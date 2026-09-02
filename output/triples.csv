@@ -1,0 +1,96 @@
+﻿subject,relation,object,source_chunks,source_slides,evidence_count
+digital code,part of,computer engineering,1,1;2;3,1
+base 10,part of,decimal number system,2,4;5,1
+decimal number system,has part,base 10,2,4;5,1
+decimal number system,has part,base-10,3,6;7,1
+base-10,part of,decimal number system,3,6;7,1
+decimal number system,uses,base-10,4,8,1
+base-10,used by,decimal number system,4,8,1
+base-10,instance of,decimal number system,5,9;10,1
+binary number system,has part has part,base 2 base 2,6,10;11;12,1
+base 2,part of part of,binary number system binary number system,6,10;11;12,1
+base 2,opposite of,decimal number,7,13;14,1
+decimal number,opposite of,base 2,7,13;14,1
+decimal number,said to be the same as,base-8 numeral system,8,14;15,1
+base-8 numeral system,said to be the same as,decimal number,8,14;15,1
+base-8,instance of,numeral system,9,16;17,1
+base-8,said to be the same as,octal (base 8) number system,10,18;19,1
+octal number system,said to be the same as,base-8,10,18;19,1
+base 8,part of,octal,11,19;20,1
+hexadecimal number system,has part,base 16,12,20;21;22,1
+base 16,part of,hexadecimal number system,12,20;21;22,1
+hexadecimal,has part,base 16,13;15,22;23;25;26,2
+base 16,part of,hexadecimal,13;15,22;23;25;26,2
+B23C,part of,base 16,14,24,1
+hexadecimal,based on,Hexadecimal,16,26,1
+decimal,instance of,number base,17,27;28,1
+hexadecimal,instance of,number base,17,27;28,1
+base 2,instance of,bases,18,28;29,1
+base 8,instance of,bases,18,28;29,1
+base 10,instance of,bases,18,28;29,1
+base 16,instance of,bases,18,28;29,1
+hexadecimal,said to be the same as,base 10,19,30;31,1
+base 10,said to be the same as,hexadecimal,19,30;31,1
+AF4,said to be the same as said to be the same as,base 10 base 10,20,31;32,1
+base 10,said to be the same as,AF4,20,31;32,1
+decimal,followed by,hexadecimal,21;27;43,32;33;43;44;45;67;68;69,3
+base 8,followed by,base 2,22,34;35,1
+base 2,followed by,hexadecimal,23,36;37,1
+decimal fraction,part of,decimal,24,37;38;39,1
+hexadecimal,based on,decimal,25,39;40;41,1
+decimal,subclass of,number system,26,41;42;43,1
+hexadecimal,subclass of,number system,26,41;42;43,1
+hexadecimal,follows,decimal,27;43,43;44;45;67;68;69,2
+computation,part of,mathematics,28,45,1
+mathematics,has part,computation,28,45,1
+decimal addition,part of,arithmetic,29,46;47,1
+77,instance of,decimal number,30,48,1
+9 × 1,followed by,9 × 2,31,,1
+9 × 2,followed by,9 × 4,31,,1
+9 × 0,instance of,multiplicand,32,49;50,1
+9 × 2,instance of,multiplicand,32,49;50,1
+9 × 3,instance of,multiplicand,32,49;50,1
+9 × 4,instance of,multiplicand,32,49;50,1
+9 × 5,instance of,multiplicand,32,49;50,1
+9 × 6,instance of,multiplicand,32,49;50,1
+9 × 7,instance of,multiplicand,32,49;50,1
+9 × 8,instance of,multiplicand,32,49;50,1
+9 × 9,instance of,multiplicand,32,49;50,1
+algorithm,part of,computer science,33,50;51;52,1
+single-bit subtraction table,use,binary addition,34,53;54,1
+1101,instance of,binary number,35,54;55;56,1
+0111,instance of,binary number,35,54;55;56,1
+1011011,instance of,binary number,35,54;55;56,1
+long division,subclass of,binary division,36,56;57;58,1
+base-8,instance of,number system,37,58;59,1
+74,point in time,74,38,60;61,1
+75,point in time point in time,75 75,38,60;61,1
+26,point in time point in time,26 26,38,60;61,1
+47,point in time point in time,47 47,38,60;61,1
+octal,said to be the same as said to be the same as,base-8 base-8,39,62,1
+base-8,said to be the same as said to be the same as,octal octal,39,62,1
+octal,part of,base-8,40,63;64;65,1
+base-8,has part has part,octal octal,40,63;64;65,1
+hexadecimal,said to be the same as,base-16,41,65;66,1
+base-16,said to be the same as,hexadecimal,41,65;66,1
+9 | A | B | C | D | E,part of,hexadecimal addition table,42,67,1
+10,part of,hexadecimal addition table,42,67,1
+11,part of,hexadecimal addition table,42,67,1
+14,part of,hexadecimal addition table,42,67,1
+decimal,different from,decimal multiplication,44,69;70;71,1
+decimal multiplication,different from,decimal,44,69;70;71,1
+decimal,used by,binary-coded decimal,45,71;72,1
+decimal number,used by,Binary Coded Decimal,46,73,1
+Excess-3 code,instance of,binary-coded decimal,47,74;75,1
+Excess-3 code,instance of,binary weights,48,76;77,1
+0100,point in time point in time,0101 0101,49,,1
+Gray Code,instance of,binary numeral system,50,78;79,1
+binary number,different from,binary numeral system,51,79;80,1
+binary numeral system,different from,binary number,51,79;80,1
+Decimal,different from,binary code,52,81,1
+binary code,different from,Decimal,52,81,1
+Parity bit,use,error detection,53,82;83,1
+odd,subclass of,Parity bit,54,84;85,1
+even,subclass of,Parity bit,54,84;85,1
+byte,part of,ASCII,55,86;87,1
+parity bit,part of,binary sequence,56,88,1

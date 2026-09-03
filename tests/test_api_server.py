@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import threading
 
@@ -332,6 +333,9 @@ def test_complete_api_requests_are_serialized_without_blocking_batch_work(
     monkeypatch.setattr(api_server, "run_batch", fake_batch)
 
     async def exercise():
+        asyncio.get_running_loop().set_default_executor(
+            ThreadPoolExecutor(max_workers=1)
+        )
         first = asyncio.create_task(
             api_server.process_files("CPE", [FakeUpload("first.pdf")])
         )
@@ -342,7 +346,7 @@ def test_complete_api_requests_are_serialized_without_blocking_batch_work(
         await asyncio.sleep(0)
         assert events == [("save", "first.pdf")]
         release_first.set()
-        await asyncio.gather(first, second)
+        await asyncio.wait_for(asyncio.gather(first, second), timeout=2)
 
     asyncio.run(exercise())
 
@@ -352,6 +356,27 @@ def test_complete_api_requests_are_serialized_without_blocking_batch_work(
         ("save", "second.pdf"),
         ("batch", "second.pdf"),
     ]
+
+
+def test_cancelled_request_lock_waiter_cannot_leak_the_lock():
+    async def exercise():
+        assert api_server._REQUEST_LOCK.acquire(blocking=False)
+        try:
+            waiter = asyncio.create_task(api_server.acquire_request_lock())
+            await asyncio.sleep(0)
+            waiter.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiter
+        finally:
+            api_server._REQUEST_LOCK.release()
+
+        barrier = api_server._REQUEST_LOCK_EXECUTOR.submit(lambda: None)
+        await asyncio.wait_for(asyncio.wrap_future(barrier), timeout=2)
+
+        assert api_server._REQUEST_LOCK.acquire(blocking=False)
+        api_server._REQUEST_LOCK.release()
+
+    asyncio.run(exercise())
 
 
 def test_same_stem_uploads_from_different_courses_get_distinct_workspaces(

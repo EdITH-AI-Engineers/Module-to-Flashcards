@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 from argparse import Namespace
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 import threading
@@ -22,6 +23,9 @@ PROJECT_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = PROJECT_DIR / "pipeline_uploads"
 OUTPUT_ROOT = PROJECT_DIR / "pipeline_output"
 _REQUEST_LOCK = threading.Lock()
+_REQUEST_LOCK_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="batch-request-lock"
+)
 app = FastAPI(title="Module to Flashcards local processor", version=__version__)
 app.add_middleware(
     CORSMiddleware,
@@ -66,6 +70,28 @@ def course_upload_directory(course_code: str) -> Path:
     except ValueError as exc:
         raise ValueError("course code resolves outside the upload directory") from exc
     return destination
+
+
+def _release_canceled_lock_acquire(future: Future[bool]) -> None:
+    """Release a lock acquired after its waiting request was cancelled."""
+    try:
+        acquired = future.result()
+    except Exception:
+        return
+    if acquired:
+        _REQUEST_LOCK.release()
+
+
+async def acquire_request_lock() -> None:
+    """Acquire the process lock without consuming the default worker pool."""
+    acquire_future = _REQUEST_LOCK_EXECUTOR.submit(_REQUEST_LOCK.acquire)
+    try:
+        acquired = await asyncio.shield(asyncio.wrap_future(acquire_future))
+    except asyncio.CancelledError:
+        acquire_future.add_done_callback(_release_canceled_lock_acquire)
+        raise
+    if not acquired:
+        raise RuntimeError("could not acquire the batch request lock")
 
 
 async def save_upload(upload: UploadFile, course_code: str) -> Path:
@@ -144,7 +170,7 @@ async def process_files(
             except ValueError as exc:
                 record_error(-1, "(batch)", exc)
             else:
-                await asyncio.to_thread(_REQUEST_LOCK.acquire)
+                await acquire_request_lock()
                 try:
                     items: list[BatchItem] = []
                     item_indexes: dict[str, int] = {}

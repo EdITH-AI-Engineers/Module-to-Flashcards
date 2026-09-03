@@ -88,8 +88,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--timeout",
         type=float,
-        default=300,
-        help="maximum seconds for one module (default: 300)",
+        default=0,
+        help="maximum seconds for one module (default: disabled)",
     )
     parser.add_argument(
         "--kg-device",
@@ -252,6 +252,10 @@ def run(
         if timeout_seconds is None
         else timeout_seconds
     )
+    if effective_timeout is not None and effective_timeout < 0:
+        raise PipelineRunError("module timeout must not be negative")
+    if effective_timeout == 0:
+        effective_timeout = None
     paths = pipeline_paths(source, args.output_root)
     paths.workspace.mkdir(parents=True, exist_ok=True)
     commands = build_stage_commands(args, paths)
@@ -265,8 +269,6 @@ def run(
         if effective_timeout is not None
         else None
     )
-    if effective_timeout is not None and effective_timeout <= 0:
-        raise PipelineRunError("module timeout must be greater than zero")
     upstream_recomputed = False
     for stage in commands:
         is_valid = validators[stage.name](stage.expected_output)

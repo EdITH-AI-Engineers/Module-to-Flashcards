@@ -14,6 +14,10 @@ def test_parse_args_defaults_to_8k_context(tmp_path):
     ).n_ctx == 8192
 
 
+def test_timeout_defaults_to_disabled(tmp_path):
+    assert make_args(tmp_path).timeout == 0
+
+
 def make_args(tmp_path, *extra):
     source = tmp_path / "Module One.pdf"
     source.write_bytes(b"pdf")
@@ -152,6 +156,33 @@ def test_run_executes_all_stages_in_order_when_artifacts_are_missing(tmp_path):
 
     assert result == paths
     assert calls == ["pdf-to-text", "knowledge-graph", "flashcards"]
+
+
+def test_zero_timeout_does_not_pass_subprocess_timeout(tmp_path):
+    args = make_args(tmp_path)
+    paths = pipeline.pipeline_paths(args.pdf, args.output_root)
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append(kwargs)
+        stage = {
+            "slides_pdf_to_txt.py": "pdf-to-text",
+            "text-extractor.py": "knowledge-graph",
+            "main.py": "flashcards",
+        }[Path(command[1]).name]
+        materialize(stage, paths)
+        return subprocess.CompletedProcess(command, 0)
+
+    pipeline.run(args, command_runner=runner)
+
+    assert all("timeout" not in kwargs for kwargs in calls)
+
+
+def test_negative_timeout_fails_before_running_stages(tmp_path):
+    args = make_args(tmp_path, "--timeout", "-1")
+
+    with pytest.raises(pipeline.PipelineRunError, match="must not be negative"):
+        pipeline.run(args, command_runner=lambda *a, **k: pytest.fail("must not run"))
 
 
 def test_run_reuses_all_valid_artifacts_without_subprocesses(tmp_path):

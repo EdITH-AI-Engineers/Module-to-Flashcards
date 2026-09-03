@@ -2,6 +2,8 @@
 
 This project turns slide PDFs into structured text, extracts a relationship graph, and uses a local Qwen model to generate validated, copy-paste-ready assessment CSV.
 
+Current release: 1.1.0
+
 The flashcard generator uses the official Hugging Face repository `Qwen/Qwen2.5-3B-Instruct-GGUF` and the exact file `qwen2.5-3b-instruct-q5_k_m.gguf`. The first run downloads it into `models/`; later runs reuse that local Q5_K_M model. Qwen uses an 8K-token context window by default.
 
 The complete local sequence is:
@@ -13,6 +15,10 @@ The complete local sequence is:
 5. Qwen generates and validates the flashcards from graph relationships.
 
 No PDF or extracted document content is uploaded to Mistral or another API. The selected Qwen model is text-only: Tesseract recovers visible labels from slide images, but Qwen does not perform visual interpretation of diagrams or photographs.
+
+## Git and release guidance
+
+The matching annotated Git release tag for version 1.1.0 should be `v1.1.0`.
 
 ## Requirements
 

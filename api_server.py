@@ -14,12 +14,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from batch_pipeline import BatchItem, run_batch
 from local_qwen import DEFAULT_N_CTX
 from pipeline import pipeline_paths
+from version import __version__
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = PROJECT_DIR / "pipeline_uploads"
 OUTPUT_ROOT = PROJECT_DIR / "pipeline_output"
-app = FastAPI(title="Module to Flashcards local processor")
+app = FastAPI(title="Module to Flashcards local processor", version=__version__)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -85,7 +86,7 @@ def pipeline_args(pdf: Path, course_code: str, module_number: str) -> Namespace:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "version": __version__}
 
 
 @app.post("/process/{course_code}")

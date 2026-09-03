@@ -2,7 +2,7 @@
 
 This project turns slide PDFs into structured text, extracts a relationship graph, and uses a local Qwen model to generate validated, copy-paste-ready assessment CSV.
 
-The flashcard generator uses the official Hugging Face repository `Qwen/Qwen2.5-3B-Instruct-GGUF` and the exact file `qwen2.5-3b-instruct-q8_0.gguf`. The first run downloads the approximately 3.6 GB model into `models/`. Later runs reuse that file.
+The flashcard generator uses the official Hugging Face repository `Qwen/Qwen2.5-3B-Instruct-GGUF` and the exact file `qwen2.5-3b-instruct-q5_k_m.gguf`. The first run downloads it into `models/`; later runs reuse that local Q5_K_M model. Qwen uses an 8K-token context window by default.
 
 The complete local sequence is:
 
@@ -54,11 +54,17 @@ Confirm that the server is ready before using the extension:
 Invoke-WebRequest http://localhost:8000/health
 ```
 
-The server processes each selected PDF locally and writes results under
+The server accepts multiple selected PDFs in one request and writes results under
 `pipeline_output/<pdf-name>/`. Keep the server terminal open while processing.
-Each module has a maximum processing time of five minutes. A timed-out module
-is reported in the extension as failed, while other selected modules continue
-processing.
+There is no default processing timeout: `--timeout 0` means unlimited time.
+
+For a multi-file request, the server stages work to reduce memory pressure and
+model reloads: it normalizes all pending PDFs with one Qwen load, builds all
+pending knowledge graphs with one REBEL load, then generates flashcards with a
+second Qwen load. Heavy inference is sequential, not parallel. If one module
+fails in a stage, it is reported in `errors` and does not block the other
+modules from continuing. Re-send the same file to resume: valid completed
+artifacts are reused, while incomplete downstream stages run again.
 
 ## One-time setup on Windows PowerShell
 
@@ -113,7 +119,9 @@ POST http://localhost:8000/process/<course-code>
 ```
 
 The endpoint accepts the extension's multipart `files` fields, processes each
-PDF locally, and returns `outputs` and `errors`. Names such as
+PDF locally, and returns `outputs` and `errors`. It uses fast API defaults for
+interactive batches: REBEL batch size `1`, one beam, and no optional final
+flashcard review. Names such as
 `CPE0021-M1.pdf` automatically select module number `1`; files without an
 `M<number>` marker use module number `1`.
 
@@ -142,10 +150,13 @@ must then be started with the matching port, for example:
 
 ## Run the complete sequence
 
-After one-time setup, from the project directory, run:
+After one-time setup, from the project directory, run the full-quality CLI
+configuration:
 
 ```powershell
-.\.venv\Scripts\python.exe pipeline.py "C:\path\to\module.pdf" --course-code CPE0021 --module-number 1
+.\.venv\Scripts\python.exe pipeline.py "C:\path\to\module.pdf" `
+  --course-code CPE0021 --module-number 1 `
+  --kg-batch-size 4 --kg-num-beams 3
 ```
 
 The command creates a per-PDF workspace:
@@ -174,11 +185,11 @@ CPU-only Qwen and REBEL inference can take a long time for a full module. Force 
 
 The source PDF is never changed or deleted.
 
-The command-line runner also enforces the five-minute default. To override it
-for a larger module, pass `--timeout` in seconds:
+The command-line timeout is disabled by default (`--timeout 0`). Set a positive
+number of seconds only when you need a limit for one module:
 
 ```powershell
-\.venv\Scripts\python.exe pipeline.py "C:\path\to\module.pdf" --course-code CPE0021 --module-number 1 --timeout 600
+.\.venv\Scripts\python.exe pipeline.py "C:\path\to\module.pdf" --course-code CPE0021 --module-number 1 --timeout 600
 ```
 
 ## Run stage 1 only
@@ -246,7 +257,8 @@ Choose another output path:
 .\.venv\Scripts\python.exe main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --output flashcards\cpe0021-module-1.txt
 ```
 
-Skip the six final model-assisted reviews to reduce runtime:
+The CLI keeps its final model-assisted review enabled by default. To skip the
+five grounding reviews and global duplicate review when runtime matters:
 
 ```powershell
 .\.venv\Scripts\python.exe main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --skip-final-review

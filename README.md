@@ -24,14 +24,55 @@ No PDF or extracted document content is uploaded to Mistral or another API. The 
 
 CPU-only inference works but can be slow because a complete module requires concept planning, 20 cluster-generation calls, validation retries, and six review calls. GPU acceleration requires a `llama-cpp-python` build compatible with the installed GPU runtime.
 
-## Set up on Windows PowerShell
+## Quick start with the browser extension
+
+Run these steps from the project directory in Windows PowerShell:
+
+1. Install the project dependencies once:
+
+  ```powershell
+  python -m venv .venv
+  .\.venv\Scripts\Activate.ps1
+  python -m pip install --upgrade pip
+  python -m pip install -r requirements.txt
+  ```
+
+2. Start the local processor and leave it running:
+
+  ```powershell
+  .\.venv\Scripts\python.exe api_server.py
+  ```
+
+3. Open the Paraverse course page, select the PDFs in the extension panel,
+  and click **Process Selected**. The extension sends them to the local
+  server at `http://localhost:8000/process/<course-code>`.
+
+Confirm that the server is ready before using the extension:
+
+```powershell
+Invoke-WebRequest http://localhost:8000/health
+```
+
+The server processes each selected PDF locally and writes results under
+`pipeline_output/<pdf-name>/`. Keep the server terminal open while processing.
+
+## One-time setup on Windows PowerShell
+
+Install the Python dependencies once in a project virtual environment. Do not
+run the install command each time you generate flashcards; later runs only use
+the already configured environment and reuse the downloaded model.
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python -m pip check
 ```
+
+Keep the virtual environment activated while using the project. If it is not
+activated, call the same interpreter explicitly with
+`.\.venv\Scripts\python.exe`.
 
 Install Tesseract OCR if it is not already available. On Windows, one common installation is:
 
@@ -51,9 +92,53 @@ The requirements file uses the project's official CPU-wheel index so Windows doe
 
 If `llama-cpp-python` tries to compile and fails, install the Visual Studio C++ Build Tools or install an official prebuilt wheel matching the computer's CPU or CUDA environment. Python 3.11 or 3.12 generally has broader native-wheel compatibility than a newly released Python version.
 
+## Connect the browser extension
+
+Start the local API once after setup and leave this terminal open while using
+the Paraverse extension:
+
+```powershell
+.\.venv\Scripts\python.exe api_server.py
+```
+
+The server listens at `http://localhost:8000`. Your extension's
+`background.js` sends selected files to:
+
+```text
+POST http://localhost:8000/process/<course-code>
+```
+
+The endpoint accepts the extension's multipart `files` fields, processes each
+PDF locally, and returns `outputs` and `errors`. Names such as
+`CPE0021-M1.pdf` automatically select module number `1`; files without an
+`M<number>` marker use module number `1`.
+
+If your extension has a `manifest.json`, include localhost in its background
+host permissions:
+
+```json
+"host_permissions": [
+  "https://paraverse.feutech.edu.ph/*",
+  "http://localhost:8000/*"
+]
+```
+
+Check the connection before processing files:
+
+```powershell
+Invoke-WebRequest http://localhost:8000/health
+```
+
+The extension's Local port field can be changed from `8000`, but the server
+must then be started with the matching port, for example:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn api_server:app --host 127.0.0.1 --port 8010
+```
+
 ## Run the complete sequence
 
-From the project directory, run:
+After one-time setup, from the project directory, run:
 
 ```powershell
 .\.venv\Scripts\python.exe pipeline.py "C:\path\to\module.pdf" --course-code CPE0021 --module-number 1
@@ -102,7 +187,7 @@ The file uses a stable, machine-readable plain-text contract with `[MODULE]`, `[
 The included extractor accepts a UTF-8 text module:
 
 ```powershell
-python text-extractor.py sample.txt --output-dir output
+.\.venv\Scripts\python.exe text-extractor.py sample.txt --output-dir output
 ```
 
 If `output/knowledge_graph.json` already exists, skip this extraction step.
@@ -112,7 +197,7 @@ If `output/knowledge_graph.json` already exists, skip this extraction step.
 Run stage 3 directly:
 
 ```powershell
-python main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1
+.\.venv\Scripts\python.exe main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1
 ```
 
 The generated file defaults to:
@@ -133,7 +218,7 @@ Every successful module contains 20 graph-supported concepts, five questions per
 Before generating all 100 questions, download and load the model with a tiny JSON request:
 
 ```powershell
-python main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --smoke-test
+.\.venv\Scripts\python.exe main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --smoke-test
 ```
 
 A successful run prints:
@@ -147,13 +232,13 @@ Qwen smoke test passed.
 Choose another output path:
 
 ```powershell
-python main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --output flashcards\cpe0021-module-1.txt
+.\.venv\Scripts\python.exe main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --output flashcards\cpe0021-module-1.txt
 ```
 
 Skip the six final model-assisted reviews to reduce runtime:
 
 ```powershell
-python main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --skip-final-review
+.\.venv\Scripts\python.exe main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --skip-final-review
 ```
 
 Skipping review retains deterministic schema and duplicate checks, but reduces semantic grounding and duplication assurance.
@@ -161,13 +246,13 @@ Skipping review retains deterministic schema and duplicate checks, but reduces s
 Use CPU only:
 
 ```powershell
-python main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --n-gpu-layers 0
+.\.venv\Scripts\python.exe main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --n-gpu-layers 0
 ```
 
 See all options:
 
 ```powershell
-python main.py --help
+.\.venv\Scripts\python.exe main.py --help
 ```
 
 ## Identity precedence
@@ -182,7 +267,7 @@ Both values are preserved as exact strings. If a required value is unavailable, 
 The default tests never download or load the model:
 
 ```powershell
-python -m pytest -q
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
 ## Privacy and output behavior

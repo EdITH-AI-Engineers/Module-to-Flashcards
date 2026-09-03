@@ -1,11 +1,14 @@
 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 
 huggingface-hub
+fastapi
 llama-cpp-python
 Pillow
 PyMuPDF
+python-multipart
 pytesseract
 pytest
 sentencepiece
 torch
 transformers
+uvicorn

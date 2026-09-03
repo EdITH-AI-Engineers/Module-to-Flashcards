@@ -283,7 +283,7 @@ def main() -> None:
         from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
     except ImportError as exc:
         raise SystemExit(
-            "Missing dependencies. Run: pip install torch transformers sentencepiece"
+            "Missing dependencies. Run: python -m pip install -r requirements.txt"
         ) from exc
 
     device = args.device

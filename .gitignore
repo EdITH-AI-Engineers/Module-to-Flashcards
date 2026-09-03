@@ -4,6 +4,7 @@ __pycache__/
 models/
 flashcards/
 pipeline_output/
+pipeline_uploads/
 structured_text/
 progress.json
 progress.log

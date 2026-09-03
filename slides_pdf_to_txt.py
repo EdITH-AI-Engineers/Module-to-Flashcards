@@ -10,7 +10,7 @@ from typing import Sequence
 
 from local_qwen import DEFAULT_N_CTX, LocalQwenBackend, ensure_model
 from pdf_ingestion import PdfExtractionError, extract_pdf_pages
-from slide_normalizer import SlideNormalizationError, normalize_document
+from slide_normalizer import CompletionBackend, SlideNormalizationError, normalize_document
 from structured_module import render_structured_module
 
 
@@ -85,7 +85,9 @@ def _atomic_write(path: Path, content: str) -> None:
                 pass
 
 
-def run(args: argparse.Namespace) -> Path:
+def run(
+    args: argparse.Namespace, *, backend: CompletionBackend | None = None
+) -> Path:
     _validate_args(args)
     pages = extract_pdf_pages(
         args.pdf,
@@ -94,13 +96,14 @@ def run(args: argparse.Namespace) -> Path:
     )
     print(f"Extracted {len(pages)} slide(s) locally.", file=sys.stderr, flush=True)
 
-    model_path = ensure_model(args.model_dir)
-    backend = LocalQwenBackend(
-        model_path,
-        n_ctx=args.n_ctx,
-        n_gpu_layers=args.n_gpu_layers,
-        seed=args.seed,
-    )
+    if backend is None:
+        model_path = ensure_model(args.model_dir)
+        backend = LocalQwenBackend(
+            model_path,
+            n_ctx=args.n_ctx,
+            n_gpu_layers=args.n_gpu_layers,
+            seed=args.seed,
+        )
     module = normalize_document(
         backend,
         pages,

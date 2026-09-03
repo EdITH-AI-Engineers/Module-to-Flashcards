@@ -78,6 +78,41 @@ def test_run_writes_pipeline_result(tmp_path, monkeypatch, valid_clusters):
     assert output_path.read_text(encoding="utf-8").startswith("Module 1.1\n")
 
 
+def test_run_reuses_injected_backend(tmp_path, monkeypatch, valid_clusters):
+    graph_path = tmp_path / "graph.json"
+    graph_path.write_text(
+        '{"metadata": {}, "nodes": [], "edges": '
+        '[{"id":"e1","subject":"a","relation":"is","object":"b"}]}',
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "cards.txt"
+    shared_backend = object()
+    monkeypatch.setattr(
+        main,
+        "ensure_model",
+        lambda path: pytest.fail("an injected backend must bypass model loading"),
+    )
+
+    class FakePipeline:
+        def __init__(self, backend, config, **kwargs):
+            assert backend is shared_backend
+
+        def run(self, identity, facts):
+            return valid_clusters
+
+    monkeypatch.setattr(main, "FlashcardPipeline", FakePipeline)
+    args = main.parse_args(
+        [
+            str(graph_path),
+            "--course-code", "CPE0021",
+            "--module-number", "1",
+            "--output", str(output_path),
+        ]
+    )
+
+    assert main.run(args, backend=shared_backend) == output_path
+
+
 def test_default_output_uses_resolved_graph_module(tmp_path, monkeypatch, valid_clusters):
     graph_path = tmp_path / "graph.json"
     graph_path.write_text(

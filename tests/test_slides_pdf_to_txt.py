@@ -133,6 +133,37 @@ def test_run_uses_explicit_output_and_backend_configuration(tmp_path, monkeypatc
     }
 
 
+def test_run_reuses_injected_backend(tmp_path, monkeypatch):
+    source = tmp_path / "module.pdf"
+    source.write_bytes(b"pdf")
+    output = tmp_path / "structured.txt"
+    shared_backend = object()
+    monkeypatch.setattr(
+        slides_pdf_to_txt,
+        "extract_pdf_pages",
+        lambda *a, **k: (ExtractedPage(1, "Page text", "text"),),
+    )
+    monkeypatch.setattr(
+        slides_pdf_to_txt,
+        "ensure_model",
+        lambda path: pytest.fail("an injected backend must bypass model loading"),
+    )
+    monkeypatch.setattr(
+        slides_pdf_to_txt,
+        "normalize_document",
+        lambda backend, *a, **k: backend,
+    )
+    monkeypatch.setattr(
+        slides_pdf_to_txt,
+        "render_structured_module",
+        lambda value: "shared\n" if value is shared_backend else "wrong\n",
+    )
+    args = slides_pdf_to_txt.parse_args([str(source), "--output", str(output)])
+
+    assert slides_pdf_to_txt.run(args, backend=shared_backend) == output
+    assert output.read_text(encoding="utf-8") == "shared\n"
+
+
 def test_invalid_pdf_fails_before_model_download(tmp_path, monkeypatch):
     source = tmp_path / "bad.pdf"
     source.write_bytes(b"bad")

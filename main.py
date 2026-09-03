@@ -8,6 +8,7 @@ from typing import Sequence
 
 from flashcard_csv import render_module, write_module_output
 from flashcard_pipeline import FlashcardPipeline, GenerationError, PipelineConfig
+from flashcard_types import ChatBackend
 from graph_input import (
     GraphInputError,
     extract_graph_facts,
@@ -73,21 +74,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def run(args: argparse.Namespace) -> Path | None:
+def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path | None:
     graph = load_graph(args.graph)
     identity = resolve_identity(graph, args.course_code, args.module_number)
     facts = extract_graph_facts(graph)
 
-    try:
-        model_path = ensure_model(args.model_dir)
-        backend = LocalQwenBackend(
-            model_path,
-            n_ctx=args.n_ctx,
-            n_gpu_layers=args.n_gpu_layers,
-            seed=args.seed,
-        )
-    except Exception as exc:
-        raise RuntimeError(f"local Qwen setup failed: {exc}") from exc
+    if backend is None:
+        try:
+            model_path = ensure_model(args.model_dir)
+            backend = LocalQwenBackend(
+                model_path,
+                n_ctx=args.n_ctx,
+                n_gpu_layers=args.n_gpu_layers,
+                seed=args.seed,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"local Qwen setup failed: {exc}") from exc
 
     if args.smoke_test:
         raw = backend.complete(

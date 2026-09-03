@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import time
 from argparse import Namespace
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -12,14 +11,14 @@ from urllib.parse import quote
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from pipeline import PipelineRunError, pipeline_paths, run
+from batch_pipeline import BatchItem, run_batch
+from local_qwen import DEFAULT_N_CTX
+from pipeline import pipeline_paths
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = PROJECT_DIR / "pipeline_uploads"
 OUTPUT_ROOT = PROJECT_DIR / "pipeline_output"
-MODULE_TIMEOUT_SECONDS = 5 * 60
-
 app = FastAPI(title="Module to Flashcards local processor")
 app.add_middleware(
     CORSMiddleware,
@@ -72,12 +71,14 @@ def pipeline_args(pdf: Path, course_code: str, module_number: str) -> Namespace:
         attempts=3,
         seed=42,
         n_gpu_layers=-1,
-        n_ctx=32768,
+        n_ctx=DEFAULT_N_CTX,
         ocr_min_chars=40,
         ocr_dpi=200,
-        timeout=300,
+        timeout=0,
         kg_device="auto",
-        skip_final_review=False,
+        kg_batch_size=1,
+        kg_num_beams=1,
+        skip_final_review=True,
         force=False,
     )
 
@@ -92,40 +93,37 @@ async def process_files(
     course_code: str,
     files: Annotated[list[UploadFile], File(description="PDF module files")],
 ) -> dict:
-    if not course_code.strip():
-        return {"outputs": [], "errors": [{"pdf": "(batch)", "error": "Missing course code"}]}
+    try:
+        if not course_code.strip():
+            return {
+                "outputs": [],
+                "errors": [{"pdf": "(batch)", "error": "Missing course code"}],
+            }
 
-    outputs: list[str] = []
-    errors: list[dict[str, str]] = []
-    for upload in files:
-        filename = upload.filename or "(unnamed)"
-        deadline = time.monotonic() + MODULE_TIMEOUT_SECONDS
-        try:
-            pdf = await asyncio.wait_for(
-                save_upload(upload, course_code),
-                timeout=MODULE_TIMEOUT_SECONDS,
-            )
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError("module exceeded 300-second timeout")
-            paths = run(
-                pipeline_args(pdf, course_code, module_number_from_filename(filename)),
-                timeout_seconds=remaining,
-            )
-            outputs.append(str(paths.flashcards.resolve()))
-        except asyncio.TimeoutError as exc:
-            errors.append({"pdf": filename, "error": "module exceeded 300-second timeout"})
-        except (OSError, PipelineRunError, ValueError, RuntimeError) as exc:
-            errors.append({"pdf": filename, "error": str(exc)})
-        finally:
+        errors: list[dict[str, str]] = []
+        items: list[BatchItem] = []
+        for upload in files:
+            filename = upload.filename or "(unnamed)"
+            try:
+                pdf = await save_upload(upload, course_code)
+                args = pipeline_args(
+                    pdf, course_code, module_number_from_filename(filename)
+                )
+                items.append(BatchItem(filename, args, pipeline_paths(pdf, OUTPUT_ROOT)))
+            except (OSError, ValueError, RuntimeError) as exc:
+                errors.append({"pdf": filename, "error": str(exc)})
+
+        batch_result = await asyncio.to_thread(run_batch, tuple(items))
+        errors.extend(batch_result.errors)
+        return {
+            "outputs": [str(output.resolve()) for output in batch_result.outputs],
+            "errors": errors,
+            "courseCode": course_code,
+            "processUrl": f"/process/{quote(course_code, safe='')}",
+        }
+    finally:
+        for upload in files:
             await upload.close()
-
-    return {
-        "outputs": outputs,
-        "errors": errors,
-        "courseCode": course_code,
-        "processUrl": f"/process/{quote(course_code, safe='')}",
-    }
 
 
 if __name__ == "__main__":

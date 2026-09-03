@@ -6,6 +6,10 @@ import slides_pdf_to_txt
 from pdf_ingestion import ExtractedPage, PdfExtractionError
 
 
+def test_parse_args_defaults_to_8k_context():
+    assert slides_pdf_to_txt.parse_args(["module.pdf"]).n_ctx == 8192
+
+
 def test_parse_args_preserves_pdf_identity_and_model_options():
     args = slides_pdf_to_txt.parse_args(
         [

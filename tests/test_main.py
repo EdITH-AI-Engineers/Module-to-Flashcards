@@ -5,6 +5,10 @@ import pytest
 import main
 
 
+def test_parse_args_defaults_to_8k_context():
+    assert main.parse_args(["graph.json"]).n_ctx == 8192
+
+
 def test_parse_args_preserves_identity_strings():
     args = main.parse_args(
         [

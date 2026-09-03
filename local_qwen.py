@@ -7,11 +7,12 @@ from huggingface_hub import hf_hub_download
 
 
 MODEL_REPO = "Qwen/Qwen2.5-3B-Instruct-GGUF"
-MODEL_FILENAME = "qwen2.5-3b-instruct-q8_0.gguf"
+MODEL_FILENAME = "qwen2.5-3b-instruct-q5_k_m.gguf"
+DEFAULT_N_CTX = 8192
 
 
 def ensure_model(model_dir: Path) -> Path:
-    """Return the exact local Q8 model path, downloading it when absent."""
+    """Return the exact local Q5 model path, downloading it when absent."""
     model_dir = Path(model_dir)
     model_dir.mkdir(parents=True, exist_ok=True)
     target = model_dir / MODEL_FILENAME
@@ -31,7 +32,7 @@ class LocalQwenBackend:
         self,
         model_path: Path,
         *,
-        n_ctx: int = 32768,
+        n_ctx: int = DEFAULT_N_CTX,
         n_gpu_layers: int = -1,
         temperature: float = 0.2,
         seed: int = 42,
@@ -53,6 +54,11 @@ class LocalQwenBackend:
         )
         self._temperature = temperature
         self._seed = seed
+
+    def close(self) -> None:
+        close = getattr(self._llm, "close", None)
+        if callable(close):
+            close()
 
     def complete(self, system: str, user: str, *, max_tokens: int) -> str:
         response: Any = self._llm.create_chat_completion(

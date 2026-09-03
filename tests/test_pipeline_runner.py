@@ -8,6 +8,12 @@ import pipeline
 from structured_module import StructuredModule, StructuredSlide, render_structured_module
 
 
+def test_parse_args_defaults_to_8k_context(tmp_path):
+    assert pipeline.parse_args(
+        [str(tmp_path / "module.pdf"), "--course-code", "CPE0021", "--module-number", "1"]
+    ).n_ctx == 8192
+
+
 def make_args(tmp_path, *extra):
     source = tmp_path / "Module One.pdf"
     source.write_bytes(b"pdf")

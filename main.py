@@ -14,14 +14,14 @@ from graph_input import (
     load_graph,
     resolve_identity,
 )
-from local_qwen import LocalQwenBackend, ensure_model
+from local_qwen import DEFAULT_N_CTX, LocalQwenBackend, ensure_model
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Generate validated assessment CSV from a knowledge graph with a "
-            "local Qwen2.5 3B Q8_0 model."
+            "local Qwen2.5 3B Q5_K_M model."
         )
     )
     parser.add_argument("graph", type=Path, help="knowledge_graph.json path")
@@ -55,8 +55,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--n-ctx",
         type=int,
-        default=32768,
-        help="model context window (default: 32768)",
+        default=DEFAULT_N_CTX,
+        help=f"model context window (default: {DEFAULT_N_CTX})",
     )
     parser.add_argument(
         "--skip-final-review",

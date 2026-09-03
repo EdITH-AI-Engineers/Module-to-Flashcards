@@ -1,4 +1,6 @@
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 
 from local_qwen import (
     MODEL_FILENAME,
@@ -21,11 +23,11 @@ def test_ensure_model_downloads_exact_checkpoint(tmp_path, monkeypatch):
 
     path = ensure_model(tmp_path)
 
-    assert path.name == "qwen2.5-3b-instruct-q8_0.gguf"
+    assert path.name == "qwen2.5-3b-instruct-q5_k_m.gguf"
     assert calls == [
         {
             "repo_id": "Qwen/Qwen2.5-3B-Instruct-GGUF",
-            "filename": "qwen2.5-3b-instruct-q8_0.gguf",
+            "filename": "qwen2.5-3b-instruct-q5_k_m.gguf",
             "local_dir": str(tmp_path),
         }
     ]
@@ -89,3 +91,22 @@ def test_backend_rejects_empty_assistant_content():
         assert "empty assistant content" in str(exc)
     else:
         raise AssertionError("empty model content should fail")
+
+
+def test_backend_defaults_to_low_memory_context_and_can_close(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setitem(sys.modules, "llama_cpp", SimpleNamespace(Llama=FakeLlama))
+    backend = LocalQwenBackend(tmp_path / "model.gguf")
+
+    assert captured["n_ctx"] == 8192
+    backend.close()
+    assert backend._llm.closed is True

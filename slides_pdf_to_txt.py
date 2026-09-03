@@ -8,7 +8,7 @@ import sys
 import tempfile
 from typing import Sequence
 
-from local_qwen import LocalQwenBackend, ensure_model
+from local_qwen import DEFAULT_N_CTX, LocalQwenBackend, ensure_model
 from pdf_ingestion import PdfExtractionError, extract_pdf_pages
 from slide_normalizer import SlideNormalizationError, normalize_document
 from structured_module import render_structured_module
@@ -41,7 +41,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--n-gpu-layers", type=int, default=-1)
-    parser.add_argument("--n-ctx", type=int, default=32768)
+    parser.add_argument("--n-ctx", type=int, default=DEFAULT_N_CTX)
     parser.add_argument("--ocr-min-chars", type=int, default=40)
     parser.add_argument("--ocr-dpi", type=int, default=200)
     return parser.parse_args(argv)

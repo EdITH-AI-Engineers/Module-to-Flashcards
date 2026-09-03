@@ -23,7 +23,7 @@ No PDF or extracted document content is uploaded to Mistral or another API. The 
 - Several gigabytes of free disk space
 - Internet access for initial dependency and model downloads
 
-GPU offload is enabled by default with `n_gpu_layers=-1`, and REBEL selects CUDA automatically when PyTorch can access it. GPU acceleration requires a GPU-enabled `llama-cpp-python` build compatible with the installed GPU runtime. CPU-only inference remains supported but can be slow because a complete module requires concept planning, 20 cluster-generation calls, validation retries, and six review calls.
+GPU offload is enabled by default with `n_gpu_layers=-1`, and REBEL selects CUDA automatically when PyTorch can access it. GPU acceleration requires a GPU-enabled `llama-cpp-python` build compatible with the installed GPU runtime. CPU-only inference remains supported but can be slow because a complete module requires concept planning, 20 cluster-generation calls, validation retries, and, in full-quality CLI mode, six optional final review calls. API fast mode skips those optional reviews.
 
 ## Quick start with the browser extension
 
@@ -151,7 +151,7 @@ must then be started with the matching port, for example:
 ## Run the complete sequence
 
 After one-time setup, from the project directory, run the full-quality CLI
-configuration:
+configuration. The CLI defaults are REBEL batch size 4 and three beams:
 
 ```powershell
 .\.venv\Scripts\python.exe pipeline.py "C:\path\to\module.pdf" `

@@ -98,7 +98,17 @@ def test_pipeline_paths_use_a_sanitized_per_pdf_workspace(tmp_path):
 
 
 def test_build_stage_commands_use_current_python_and_absolute_artifacts(tmp_path):
-    args = make_args(tmp_path, "--n-gpu-layers", "0", "--kg-device", "cpu")
+    args = make_args(
+        tmp_path,
+        "--n-gpu-layers",
+        "0",
+        "--kg-device",
+        "cpu",
+        "--kg-batch-size",
+        "1",
+        "--kg-num-beams",
+        "1",
+    )
     paths = pipeline.pipeline_paths(args.pdf, args.output_root)
 
     commands = pipeline.build_stage_commands(args, paths)
@@ -115,6 +125,10 @@ def test_build_stage_commands_use_current_python_and_absolute_artifacts(tmp_path
     assert "CPE0021" in commands[0].command
     assert Path(commands[1].command[1]).name == "text-extractor.py"
     assert "cpu" in commands[1].command
+    assert "--batch-size" in commands[1].command
+    assert commands[1].command[commands[1].command.index("--batch-size") + 1] == "1"
+    assert "--num-beams" in commands[1].command
+    assert commands[1].command[commands[1].command.index("--num-beams") + 1] == "1"
     assert Path(commands[2].command[1]).name == "main.py"
     assert str(paths.graph_json.resolve()) in commands[2].command
 

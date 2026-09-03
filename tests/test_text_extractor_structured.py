@@ -1,6 +1,9 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
+
+import text_extractor
 from structured_module import (
     StructuredModule,
     StructuredSlide,
@@ -94,3 +97,57 @@ def test_plain_text_input_remains_supported():
 
     assert prepared == "Processor\n\nA processor executes instructions."
     assert metadata == {}
+
+
+def test_run_reuses_injected_runtime(tmp_path, monkeypatch):
+    """Catches run loading or releasing a runtime supplied by its caller."""
+    source = tmp_path / "module.txt"
+    source.write_text(structured_text(), encoding="utf-8")
+    output_dir = tmp_path / "graph"
+
+    class FakeTokenizer:
+        def encode(self, text, *, add_special_tokens):
+            return [1]
+
+        def decode(self, ids, *, skip_special_tokens):
+            return "processor contains ALU"
+
+    tokenizer = FakeTokenizer()
+    runtime = text_extractor.RebelRuntime(tokenizer, object(), "cpu")
+    monkeypatch.setattr(
+        text_extractor,
+        "load_runtime",
+        lambda *a, **k: pytest.fail("injected runtime must be reused"),
+    )
+    monkeypatch.setattr(
+        text_extractor,
+        "release_runtime",
+        lambda *a, **k: pytest.fail("injected runtime remains caller-owned"),
+    )
+    triples = [
+        {
+            "subject": "processor",
+            "relation": "contains",
+            "object": "ALU",
+            "evidence": [],
+        }
+    ]
+    monkeypatch.setattr(text_extractor, "extract_relations", lambda *a, **k: triples)
+    args = text_extractor.parse_args(
+        [
+            str(source),
+            "--output-dir",
+            str(output_dir),
+            "--batch-size",
+            "1",
+            "--num-beams",
+            "1",
+        ]
+    )
+
+    json_path, csv_path = text_extractor.run(args, runtime=runtime)
+
+    assert json_path.is_file()
+    assert csv_path.is_file()
+    assert args.batch_size == 1
+    assert args.num_beams == 1

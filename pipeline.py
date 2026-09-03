@@ -98,6 +98,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="REBEL device (default: auto)",
     )
     parser.add_argument(
+        "--kg-batch-size",
+        type=int,
+        default=4,
+        help="REBEL chunks per inference batch (default: 4)",
+    )
+    parser.add_argument(
+        "--kg-num-beams",
+        type=int,
+        default=3,
+        help="REBEL beams per generated chunk (default: 3)",
+    )
+    parser.add_argument(
         "--skip-final-review",
         action="store_true",
         help="skip Qwen's final flashcard review calls",
@@ -152,6 +164,10 @@ def build_stage_commands(
         str(paths.graph_dir.resolve()),
         "--device",
         args.kg_device,
+        "--batch-size",
+        str(args.kg_batch_size),
+        "--num-beams",
+        str(args.kg_num_beams),
     ]
     stage_three = [
         sys.executable,

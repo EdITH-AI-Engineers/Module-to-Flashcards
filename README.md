@@ -18,11 +18,12 @@ No PDF or extracted document content is uploaded to Mistral or another API. The 
 
 - Windows, macOS, or Linux
 - Python 3.11 or 3.12 recommended for the easiest `llama-cpp-python` installation
+- A CUDA-capable GPU with a GPU-enabled `llama-cpp-python` build for acceleration
 - Tesseract OCR available on `PATH` or installed in its standard Windows folder
 - Several gigabytes of free disk space
 - Internet access for initial dependency and model downloads
 
-CPU-only inference works but can be slow because a complete module requires concept planning, 20 cluster-generation calls, validation retries, and six review calls. GPU acceleration requires a `llama-cpp-python` build compatible with the installed GPU runtime.
+GPU offload is enabled by default with `n_gpu_layers=-1`, and REBEL selects CUDA automatically when PyTorch can access it. GPU acceleration requires a GPU-enabled `llama-cpp-python` build compatible with the installed GPU runtime. CPU-only inference remains supported but can be slow because a complete module requires concept planning, 20 cluster-generation calls, validation retries, and six review calls.
 
 ## Quick start with the browser extension
 
@@ -55,6 +56,9 @@ Invoke-WebRequest http://localhost:8000/health
 
 The server processes each selected PDF locally and writes results under
 `pipeline_output/<pdf-name>/`. Keep the server terminal open while processing.
+Each module has a maximum processing time of five minutes. A timed-out module
+is reported in the extension as failed, while other selected modules continue
+processing.
 
 ## One-time setup on Windows PowerShell
 
@@ -88,7 +92,7 @@ Verify the installation:
 
 If the installer does not add Tesseract to `PATH`, the project also checks the standard Windows installation folders automatically. Tesseract is only invoked when a PDF page has too little embedded text. A text-layer PDF can complete stage 1 without OCR.
 
-The requirements file uses the project's official CPU-wheel index so Windows does not need to compile `llama-cpp-python` from source. GPU users can replace that package with a CUDA, Vulkan, or other accelerated wheel supported by their hardware.
+The default configuration requests GPU acceleration. Install the `llama-cpp-python` wheel matching your GPU backend before running the project. CUDA users should follow the official `llama-cpp-python` installation instructions for their CUDA version; the correct wheel must be installed in `.venv` for `n_gpu_layers=-1` to use the GPU. If a GPU-enabled build is unavailable, the program falls back only when you explicitly run with `--n-gpu-layers 0` and `--kg-device cpu`.
 
 If `llama-cpp-python` tries to compile and fails, install the Visual Studio C++ Build Tools or install an official prebuilt wheel matching the computer's CPU or CUDA environment. Python 3.11 or 3.12 generally has broader native-wheel compatibility than a newly released Python version.
 
@@ -169,6 +173,13 @@ CPU-only Qwen and REBEL inference can take a long time for a full module. Force 
 ```
 
 The source PDF is never changed or deleted.
+
+The command-line runner also enforces the five-minute default. To override it
+for a larger module, pass `--timeout` in seconds:
+
+```powershell
+\.venv\Scripts\python.exe pipeline.py "C:\path\to\module.pdf" --course-code CPE0021 --module-number 1 --timeout 600
+```
 
 ## Run stage 1 only
 

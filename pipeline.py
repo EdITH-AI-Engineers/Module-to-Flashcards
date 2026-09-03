@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 from typing import Callable, Sequence
 
 from graph_input import GraphInputError, extract_graph_facts, load_graph
@@ -83,6 +84,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--n-ctx", type=int, default=32768)
     parser.add_argument("--ocr-min-chars", type=int, default=40)
     parser.add_argument("--ocr-dpi", type=int, default=200)
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=300,
+        help="maximum seconds for one module (default: 300)",
+    )
     parser.add_argument(
         "--kg-device",
         choices=("auto", "cpu", "cuda"),
@@ -213,6 +220,7 @@ def run(
     args: argparse.Namespace,
     *,
     command_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    timeout_seconds: float | None = None,
 ) -> PipelinePaths:
     source = Path(args.pdf)
     if not source.is_file():
@@ -222,6 +230,11 @@ def run(
     if args.attempts < 1:
         raise PipelineRunError("--attempts must be at least 1")
 
+    effective_timeout = (
+        getattr(args, "timeout", None)
+        if timeout_seconds is None
+        else timeout_seconds
+    )
     paths = pipeline_paths(source, args.output_root)
     paths.workspace.mkdir(parents=True, exist_ok=True)
     commands = build_stage_commands(args, paths)
@@ -230,6 +243,13 @@ def run(
         "knowledge-graph": _valid_graph,
         "flashcards": lambda path: _valid_flashcards(path, args.module_number),
     }
+    deadline = (
+        time.monotonic() + effective_timeout
+        if effective_timeout is not None
+        else None
+    )
+    if effective_timeout is not None and effective_timeout <= 0:
+        raise PipelineRunError("module timeout must be greater than zero")
     upstream_recomputed = False
     for stage in commands:
         is_valid = validators[stage.name](stage.expected_output)
@@ -239,11 +259,24 @@ def run(
 
         print(f"Running {stage.name}...", flush=True)
         try:
-            command_runner(
-                list(stage.command),
-                check=True,
-                cwd=str(PROJECT_DIR),
+            command_kwargs = {"check": True, "cwd": str(PROJECT_DIR)}
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise PipelineRunError(
+                        f"module exceeded {effective_timeout:g}-second timeout"
+                    )
+                command_kwargs["timeout"] = remaining
+            command_runner(list(stage.command), **command_kwargs)
+        except subprocess.TimeoutExpired as exc:
+            limit = (
+                f"{effective_timeout:g}-second"
+                if effective_timeout is not None
+                else "stage"
             )
+            raise PipelineRunError(
+                f"{stage.name} stage exceeded the {limit} timeout"
+            ) from exc
         except (subprocess.CalledProcessError, OSError) as exc:
             raise PipelineRunError(f"{stage.name} stage failed: {exc}") from exc
         if not validators[stage.name](stage.expected_output):

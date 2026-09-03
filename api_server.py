@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import re
+import time
 from argparse import Namespace
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -16,6 +18,7 @@ from pipeline import PipelineRunError, pipeline_paths, run
 PROJECT_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = PROJECT_DIR / "pipeline_uploads"
 OUTPUT_ROOT = PROJECT_DIR / "pipeline_output"
+MODULE_TIMEOUT_SECONDS = 5 * 60
 
 app = FastAPI(title="Module to Flashcards local processor")
 app.add_middleware(
@@ -72,6 +75,7 @@ def pipeline_args(pdf: Path, course_code: str, module_number: str) -> Namespace:
         n_ctx=32768,
         ocr_min_chars=40,
         ocr_dpi=200,
+        timeout=300,
         kg_device="auto",
         skip_final_review=False,
         force=False,
@@ -95,12 +99,22 @@ async def process_files(
     errors: list[dict[str, str]] = []
     for upload in files:
         filename = upload.filename or "(unnamed)"
+        deadline = time.monotonic() + MODULE_TIMEOUT_SECONDS
         try:
-            pdf = await save_upload(upload, course_code)
+            pdf = await asyncio.wait_for(
+                save_upload(upload, course_code),
+                timeout=MODULE_TIMEOUT_SECONDS,
+            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("module exceeded 300-second timeout")
             paths = run(
-                pipeline_args(pdf, course_code, module_number_from_filename(filename))
+                pipeline_args(pdf, course_code, module_number_from_filename(filename)),
+                timeout_seconds=remaining,
             )
             outputs.append(str(paths.flashcards.resolve()))
+        except asyncio.TimeoutError as exc:
+            errors.append({"pdf": filename, "error": "module exceeded 300-second timeout"})
         except (OSError, PipelineRunError, ValueError, RuntimeError) as exc:
             errors.append({"pdf": filename, "error": str(exc)})
         finally:

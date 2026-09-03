@@ -113,10 +113,18 @@ async def process_files(
             except (OSError, ValueError, RuntimeError) as exc:
                 errors.append({"pdf": filename, "error": str(exc)})
 
-        batch_result = await asyncio.to_thread(run_batch, tuple(items))
-        errors.extend(batch_result.errors)
+        try:
+            batch_result = await asyncio.to_thread(run_batch, tuple(items))
+        except (OSError, ValueError, RuntimeError) as exc:
+            errors.extend(
+                {"pdf": item.filename, "error": str(exc)} for item in items
+            )
+            outputs: list[str] = []
+        else:
+            errors.extend(batch_result.errors)
+            outputs = [str(output.resolve()) for output in batch_result.outputs]
         return {
-            "outputs": [str(output.resolve()) for output in batch_result.outputs],
+            "outputs": outputs,
             "errors": errors,
             "courseCode": course_code,
             "processUrl": f"/process/{quote(course_code, safe='')}",

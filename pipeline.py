@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from dataclasses import dataclass
+import io
 from pathlib import Path
 import re
 import subprocess
 import sys
 import time
 from typing import Callable, Sequence
+from uuid import UUID
 
+from flashcard_csv import CSV_COLUMNS
 from graph_input import GraphInputError, extract_graph_facts, load_graph
 from local_qwen import DEFAULT_N_CTX
 from structured_module import graph_ready_text, parse_module_metadata
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
+_BATCH_REUSE_MANIFEST_NAME = "batch_reuse_manifest.json"
 
 
 class PipelineRunError(RuntimeError):
@@ -220,17 +225,92 @@ def _valid_graph(path: Path) -> bool:
     return True
 
 
-def _valid_flashcards(path: Path, module_number: str) -> bool:
+def _valid_flashcards(
+    path: Path,
+    module_number: str,
+    course_code: str | None = None,
+) -> bool:
     if not path.is_file():
         return False
     try:
         text = path.read_text(encoding="utf-8-sig")
     except OSError:
         return False
-    return (
-        f"Module {module_number}.1" in text
-        and f"Module {module_number}.2" in text
-    )
+    first_label = f"Module {module_number}.1"
+    second_label = f"Module {module_number}.2"
+    lines = text.splitlines(keepends=True)
+    first_indexes = [
+        index
+        for index, line in enumerate(lines)
+        if line.rstrip("\r\n") == first_label
+    ]
+    second_indexes = [
+        index
+        for index, line in enumerate(lines)
+        if line.rstrip("\r\n") == second_label
+    ]
+    if (
+        first_indexes != [0]
+        or len(second_indexes) != 1
+        or second_indexes[0] <= first_indexes[0]
+    ):
+        return False
+
+    def parse_block(block: str) -> list[list[str]] | None:
+        try:
+            rows = list(csv.reader(io.StringIO(block.strip("\r\n"), newline=""), strict=True))
+        except csv.Error:
+            return None
+        if not rows or tuple(rows[0]) != CSV_COLUMNS:
+            return None
+        data_rows = rows[1:]
+        if len(data_rows) != 50 or any(len(row) != len(CSV_COLUMNS) for row in data_rows):
+            return None
+        return data_rows
+
+    second_index = second_indexes[0]
+    first_rows = parse_block("".join(lines[1:second_index]))
+    second_rows = parse_block("".join(lines[second_index + 1 :]))
+    if first_rows is None or second_rows is None:
+        return False
+
+    rows = first_rows + second_rows
+    if len(rows) != 100 or any(row[12] != str(module_number) for row in rows):
+        return False
+    cluster_counts: dict[str, int] = {}
+    for row in rows:
+        if course_code is not None and row[11] != str(course_code):
+            return False
+        try:
+            cluster = str(UUID(row[10]))
+        except (AttributeError, ValueError):
+            return False
+        cluster_counts[cluster] = cluster_counts.get(cluster, 0) + 1
+    return len(cluster_counts) == 20 and all(count == 5 for count in cluster_counts.values())
+
+
+def _invalidate_artifacts(paths: Sequence[Path]) -> None:
+    for path in paths:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise PipelineRunError(
+                f"could not invalidate stale artifact {path}: {exc}"
+            ) from exc
+
+
+def _invalidate_downstream_for_stage(stage_name: str, paths: PipelinePaths) -> None:
+    manifest = paths.workspace / _BATCH_REUSE_MANIFEST_NAME
+    if stage_name == "pdf-to-text":
+        _invalidate_artifacts(
+            (paths.graph_json, paths.triples_csv, paths.flashcards, manifest)
+        )
+    elif stage_name == "knowledge-graph":
+        _invalidate_artifacts((paths.flashcards, manifest))
+    elif stage_name == "flashcards":
+        _invalidate_artifacts((manifest,))
 
 
 def run(
@@ -262,7 +342,9 @@ def run(
     validators = {
         "pdf-to-text": _valid_structured_text,
         "knowledge-graph": _valid_graph,
-        "flashcards": lambda path: _valid_flashcards(path, args.module_number),
+        "flashcards": lambda path: _valid_flashcards(
+            path, args.module_number, args.course_code
+        ),
     }
     deadline = (
         time.monotonic() + effective_timeout
@@ -278,6 +360,7 @@ def run(
 
         print(f"Running {stage.name}...", flush=True)
         try:
+            _invalidate_downstream_for_stage(stage.name, paths)
             command_kwargs = {"check": True, "cwd": str(PROJECT_DIR)}
             if deadline is not None:
                 remaining = deadline - time.monotonic()

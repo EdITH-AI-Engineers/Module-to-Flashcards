@@ -1,8 +1,11 @@
 from collections import Counter
 from contextlib import contextmanager
+import csv
+import io
 import json
 import time
 
+from flashcard_csv import CSV_COLUMNS
 import pipeline
 from batch_pipeline import BatchDependencies, BatchItem
 from structured_module import StructuredModule, StructuredSlide, render_structured_module
@@ -88,11 +91,42 @@ def materialize(item, stage):
             encoding="utf-8",
         )
     else:
+        item.paths.flashcards.parent.mkdir(parents=True, exist_ok=True)
         item.paths.flashcards.write_text(
-            f"Module {item.args.module_number}.1\n"
-            f"Module {item.args.module_number}.2\n",
+            flashcard_content(item.args.course_code, item.args.module_number),
             encoding="utf-8",
         )
+
+
+def flashcard_content(course_code="CPE0021", module_number="01"):
+    """Return a structurally complete two-block 100-card reuse fixture."""
+    blocks = []
+    for block_number, first_cluster in enumerate((1, 11), start=1):
+        stream = io.StringIO(newline="")
+        writer = csv.writer(stream, lineterminator="\n")
+        writer.writerow(CSV_COLUMNS)
+        for cluster_number in range(first_cluster, first_cluster + 10):
+            cluster = f"00000000-0000-4000-8000-{cluster_number:012d}"
+            for card_number in range(1, 6):
+                writer.writerow(
+                    (
+                        "multiple-choice",
+                        f"Question {cluster_number}-{card_number}",
+                        "Correct",
+                        "Wrong one",
+                        "Wrong two",
+                        "Wrong three",
+                        "",
+                        "Explanation",
+                        "Hint",
+                        "1",
+                        cluster,
+                        course_code,
+                        str(module_number),
+                    )
+                )
+        blocks.append(f"Module {module_number}.{block_number}\n{stream.getvalue()}")
+    return "\n".join(blocks)
 
 
 def fake_dependencies(

@@ -5,6 +5,7 @@ import re
 from argparse import Namespace
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+import threading
 from typing import Annotated
 from urllib.parse import quote
 
@@ -20,6 +21,7 @@ from version import __version__
 PROJECT_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = PROJECT_DIR / "pipeline_uploads"
 OUTPUT_ROOT = PROJECT_DIR / "pipeline_output"
+_REQUEST_LOCK = threading.Lock()
 app = FastAPI(title="Module to Flashcards local processor", version=__version__)
 app.add_middleware(
     CORSMiddleware,
@@ -44,21 +46,48 @@ def safe_filename(filename: str) -> str:
     return name
 
 
+def safe_course_component(course_code: str) -> str:
+    """Return one safe directory component without changing the public code."""
+    value = str(course_code).strip()
+    if not value or value in {".", ".."}:
+        raise ValueError("course code must not be blank, '.' or '..'")
+    component = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-")
+    if not component or component in {".", ".."}:
+        raise ValueError("course code does not contain a safe path component")
+    return component
+
+
+def course_upload_directory(course_code: str) -> Path:
+    component = safe_course_component(course_code)
+    root = UPLOAD_DIR.resolve()
+    destination = (root / component).resolve()
+    try:
+        destination.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("course code resolves outside the upload directory") from exc
+    return destination
+
+
 async def save_upload(upload: UploadFile, course_code: str) -> Path:
     filename = safe_filename(upload.filename or "")
-    destination_dir = UPLOAD_DIR / re.sub(r"[^A-Za-z0-9._-]+", "_", course_code)
+    destination_dir = course_upload_directory(course_code)
     destination_dir.mkdir(parents=True, exist_ok=True)
     destination = destination_dir / filename
 
-    with NamedTemporaryFile(
-        mode="wb", dir=destination_dir, prefix=f".{filename}.", suffix=".tmp", delete=False
-    ) as temporary:
-        temporary_path = Path(temporary.name)
-        while chunk := await upload.read(1024 * 1024):
-            temporary.write(chunk)
-
-    temporary_path.replace(destination)
-    return destination
+    temporary_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="wb", dir=destination_dir, prefix=f".{filename}.", suffix=".tmp", delete=False
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            while chunk := await upload.read(1024 * 1024):
+                temporary.write(chunk)
+        temporary_path.replace(destination)
+        temporary_path = None
+        return destination
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
 
 
 def pipeline_args(pdf: Path, course_code: str, module_number: str) -> Namespace:
@@ -94,45 +123,100 @@ async def process_files(
     course_code: str,
     files: Annotated[list[UploadFile], File(description="PDF module files")],
 ) -> dict:
+    indexed_errors: list[tuple[int, int, dict[str, str]]] = []
+    error_order = 0
+
+    def record_error(index: int, filename: str, error: object) -> None:
+        nonlocal error_order
+        indexed_errors.append(
+            (index, error_order, {"pdf": filename, "error": str(error)})
+        )
+        error_order += 1
+
+    outputs: list[str] = []
     try:
         if not course_code.strip():
-            return {
-                "outputs": [],
-                "errors": [{"pdf": "(batch)", "error": "Missing course code"}],
-            }
+            record_error(-1, "(batch)", "Missing course code")
+        else:
+            try:
+                course_component = safe_course_component(course_code)
+                course_upload_directory(course_code)
+            except ValueError as exc:
+                record_error(-1, "(batch)", exc)
+            else:
+                await asyncio.to_thread(_REQUEST_LOCK.acquire)
+                try:
+                    items: list[BatchItem] = []
+                    item_indexes: dict[str, int] = {}
+                    seen_filenames: set[str] = set()
+                    seen_workspaces: set[str] = set()
+                    output_root = OUTPUT_ROOT / course_component
+                    for index, upload in enumerate(files):
+                        filename = upload.filename or "(unnamed)"
+                        try:
+                            filename_component = safe_filename(upload.filename or "")
+                            filename_key = filename_component.casefold()
+                            workspace_key = pipeline_paths(
+                                Path(filename_component), output_root
+                            ).workspace.name.casefold()
+                            if filename_key in seen_filenames:
+                                raise ValueError(
+                                    "sanitized filename collides with an earlier "
+                                    f"upload: {filename_component}"
+                                )
+                            if workspace_key in seen_workspaces:
+                                raise ValueError(
+                                    "workspace collides with an earlier upload: "
+                                    f"{pipeline_paths(Path(filename_component), output_root).workspace.name}"
+                                )
+                            seen_filenames.add(filename_key)
+                            seen_workspaces.add(workspace_key)
+                            pdf = await save_upload(upload, course_code)
+                            args = pipeline_args(
+                                pdf, course_code, module_number_from_filename(filename)
+                            )
+                            item = BatchItem(
+                                filename, args, pipeline_paths(pdf, output_root)
+                            )
+                            items.append(item)
+                            item_indexes[filename] = index
+                        except (OSError, ValueError, RuntimeError) as exc:
+                            record_error(index, filename, exc)
 
-        errors: list[dict[str, str]] = []
-        items: list[BatchItem] = []
-        for upload in files:
+                    try:
+                        batch_result = await asyncio.to_thread(run_batch, tuple(items))
+                    except (OSError, ValueError, RuntimeError) as exc:
+                        for item in items:
+                            record_error(item_indexes[item.filename], item.filename, exc)
+                    else:
+                        for error in batch_result.errors:
+                            filename = error["pdf"]
+                            record_error(
+                                item_indexes.get(filename, len(files)),
+                                filename,
+                                error["error"],
+                            )
+                        outputs = [str(output.resolve()) for output in batch_result.outputs]
+                finally:
+                    _REQUEST_LOCK.release()
+    finally:
+        for index, upload in enumerate(files):
             filename = upload.filename or "(unnamed)"
             try:
-                pdf = await save_upload(upload, course_code)
-                args = pipeline_args(
-                    pdf, course_code, module_number_from_filename(filename)
-                )
-                items.append(BatchItem(filename, args, pipeline_paths(pdf, OUTPUT_ROOT)))
-            except (OSError, ValueError, RuntimeError) as exc:
-                errors.append({"pdf": filename, "error": str(exc)})
+                await upload.close()
+            except Exception as exc:
+                record_error(index, filename, exc)
 
-        try:
-            batch_result = await asyncio.to_thread(run_batch, tuple(items))
-        except (OSError, ValueError, RuntimeError) as exc:
-            errors.extend(
-                {"pdf": item.filename, "error": str(exc)} for item in items
-            )
-            outputs: list[str] = []
-        else:
-            errors.extend(batch_result.errors)
-            outputs = [str(output.resolve()) for output in batch_result.outputs]
-        return {
-            "outputs": outputs,
-            "errors": errors,
-            "courseCode": course_code,
-            "processUrl": f"/process/{quote(course_code, safe='')}",
-        }
-    finally:
-        for upload in files:
-            await upload.close()
+    errors = [
+        error
+        for _index, _order, error in sorted(indexed_errors, key=lambda item: item[:2])
+    ]
+    return {
+        "outputs": outputs,
+        "errors": errors,
+        "courseCode": course_code,
+        "processUrl": f"/process/{quote(course_code, safe='')}",
+    }
 
 
 if __name__ == "__main__":

@@ -67,6 +67,7 @@ def test_batch_reuses_valid_artifacts_without_loading_models(tmp_path):
     for item in items:
         for stage in ("normalize", "graph", "flashcards"):
             materialize(item, stage)
+        batch_pipeline._write_manifest(item)
 
     @contextmanager
     def forbidden_loader(args):
@@ -249,6 +250,8 @@ def test_loader_failure_aborts_all_remaining_heavy_stages(
         for item in items:
             materialize(item, "normalize")
         materialize(items[1], "graph")
+    for item in items:
+        batch_pipeline._write_manifest(item)
 
     @contextmanager
     def qwen_loader(args):
@@ -401,6 +404,160 @@ def test_exact_timeout_boundary_stops_before_the_next_stage(tmp_path):
             "error": "module exceeded 5-second active-processing timeout",
         },
     )
+
+
+def test_zero_batch_timeout_is_disabled_without_reading_the_clock(tmp_path):
+    items = make_items(tmp_path, "one.pdf")
+
+    @contextmanager
+    def loader(args):
+        yield object()
+
+    result = run_batch(
+        items,
+        dependencies=fake_dependencies(
+            [],
+            loader,
+            loader,
+            monotonic=lambda: pytest.fail("zero timeout must not set a deadline"),
+        ),
+        timeout_seconds=0,
+    )
+
+    assert result.outputs == (items[0].paths.flashcards,)
+    assert not result.errors
+
+
+def test_negative_batch_timeout_fails_every_item_before_loading_models(tmp_path):
+    items = make_items(tmp_path, "one.pdf", "two.pdf")
+
+    @contextmanager
+    def forbidden_loader(args):
+        pytest.fail("negative timeout must fail before model loading")
+        yield object()
+
+    result = run_batch(
+        items,
+        dependencies=fake_dependencies([], forbidden_loader, forbidden_loader),
+        timeout_seconds=-1,
+    )
+
+    assert result.errors == (
+        {"pdf": "one.pdf", "error": "module timeout must not be negative"},
+        {"pdf": "two.pdf", "error": "module timeout must not be negative"},
+    )
+
+
+def test_final_flashcard_stage_exhausting_the_budget_is_not_successful(tmp_path):
+    items = make_items(tmp_path, "one.pdf")
+    events = []
+    clock_values = iter((0, 0, 0, 0, 0, 5))
+
+    @contextmanager
+    def loader(args):
+        yield object()
+
+    result = run_batch(
+        items,
+        dependencies=fake_dependencies(
+            events,
+            loader,
+            loader,
+            monotonic=lambda: next(clock_values),
+        ),
+        timeout_seconds=5,
+    )
+
+    assert ("flashcards", "one.pdf") in [event[:2] for event in events]
+    assert result.outputs == ()
+    assert result.errors == (
+        {
+            "pdf": "one.pdf",
+            "error": "module exceeded 5-second active-processing timeout",
+        },
+    )
+
+
+def test_force_partial_failure_removes_stale_downstream_artifacts_for_resume(tmp_path):
+    item = make_items(tmp_path, "one.pdf")[0]
+    for stage in ("normalize", "graph", "flashcards"):
+        materialize(item, stage)
+    manifest = item.paths.workspace / "batch_reuse_manifest.json"
+    manifest.write_text("old manifest", encoding="utf-8")
+    item.args.force = True
+
+    @contextmanager
+    def loader(args):
+        yield object()
+
+    first = run_batch(
+        (item,),
+        dependencies=BatchDependencies(
+            qwen_loader=loader,
+            rebel_loader=loader,
+            normalize_stage=lambda current, backend: materialize(current, "normalize"),
+            graph_stage=lambda current, runtime: (_ for _ in ()).throw(
+                RuntimeError("graph failed")
+            ),
+            flashcard_stage=lambda current, backend: materialize(current, "flashcards"),
+            monotonic=time.monotonic,
+        ),
+    )
+
+    assert first.errors == ({"pdf": "one.pdf", "error": "graph failed"},)
+    assert not item.paths.graph_json.exists()
+    assert not item.paths.triples_csv.exists()
+    assert not item.paths.flashcards.exists()
+    assert not manifest.exists()
+
+    item.args.force = False
+    counters = Counter()
+    resumed = run_batch((item,), dependencies=counting_dependencies(counters))
+
+    assert resumed.outputs == (item.paths.flashcards,)
+    assert counters["normalize"] == counters["graph"] == counters["flashcards"] == 1
+
+
+def test_matching_batch_reuse_manifest_skips_all_model_work(tmp_path):
+    item = make_items(tmp_path, "one.pdf")[0]
+    first_counters = Counter()
+
+    first = run_batch((item,), dependencies=counting_dependencies(first_counters))
+
+    assert first.outputs == (item.paths.flashcards,)
+    assert (item.paths.workspace / "batch_reuse_manifest.json").is_file()
+
+    @contextmanager
+    def forbidden_loader(args):
+        pytest.fail("matching manifest and artifacts must be reused")
+        yield object()
+
+    resumed = run_batch(
+        (item,), dependencies=fake_dependencies([], forbidden_loader, forbidden_loader)
+    )
+
+    assert resumed.outputs == (item.paths.flashcards,)
+
+
+@pytest.mark.parametrize(
+    "change",
+    (
+        lambda item: item.args.pdf.write_bytes(b"replaced pdf"),
+        lambda item: setattr(item.args, "seed", 99),
+        lambda item: setattr(item.args, "course_code", "CPE0099"),
+    ),
+    ids=("replaced-source", "changed-setting", "changed-course"),
+)
+def test_changed_batch_reuse_identity_or_source_forces_all_stages(tmp_path, change):
+    item = make_items(tmp_path, "one.pdf")[0]
+    assert run_batch((item,), dependencies=counting_dependencies(Counter())).outputs
+    change(item)
+    counters = Counter()
+
+    result = run_batch((item,), dependencies=counting_dependencies(counters))
+
+    assert result.outputs == (item.paths.flashcards,)
+    assert counters["normalize"] == counters["graph"] == counters["flashcards"] == 1
 
 
 def test_empty_batch_returns_empty_result_without_loading_models():

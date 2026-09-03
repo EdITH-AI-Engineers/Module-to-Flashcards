@@ -61,7 +61,7 @@ Invoke-WebRequest http://localhost:8000/health
 ```
 
 The server accepts multiple selected PDFs in one request and writes results under
-`pipeline_output/<pdf-name>/`. Keep the server terminal open while processing.
+`pipeline_output/<sanitized-course-code>/<pdf-name>/`. Keep the server terminal open while processing.
 There is no default processing timeout: `--timeout 0` means unlimited time.
 
 For a multi-file request, the server stages work to reduce memory pressure and

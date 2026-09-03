@@ -1,6 +1,7 @@
 __pycache__/
 .pytest_cache/
 .venv*/
+.worktrees/
 models/
 flashcards/
 pipeline_output/

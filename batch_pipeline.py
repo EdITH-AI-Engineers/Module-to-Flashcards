@@ -59,6 +59,7 @@ class _BatchState:
     needs_flashcards: bool
     remaining_seconds: float | None
     active: bool = True
+    error: str | None = None
 
 
 _STAGE_ERRORS = (
@@ -199,8 +200,7 @@ def _run_stage(
     validator: Callable[[BatchItem], bool],
     dependencies: BatchDependencies,
     timeout_seconds: float | None,
-    errors: list[dict[str, str]],
-) -> None:
+) -> bool:
     pending = [
         state
         for state in states
@@ -208,19 +208,14 @@ def _run_stage(
     ]
     for state in pending:
         if state.remaining_seconds is not None and state.remaining_seconds <= 0:
-            state.active = False
-            errors.append(
-                {
-                    "pdf": state.item.filename,
-                    "error": (
-                        "module exceeded "
-                        f"{timeout_seconds:g}-second active-processing timeout"
-                    ),
-                }
+            _fail(
+                state,
+                "module exceeded "
+                f"{timeout_seconds:g}-second active-processing timeout",
             )
     pending = [state for state in pending if state.active]
     if not pending:
-        return
+        return True
 
     try:
         with loader(pending[0].item.args) as runtime:
@@ -231,26 +226,34 @@ def _run_stage(
                     else None
                 )
                 try:
-                    stage(state.item, runtime)
+                    try:
+                        stage(state.item, runtime)
+                    finally:
+                        if start is not None:
+                            elapsed = dependencies.monotonic() - start
+                            state.remaining_seconds -= elapsed
                     if not validator(state.item):
                         raise RuntimeError(
                             f"{stage_name} stage did not create a valid artifact: "
                             f"{_stage_output(state.item, stage_name)}"
                         )
                 except _STAGE_ERRORS as exc:
-                    state.active = False
-                    errors.append(
-                        {"pdf": state.item.filename, "error": str(exc)}
-                    )
-                finally:
-                    if start is not None:
-                        elapsed = dependencies.monotonic() - start
-                        state.remaining_seconds -= elapsed
+                    _fail(state, str(exc))
     except _STAGE_ERRORS as exc:
-        for state in pending:
-            if state.active:
-                state.active = False
-                errors.append({"pdf": state.item.filename, "error": str(exc)})
+        for state in states:
+            if state.active and _has_remaining_work(state):
+                _fail(state, str(exc))
+        return False
+    return True
+
+
+def _fail(state: _BatchState, error: str) -> None:
+    state.active = False
+    state.error = error
+
+
+def _has_remaining_work(state: _BatchState) -> bool:
+    return state.needs_normalize or state.needs_graph or state.needs_flashcards
 
 
 def _stage_output(item: BatchItem, stage_name: str) -> Path:
@@ -259,6 +262,23 @@ def _stage_output(item: BatchItem, stage_name: str) -> Path:
     if stage_name == "graph":
         return item.paths.graph_json
     return item.paths.flashcards
+
+
+def _result(states: Sequence[_BatchState]) -> BatchResult:
+    outputs = tuple(
+        state.item.paths.flashcards
+        for state in states
+        if state.active
+        and _valid_flashcards(
+            state.item.paths.flashcards, state.item.args.module_number
+        )
+    )
+    errors = tuple(
+        {"pdf": state.item.filename, "error": state.error}
+        for state in states
+        if state.error is not None
+    )
+    return BatchResult(outputs=outputs, errors=errors)
 
 
 def run_batch(
@@ -279,9 +299,7 @@ def run_batch(
         )
 
     states = [_make_state(item, timeout_seconds) for item in items]
-    errors: list[dict[str, str]] = []
-
-    _run_stage(
+    if not _run_stage(
         states,
         needs_attribute="needs_normalize",
         stage_name="normalize",
@@ -290,9 +308,9 @@ def run_batch(
         validator=lambda item: _valid_structured_text(item.paths.structured_text),
         dependencies=dependencies,
         timeout_seconds=timeout_seconds,
-        errors=errors,
-    )
-    _run_stage(
+    ):
+        return _result(states)
+    if not _run_stage(
         states,
         needs_attribute="needs_graph",
         stage_name="graph",
@@ -301,9 +319,9 @@ def run_batch(
         validator=lambda item: _valid_graph(item.paths.graph_json),
         dependencies=dependencies,
         timeout_seconds=timeout_seconds,
-        errors=errors,
-    )
-    _run_stage(
+    ):
+        return _result(states)
+    if not _run_stage(
         states,
         needs_attribute="needs_flashcards",
         stage_name="flashcards",
@@ -314,15 +332,6 @@ def run_batch(
         ),
         dependencies=dependencies,
         timeout_seconds=timeout_seconds,
-        errors=errors,
-    )
-
-    outputs = tuple(
-        state.item.paths.flashcards
-        for state in states
-        if state.active
-        and _valid_flashcards(
-            state.item.paths.flashcards, state.item.args.module_number
-        )
-    )
-    return BatchResult(outputs=outputs, errors=tuple(errors))
+    ):
+        return _result(states)
+    return _result(states)

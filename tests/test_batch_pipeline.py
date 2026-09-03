@@ -227,3 +227,258 @@ def test_production_loaders_release_their_owned_runtimes(monkeypatch, tmp_path):
 
     assert backend.closed is True
     assert released == [runtime]
+
+
+@pytest.mark.parametrize(
+    ("failing_loader", "failure_point"),
+    (
+        ("qwen", "entry"),
+        ("qwen", "exit"),
+        ("rebel", "entry"),
+        ("rebel", "exit"),
+    ),
+)
+def test_loader_failure_aborts_all_remaining_heavy_stages(
+    tmp_path, failing_loader, failure_point
+):
+    items = make_items(tmp_path, "one.pdf", "two.pdf")
+    events = []
+    if failing_loader == "qwen":
+        materialize(items[1], "normalize")
+    else:
+        for item in items:
+            materialize(item, "normalize")
+        materialize(items[1], "graph")
+
+    @contextmanager
+    def qwen_loader(args):
+        events.append("qwen-entry")
+        if failing_loader == "qwen" and failure_point == "entry":
+            raise RuntimeError("qwen entry failed")
+        yield object()
+        events.append("qwen-exit")
+        if failing_loader == "qwen" and failure_point == "exit":
+            raise RuntimeError("qwen exit failed")
+
+    @contextmanager
+    def rebel_loader(args):
+        events.append("rebel-entry")
+        if failing_loader == "rebel" and failure_point == "entry":
+            raise RuntimeError("rebel entry failed")
+        yield object()
+        events.append("rebel-exit")
+        if failing_loader == "rebel" and failure_point == "exit":
+            raise RuntimeError("rebel exit failed")
+
+    result = run_batch(
+        items,
+        dependencies=fake_dependencies(events, qwen_loader, rebel_loader),
+    )
+
+    loader_events = [event for event in events if isinstance(event, str)]
+    expected_events = [f"{failing_loader}-entry"]
+    if failure_point == "exit":
+        expected_events.append(f"{failing_loader}-exit")
+    error = f"{failing_loader} {failure_point} failed"
+    assert loader_events == expected_events
+    assert result == BatchResult(
+        outputs=(),
+        errors=(
+            {"pdf": "one.pdf", "error": error},
+            {"pdf": "two.pdf", "error": error},
+        ),
+    )
+
+
+def test_errors_are_returned_in_input_order_across_stages(tmp_path):
+    items = make_items(tmp_path, "one.pdf", "two.pdf")
+
+    @contextmanager
+    def loader(args):
+        yield object()
+
+    def normalize(item, backend):
+        if item.filename == "two.pdf":
+            raise RuntimeError("second failed normalization")
+        materialize(item, "normalize")
+
+    def graph(item, runtime):
+        raise RuntimeError("first failed graph generation")
+
+    dependencies = BatchDependencies(
+        qwen_loader=loader,
+        rebel_loader=loader,
+        normalize_stage=normalize,
+        graph_stage=graph,
+        flashcard_stage=lambda item, backend: materialize(item, "flashcards"),
+        monotonic=time.monotonic,
+    )
+
+    result = run_batch(items, dependencies=dependencies)
+
+    assert result.errors == (
+        {"pdf": "one.pdf", "error": "first failed graph generation"},
+        {"pdf": "two.pdf", "error": "second failed normalization"},
+    )
+
+
+def test_artifact_validation_time_is_excluded_from_active_budget(
+    tmp_path, monkeypatch
+):
+    items = make_items(tmp_path, "one.pdf")
+    now = [0.0]
+    original_validator = batch_pipeline._valid_structured_text
+
+    def slow_validator(path):
+        result = original_validator(path)
+        if path.is_file():
+            now[0] += 10
+        return result
+
+    @contextmanager
+    def loader(args):
+        yield object()
+
+    dependencies = fake_dependencies(
+        [],
+        loader,
+        loader,
+        monotonic=lambda: now[0],
+    )
+    original_normalize = dependencies.normalize_stage
+
+    def normalize(item, backend):
+        now[0] += 4
+        original_normalize(item, backend)
+
+    dependencies = BatchDependencies(
+        qwen_loader=dependencies.qwen_loader,
+        rebel_loader=dependencies.rebel_loader,
+        normalize_stage=normalize,
+        graph_stage=dependencies.graph_stage,
+        flashcard_stage=dependencies.flashcard_stage,
+        monotonic=dependencies.monotonic,
+    )
+    monkeypatch.setattr(batch_pipeline, "_valid_structured_text", slow_validator)
+
+    result = run_batch(items, dependencies=dependencies, timeout_seconds=5)
+
+    assert result.outputs == (items[0].paths.flashcards,)
+    assert not result.errors
+
+
+def test_exact_timeout_boundary_stops_before_the_next_stage(tmp_path):
+    items = make_items(tmp_path, "one.pdf")
+    events = []
+    clock_values = iter([0, 5])
+
+    @contextmanager
+    def qwen_loader(args):
+        events.append("qwen")
+        yield object()
+
+    @contextmanager
+    def rebel_loader(args):
+        events.append("rebel")
+        yield object()
+
+    result = run_batch(
+        items,
+        dependencies=fake_dependencies(
+            events,
+            qwen_loader,
+            rebel_loader,
+            monotonic=lambda: next(clock_values),
+        ),
+        timeout_seconds=5,
+    )
+
+    assert events[0] == "qwen"
+    assert "rebel" not in events
+    assert result.errors == (
+        {
+            "pdf": "one.pdf",
+            "error": "module exceeded 5-second active-processing timeout",
+        },
+    )
+
+
+def test_empty_batch_returns_empty_result_without_loading_models():
+    @contextmanager
+    def forbidden_loader(args):
+        raise AssertionError("an empty batch must not load a model")
+        yield
+
+    result = run_batch(
+        (),
+        dependencies=fake_dependencies([], forbidden_loader, forbidden_loader),
+    )
+
+    assert result == BatchResult(outputs=(), errors=())
+
+
+def test_production_normalize_adapter_translates_output_and_backend(
+    tmp_path, monkeypatch
+):
+    item = make_items(tmp_path, "one.pdf")[0]
+    backend = object()
+    captured = {}
+
+    def fake_run(args, *, backend):
+        captured.update(args=vars(args), backend=backend)
+        return args.output
+
+    monkeypatch.setattr(batch_pipeline.slides_pdf_to_txt, "run", fake_run)
+
+    output = batch_pipeline.PRODUCTION_DEPENDENCIES.normalize_stage(item, backend)
+
+    assert output == item.paths.structured_text
+    assert captured["backend"] is backend
+    assert captured["args"]["pdf"] == item.args.pdf
+    assert captured["args"]["output"] == item.paths.structured_text
+    assert captured["args"]["max_tokens"] == 2048
+
+
+def test_production_graph_adapter_translates_fast_settings(tmp_path, monkeypatch):
+    item = make_items(tmp_path, "one.pdf")[0]
+    runtime = object()
+    captured = {}
+
+    def fake_run(args, *, runtime):
+        captured.update(args=vars(args), runtime=runtime)
+        return args.output_dir / "knowledge_graph.json", args.output_dir / "triples.csv"
+
+    monkeypatch.setattr(batch_pipeline.text_extractor, "run", fake_run)
+
+    batch_pipeline.PRODUCTION_DEPENDENCIES.graph_stage(item, runtime)
+
+    assert captured["runtime"] is runtime
+    assert captured["args"]["input"] == item.paths.structured_text
+    assert captured["args"]["output_dir"] == item.paths.graph_dir
+    assert captured["args"]["device"] == "auto"
+    assert captured["args"]["batch_size"] == 1
+    assert captured["args"]["num_beams"] == 1
+
+
+def test_production_flashcard_adapter_translates_review_settings(
+    tmp_path, monkeypatch
+):
+    item = make_items(tmp_path, "one.pdf")[0]
+    backend = object()
+    captured = {}
+
+    def fake_run(args, *, backend):
+        captured.update(args=vars(args), backend=backend)
+        return args.output
+
+    monkeypatch.setattr(batch_pipeline.flashcard_generator, "run", fake_run)
+
+    output = batch_pipeline.PRODUCTION_DEPENDENCIES.flashcard_stage(item, backend)
+
+    assert output == item.paths.flashcards
+    assert captured["backend"] is backend
+    assert captured["args"]["graph"] == item.paths.graph_json
+    assert captured["args"]["output"] == item.paths.flashcards
+    assert captured["args"]["max_retries"] == item.args.attempts
+    assert captured["args"]["final_review"] is False
+    assert captured["args"]["smoke_test"] is False

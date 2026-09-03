@@ -1,0 +1,11 @@
+__pycache__/
+.pytest_cache/
+.venv*/
+models/
+flashcards/
+pipeline_output/
+structured_text/
+progress.json
+progress.log
+*.tmp
+*.pyc

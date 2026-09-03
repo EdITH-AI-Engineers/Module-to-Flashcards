@@ -1,0 +1,11 @@
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+
+huggingface-hub
+llama-cpp-python
+Pillow
+PyMuPDF
+pytesseract
+pytest
+sentencepiece
+torch
+transformers

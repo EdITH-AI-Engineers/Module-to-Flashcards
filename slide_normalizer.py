@@ -32,6 +32,8 @@ Return one JSON object only with this shape:
   "module_number": "first-slide candidate or Not Specified",
   "module_title": "first-slide candidate or Not Specified"
 }
+Keep content, visual_text, definitions, and knowledge_statements as JSON arrays,
+even when an array contains only one item.
 """
 
 
@@ -79,11 +81,20 @@ def _string(value: Any, field: str, *, default: str = NOT_SPECIFIED) -> str:
     return value.strip() or default
 
 
-def _string_list(value: Any, field: str, *, default: tuple[str, ...] = ()) -> tuple[str, ...]:
+def _string_list(
+    value: Any,
+    field: str,
+    *,
+    default: tuple[str, ...] = (),
+    allow_single_string: bool = False,
+) -> tuple[str, ...]:
     if value is None:
         return default
-    if not isinstance(value, list):
-        raise ValueError(f"{field} must be a list")
+    if allow_single_string and isinstance(value, str):
+        value = [value]
+    elif not isinstance(value, list):
+        expected = "a list or string" if allow_single_string else "a list"
+        raise ValueError(f"{field} must be {expected}")
     if not all(isinstance(item, str) for item in value):
         raise ValueError(f"{field} must contain only strings")
     return tuple(item.strip() for item in value if item.strip())
@@ -108,6 +119,7 @@ def _parse_page(
         value.get("visual_text"),
         "visual_text",
         default=(NOT_SPECIFIED,),
+        allow_single_string=True,
     )
     statements = _string_list(
         value.get("knowledge_statements"),

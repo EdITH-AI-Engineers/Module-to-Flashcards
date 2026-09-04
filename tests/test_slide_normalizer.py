@@ -58,6 +58,47 @@ def test_normalize_slide_accepts_fenced_json_and_builds_record():
     assert "Use only the supplied extracted page text" in backend.calls[0][0]
 
 
+def test_normalize_slide_accepts_single_visual_text_string():
+    backend = FakeBackend(
+        [
+            response(
+                title="Portfolio, Programs, Projects, and Operations",
+                visual_text=(
+                    "Organizational Strategy leads to a sample portfolio "
+                    "containing programs, projects, operations, and shared resources."
+                ),
+            )
+        ]
+    )
+
+    slide = normalize_slide(
+        backend,
+        number=17,
+        source_text="Portfolio, Programs, Projects, and Operations",
+        extraction_method="ocr",
+        attempts=1,
+    )
+
+    assert slide.visual_text == (
+        "Organizational Strategy leads to a sample portfolio containing programs, "
+        "projects, operations, and shared resources.",
+    )
+    assert len(backend.calls) == 1
+
+
+def test_normalize_slide_still_rejects_non_text_visual_value():
+    backend = FakeBackend([response(visual_text={"diagram": "portfolio"})])
+
+    with pytest.raises(SlideNormalizationError, match="visual_text must be a list or string"):
+        normalize_slide(
+            backend,
+            number=17,
+            source_text="Portfolio, Programs, Projects, and Operations",
+            extraction_method="ocr",
+            attempts=1,
+        )
+
+
 def test_normalize_slide_retries_with_focused_validation_feedback():
     backend = FakeBackend(
         [

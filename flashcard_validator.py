@@ -8,6 +8,12 @@ import uuid
 from collections import Counter
 from typing import Any, Iterable, Mapping, Sequence
 
+from flashcard_contract import (
+    CARDS_PER_CLUSTER,
+    CARDS_PER_MODULE,
+    CLUSTERS_PER_MODULE,
+    CONCEPTS_PER_MODULE,
+)
 from flashcard_types import (
     ConceptPlan,
     FlashcardCluster,
@@ -136,8 +142,11 @@ def parse_concept_plan(
     concepts_value = value.get("concepts")
     if not isinstance(concepts_value, list):
         raise ValidationError("concepts must be a JSON array")
-    if len(concepts_value) != 20:
-        raise ValidationError(f"expected exactly 20 concepts, received {len(concepts_value)}")
+    if len(concepts_value) != CONCEPTS_PER_MODULE:
+        raise ValidationError(
+            f"expected exactly {CONCEPTS_PER_MODULE} concepts, "
+            f"received {len(concepts_value)}"
+        )
 
     known = {fact.fact_id: fact.statement for fact in known_facts}
     results: list[ConceptPlan] = []
@@ -174,8 +183,14 @@ def parse_concept_plan(
                 errors.append(f"{prefix} uses unknown fact id {fact_id!r}")
             else:
                 resolved_facts.append(known[fact_id])
-        if len(approaches) != 5 or len(set(approaches)) != 5:
-            errors.append(f"{prefix} must contain exactly five distinct assessment approaches")
+        if (
+            len(approaches) != CARDS_PER_CLUSTER
+            or len(set(approaches)) != CARDS_PER_CLUSTER
+        ):
+            errors.append(
+                f"{prefix} must contain exactly {CARDS_PER_CLUSTER} "
+                "distinct assessment approaches"
+            )
         invalid_approaches = sorted(set(approaches) - ALLOWED_APPROACHES)
         if invalid_approaches:
             errors.append(
@@ -267,8 +282,10 @@ def validate_cluster(
     concept: ConceptPlan,
 ) -> tuple[str, ...]:
     errors: list[str] = []
-    if len(cards) != 5:
-        errors.append(f"expected exactly 5 cards, received {len(cards)}")
+    if len(cards) != CARDS_PER_CLUSTER:
+        errors.append(
+            f"expected exactly {CARDS_PER_CLUSTER} cards, received {len(cards)}"
+        )
 
     counts = Counter(card.type for card in cards)
     if any(counts.get(card_type, 0) == 0 for card_type in ALLOWED_TYPES):
@@ -277,8 +294,13 @@ def validate_cluster(
         )
 
     approaches = [card.assessment_approach for card in cards]
-    if len(approaches) != 5 or len(set(approaches)) != 5:
-        errors.append("cluster must use five distinct assessment approaches")
+    if (
+        len(approaches) != CARDS_PER_CLUSTER
+        or len(set(approaches)) != CARDS_PER_CLUSTER
+    ):
+        errors.append(
+            f"cluster must use {CARDS_PER_CLUSTER} distinct assessment approaches"
+        )
     if set(approaches) != set(concept.assessment_approaches):
         errors.append("cluster approaches must exactly match the planned assessment approaches")
 
@@ -393,8 +415,11 @@ def validate_module(
     clusters: Sequence[FlashcardCluster],
 ) -> tuple[str, ...]:
     errors: list[str] = []
-    if len(clusters) != 20:
-        errors.append(f"module must contain exactly 20 clusters, received {len(clusters)}")
+    if len(clusters) != CLUSTERS_PER_MODULE:
+        errors.append(
+            f"module must contain exactly {CLUSTERS_PER_MODULE} clusters, "
+            f"received {len(clusters)}"
+        )
 
     cluster_ids = [cluster.cluster for cluster in clusters]
     if len(set(cluster_ids)) != len(cluster_ids):
@@ -409,8 +434,11 @@ def validate_module(
             errors.append(f"cluster {position} must use a canonical valid UUID")
 
     total_cards = sum(len(cluster.cards) for cluster in clusters)
-    if total_cards != 100:
-        errors.append(f"module must contain exactly 100 cards, received {total_cards}")
+    if total_cards != CARDS_PER_MODULE:
+        errors.append(
+            f"module must contain exactly {CARDS_PER_MODULE} cards, "
+            f"received {total_cards}"
+        )
 
     indexed_cards: list[tuple[int, int, FlashcardDraft]] = []
     for cluster_position, cluster in enumerate(clusters, start=1):

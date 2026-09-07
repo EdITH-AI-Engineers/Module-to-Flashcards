@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import flashcard_csv
 from flashcard_csv import CSV_COLUMNS, render_module, write_module_output
 from flashcard_types import ModuleIdentity
 from tests.factories import valid_clusters, with_question
@@ -31,6 +32,93 @@ def test_render_module_has_two_complete_fifty_row_blocks():
     assert len({row[10] for row in first_rows[1:]}) == 10
     assert len({row[10] for row in second_rows[1:]}) == 10
     assert all(len(row) == 13 for row in first_rows + second_rows)
+
+
+def test_parse_rendered_module_counts_card_rows_without_labels_or_headers():
+    identity = ModuleIdentity("CPE0021", "1")
+    text = render_module(identity, valid_clusters())
+
+    blocks = flashcard_csv.parse_rendered_module(text, identity)
+
+    assert tuple(len(block) for block in blocks) == (50, 50)
+    assert sum(len(block) for block in blocks) == 100
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_message"),
+    (
+        (
+            lambda text: "\n".join(
+                line for index, line in enumerate(text.splitlines()) if index != 2
+            )
+            + "\n",
+            "block 1 must contain exactly 50 flashcards, received 49",
+        ),
+        (
+            lambda text: text.rstrip("\n") + "\n" + text.splitlines()[-1] + "\n",
+            "block 2 must contain exactly 50 flashcards, received 51",
+        ),
+    ),
+    ids=("under-count", "over-count"),
+)
+def test_parse_rendered_module_rejects_inexact_block_counts(mutate, expected_message):
+    identity = ModuleIdentity("CPE0021", "1")
+    malformed = mutate(render_module(identity, valid_clusters()))
+
+    with pytest.raises(ValueError, match=expected_message):
+        flashcard_csv.parse_rendered_module(malformed, identity)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_message"),
+    (
+        (
+            lambda text: text.replace(",CPE0021,1\n", ",CPE0021\n", 1),
+            "block 1 card 1 must contain exactly 13 columns",
+        ),
+        (
+            lambda text: text.replace(",CPE0021,1\n", ",CPE0099,1\n", 1),
+            "block 1 card 1 has course code 'CPE0099', expected 'CPE0021'",
+        ),
+        (
+            lambda text: text.replace(",CPE0021,1\n", ",CPE0021,2\n", 1),
+            "block 1 card 1 has module number '2', expected '1'",
+        ),
+        (
+            lambda text: text.replace(
+                "00000000-0000-4000-8000-000000000001", "not-a-uuid", 1
+            ),
+            "block 1 card 1 has an invalid cluster UUID",
+        ),
+        (
+            lambda text: text.replace(
+                "00000000-0000-4000-8000-000000000002",
+                "00000000-0000-4000-8000-000000000001",
+            ),
+            "block 1 must contain exactly 10 complete clusters",
+        ),
+    ),
+    ids=("column-count", "course-code", "module-number", "uuid", "cluster-count"),
+)
+def test_parse_rendered_module_rejects_invalid_card_rows(mutate, expected_message):
+    identity = ModuleIdentity("CPE0021", "1")
+    malformed = mutate(render_module(identity, valid_clusters()))
+
+    with pytest.raises(ValueError, match=expected_message):
+        flashcard_csv.parse_rendered_module(malformed, identity)
+
+
+def test_parse_rendered_module_requires_complete_clusters_in_each_block():
+    identity = ModuleIdentity("CPE0021", "1")
+    lines = render_module(identity, valid_clusters()).splitlines()
+    lines[2], lines[55] = lines[55], lines[2]
+    malformed = "\n".join(lines) + "\n"
+
+    with pytest.raises(
+        ValueError,
+        match="block 1 must contain exactly 10 complete clusters",
+    ):
+        flashcard_csv.parse_rendered_module(malformed, identity)
 
 
 def test_csv_escapes_commas_and_quotes():

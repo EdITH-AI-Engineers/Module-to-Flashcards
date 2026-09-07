@@ -5,6 +5,12 @@ from dataclasses import asdict, dataclass, replace
 from typing import Callable, Sequence, TypeVar
 from uuid import uuid4
 
+from flashcard_contract import (
+    CARDS_PER_BLOCK,
+    CARDS_PER_MODULE,
+    CLUSTERS_PER_MODULE,
+    CONCEPTS_PER_MODULE,
+)
 from flashcard_prompt import (
     SYSTEM_PROMPT,
     build_cluster_prompt,
@@ -180,9 +186,16 @@ class FlashcardPipeline:
         clusters: Sequence[FlashcardCluster],
     ) -> dict[str, list[str]]:
         merged: dict[str, list[str]] = {}
-        for group_number, start in enumerate(range(0, 20, 4), start=1):
-            self._progress(f"Grounding review {group_number}/5...")
-            group = tuple(clusters[start : start + 4])
+        review_group_size = 4
+        review_group_count = (
+            CLUSTERS_PER_MODULE + review_group_size - 1
+        ) // review_group_size
+        for group_number, start in enumerate(
+            range(0, CLUSTERS_PER_MODULE, review_group_size),
+            start=1,
+        ):
+            self._progress(f"Grounding review {group_number}/{review_group_count}...")
+            group = tuple(clusters[start : start + review_group_size])
             issues = self._review(
                 build_grounding_review_prompt(group),
                 {cluster.cluster for cluster in group},
@@ -215,7 +228,7 @@ class FlashcardPipeline:
         identity: ModuleIdentity,
         facts: Sequence[GraphFact],
     ) -> tuple[FlashcardCluster, ...]:
-        self._progress("Planning 20 concepts...")
+        self._progress(f"Planning {CONCEPTS_PER_MODULE} concepts...")
         plan_prompt = build_concept_plan_prompt(identity, facts)
         concepts = self._complete_with_retries(
             plan_prompt,
@@ -227,7 +240,9 @@ class FlashcardPipeline:
 
         clusters: list[FlashcardCluster] = []
         for position, concept in enumerate(concepts, start=1):
-            self._progress(f"Generating cluster {position}/20: {concept.name}")
+            self._progress(
+                f"Generating cluster {position}/{CLUSTERS_PER_MODULE}: {concept.name}"
+            )
             cards = self._generate_cards(
                 identity,
                 concept,
@@ -256,7 +271,8 @@ class FlashcardPipeline:
                     index = by_id[cluster_id]
                     old = clusters[index]
                     self._progress(
-                        f"Regenerating reviewed cluster {index + 1}/20: {old.concept.name}"
+                        "Regenerating reviewed cluster "
+                        f"{index + 1}/{CLUSTERS_PER_MODULE}: {old.concept.name}"
                     )
                     others = tuple(
                         cluster
@@ -279,5 +295,8 @@ class FlashcardPipeline:
             raise GenerationError(
                 "final module validation failed: " + "; ".join(final_errors)
             )
-        self._progress("Generation complete.")
+        self._progress(
+            f"{CARDS_PER_MODULE} flashcards generated "
+            f"({CARDS_PER_BLOCK} + {CARDS_PER_BLOCK})."
+        )
         return tuple(clusters)

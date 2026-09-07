@@ -4,6 +4,7 @@ import json
 from dataclasses import asdict
 from typing import Iterable, Sequence
 
+from flashcard_contract import CARDS_PER_CLUSTER, CONCEPTS_PER_MODULE
 from flashcard_types import (
     ConceptPlan,
     FlashcardCluster,
@@ -12,7 +13,7 @@ from flashcard_types import (
 )
 
 
-SYSTEM_PROMPT = """You are a college-level educational assessment generator.
+SYSTEM_PROMPT = f"""You are a college-level educational assessment generator.
 
 SOURCE AUTHORITY
 Use only the supplied graph facts as factual authority. Do not add outside knowledge, repair a fact from memory, or infer unsupported facts. Treat each module independently. Never assess the same underlying learning point twice. If the facts cannot support the requested number of distinct concepts, report insufficient content instead of duplicating or inventing material.
@@ -21,7 +22,7 @@ INTERNAL OUTPUT
 Return JSON only for every internal request. Do not use Markdown fences, CSV, headings, commentary, or text outside the requested JSON object. Use exactly the requested keys and value types. Preserve the required key spelling expalanation.
 
 QUESTION QUALITY
-Write clear, authentic college-level assessment items. Assess terminology, distinctions, relationships, mechanisms, processes, causes, effects, classifications, applications, implications, conditions, limitations, or technical reasoning only when the supplied facts support them. Difficulty must come from the required thinking, never confusing wording. Do not mechanically convert a fact into a stem or reveal an answer through its full definition. Within a concept, use five meaningfully different assessment approaches. Changes limited to wording, names, punctuation, order, or distractors are not distinct approaches.
+Write clear, authentic college-level assessment items. Assess terminology, distinctions, relationships, mechanisms, processes, causes, effects, classifications, applications, implications, conditions, limitations, or technical reasoning only when the supplied facts support them. Difficulty must come from the required thinking, never confusing wording. Do not mechanically convert a fact into a stem or reveal an answer through its full definition. Within a concept, use {CARDS_PER_CLUSTER} meaningfully different assessment approaches. Changes limited to wording, names, punctuation, order, or distractors are not distinct approaches.
 
 Never mention a knowledge graph, source, module, document, lesson, slide, file, chunk, citation, URL, header, footer, or source reference in a question, answer, explanation, or hint.
 
@@ -86,14 +87,14 @@ def build_concept_plan_prompt(
             {"fact_id": fact.fact_id, "statement": fact.statement} for fact in facts
         ],
     }
-    return """Select exactly 20 distinct, explicitly supported concepts for this module.
-Each concept must be assessable in five genuinely different ways. Keep concepts semantically distinct and do not use presentation or provenance details as concepts.
+    return f"""Select exactly {CONCEPTS_PER_MODULE} distinct, explicitly supported concepts for this module.
+Each concept must be assessable in {CARDS_PER_CLUSTER} genuinely different ways. Keep concepts semantically distinct and do not use presentation or provenance details as concepts.
 
-For each concept, copy one or more fact_ids exactly from the input. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements. Choose exactly five distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
+For each concept, copy one or more fact_ids exactly from the input. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements. Choose exactly {CARDS_PER_CLUSTER} distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
 
-Return one JSON object whose top-level key is "concepts" and whose value is an array. The array must contain exactly 20 concept objects before its closing bracket. Every concept object has these keys: name (string), fact_ids (non-empty string array), and assessment_approaches (array of exactly five distinct allowed approaches). Do not treat a one-object shape illustration as a complete answer.
+Return one JSON object whose top-level key is "concepts" and whose value is an array. The array must contain exactly {CONCEPTS_PER_MODULE} concept objects before its closing bracket. Every concept object has these keys: name (string), fact_ids (non-empty string array), and assessment_approaches (array of exactly {CARDS_PER_CLUSTER} distinct allowed approaches). Do not treat a one-object shape illustration as a complete answer.
 
-Only if fewer than 20 distinct concepts are genuinely supported, return an object with the single key insufficient_content. Its value must specifically state how many concepts are supportable and why, using at least five words. Never copy generic placeholder wording into that field.
+Only if fewer than {CONCEPTS_PER_MODULE} distinct concepts are genuinely supported, return an object with the single key insufficient_content. Its value must specifically state how many concepts are supportable and why, using at least five words. Never copy generic placeholder wording into that field.
 
 INPUT JSON:
 """ + _json(payload)
@@ -108,11 +109,11 @@ def build_cluster_prompt(
         "module_number": identity.module_number,
         "concept": _concept_payload(concept),
     }
-    return """Generate exactly 5 assessment cards for the one supplied concept.
+    return f"""Generate exactly {CARDS_PER_CLUSTER} assessment cards for the one supplied concept.
 Use each listed assessment approach exactly once. Include at least one multiple-choice, one identification, and one true-false card; vary the other two types naturally. Every claim, correct answer, distractor judgment, explanation, and hint must be resolvable using only the supplied facts.
 
-Return this JSON shape with exactly 5 objects in cards:
-{"cards":[{"type":"multiple-choice","question":"...","correct_option":"...","wrong_option_1":"...","wrong_option_2":"...","wrong_option_3":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":2,"assessment_approach":"application"}]}
+Return this JSON shape with exactly {CARDS_PER_CLUSTER} objects in cards:
+{{"cards":[{{"type":"multiple-choice","question":"...","correct_option":"...","wrong_option_1":"...","wrong_option_2":"...","wrong_option_3":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":2,"assessment_approach":"application"}}]}}
 
 Use empty strings for fields that the selected type requires to be empty. Use JSON null only where the type rules require null.
 
@@ -151,10 +152,10 @@ def build_grounding_review_prompt(
             for cluster in clusters
         ]
     }
-    return """Review these generated clusters against only their supplied facts. Flag a cluster if any card contains an unsupported claim, answer leakage, an invalid distractor, a misleading explanation, or insufficient variation among its five assessment approaches. Do not rewrite cards.
+    return f"""Review these generated clusters against only their supplied facts. Flag a cluster if any card contains an unsupported claim, answer leakage, an invalid distractor, a misleading explanation, or insufficient variation among its {CARDS_PER_CLUSTER} assessment approaches. Do not rewrite cards.
 
 Return only this JSON shape. Use an empty issues list when no defect exists:
-{"issues":[{"cluster":"valid UUID copied from input","reasons":["unsupported claim"]}]}
+{{"issues":[{{"cluster":"valid UUID copied from input","reasons":["unsupported claim"]}}]}}
 
 INPUT JSON:
 """ + _json(payload)

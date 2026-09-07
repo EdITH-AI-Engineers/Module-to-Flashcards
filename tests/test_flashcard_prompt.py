@@ -63,6 +63,7 @@ def test_system_prompt_defines_internal_json_contract_and_all_types():
     assert "return json only" in lowered
     assert all(name in SYSTEM_PROMPT for name in ("multiple-choice", "identification", "true-false"))
     assert "expalanation" in SYSTEM_PROMPT
+    assert "use 5 meaningfully different assessment approaches" in lowered
 
 
 def test_plan_prompt_serializes_relationships_without_provenance():
@@ -115,6 +116,7 @@ def test_grounding_review_includes_evidence_and_card_content():
     assert "binary | uses | base 2" in prompt
     assert "Binary uses base 2" in prompt
     assert '"issues"' in prompt
+    assert "among its 5 assessment approaches" in prompt
 
 
 def test_duplicate_review_excludes_answers_and_evidence():

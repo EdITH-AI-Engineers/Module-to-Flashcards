@@ -78,7 +78,7 @@ def test_pipeline_reports_major_generation_stages():
     assert messages[0] == "Planning 20 concepts..."
     assert "Generating cluster 1/20: Concept 1 topic1 alpha1 beta1" in messages
     assert "Generating cluster 20/20: Concept 20 topic20 alpha20 beta20" in messages
-    assert messages[-1] == "Generation complete."
+    assert messages[-1] == "100 flashcards generated (50 + 50)."
 
 
 def test_invalid_cluster_is_retried_with_validator_feedback():
@@ -94,6 +94,23 @@ def test_invalid_cluster_is_retried_with_validator_feedback():
 
     assert "expected exactly 5 cards" in backend.calls[2][1]
     assert "complete replacement" in backend.calls[2][1].lower()
+
+
+def test_overfull_cluster_is_retried_and_never_reaches_pipeline_result():
+    overfull = json.loads(cluster_json(1))
+    overfull["cards"].append(dict(overfull["cards"][0]))
+    responses = [plan_json(), json.dumps(overfull), cluster_json(1)]
+    responses.extend(cluster_json(index) for index in range(2, 21))
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert "expected exactly 5 cards, received 6" in backend.calls[2][1]
+    assert sum(len(cluster.cards) for cluster in clusters) == 100
 
 
 def test_invalid_plan_retry_omits_rejected_bulk_response():

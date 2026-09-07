@@ -141,8 +141,17 @@ def test_cards_parser_rejects_boolean_true_false_value():
 
 def test_concept_plan_requires_twenty_supported_concepts():
     raw, known = plan_json(count=1)
-    with pytest.raises(ValidationError, match="exactly 20 concepts"):
+    with pytest.raises(ValidationError, match="at least 20 concepts"):
         parse_concept_plan(raw, known)
+
+
+def test_concept_plan_trims_supported_overshoot_to_twenty():
+    raw, known = plan_json(count=24)
+
+    concepts = parse_concept_plan(raw, known)
+
+    assert len(concepts) == 20
+    assert concepts[-1].name == "Concept 20"
 
 
 def test_concept_plan_attaches_exact_fact_text_from_known_ids():

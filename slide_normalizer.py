@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import re
+import sys
 from typing import Any, Callable, Iterable, Protocol
 
 from structured_module import (
@@ -194,13 +195,19 @@ def _normalize_page(
     )
     feedback = ""
     last_error: Exception | None = None
-    for _ in range(attempts):
+    for attempt in range(1, attempts + 1):
         user_prompt = base_prompt + feedback
         try:
             raw = backend.complete(
                 SLIDE_SYSTEM_PROMPT,
                 user_prompt,
                 max_tokens=max_tokens,
+            )
+            print(
+                f"[slide-normalizer] slide {number} attempt "
+                f"{attempt}/{attempts} generated output:\n{raw}",
+                file=sys.stderr,
+                flush=True,
             )
             return _parse_page(
                 _extract_json_object(raw),
@@ -209,6 +216,12 @@ def _normalize_page(
             )
         except (ValueError, RuntimeError) as exc:
             last_error = exc
+            print(
+                f"[slide-normalizer] slide {number} attempt "
+                f"{attempt}/{attempts} rejected: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
             feedback = (
                 "\n\nYour previous JSON failed validation: "
                 f"{exc}. Return a corrected JSON object using the same source text."

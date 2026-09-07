@@ -78,14 +78,23 @@ def _concept_payload(concept: ConceptPlan) -> dict[str, object]:
 def build_concept_plan_prompt(
     identity: ModuleIdentity,
     facts: Sequence[GraphFact],
+    prior_concept_names: Sequence[str] = (),
 ) -> str:
-    payload = {
+    payload: dict[str, object] = {
         "course_code": identity.course_code,
         "module_number": identity.module_number,
         "graph_facts": [
             {"fact_id": fact.fact_id, "statement": fact.statement} for fact in facts
         ],
     }
+    overlap_guidance = ""
+    if prior_concept_names:
+        payload["previously_covered_concepts"] = list(prior_concept_names)
+        overlap_guidance = (
+            "\nAvoid selecting a concept that assesses the same underlying learning "
+            "point as any entry in previously_covered_concepts, even if phrased "
+            "differently. Prefer concepts distinctive to this module's own facts.\n"
+        )
     return """Select exactly 20 distinct, explicitly supported concepts for this module.
 Each concept must be assessable in five genuinely different ways. Keep concepts semantically distinct and do not use presentation or provenance details as concepts.
 
@@ -93,8 +102,13 @@ For each concept, copy one or more fact_ids exactly from the input. Do not copy 
 
 Return one JSON object whose top-level key is "concepts" and whose value is an array. The array must contain exactly 20 concept objects before its closing bracket. Every concept object has these keys: name (string), fact_ids (non-empty string array), and assessment_approaches (array of exactly five distinct allowed approaches). Do not treat a one-object shape illustration as a complete answer.
 
-Only if fewer than 20 distinct concepts are genuinely supported, return an object with the single key insufficient_content. Its value must specifically state how many concepts are supportable and why, using at least five words. Never copy generic placeholder wording into that field.
+Fill all twenty positions in this checklist before closing the concepts array:
+1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20.
+Do not stop after 11 or 12 objects. Do not add a 21st object. Each position must have a unique concept name.
+Use the JSON key "fact_ids" literally, with a normal underscore and no backslash. Every concept must copy at least one exact fact_id from graph_facts.
 
+Only if fewer than 20 distinct concepts are genuinely supported, return an object with the single key insufficient_content. Its value must specifically state how many concepts are supportable and why, using at least five words. Never copy generic placeholder wording into that field.
+""" + overlap_guidance + """
 INPUT JSON:
 """ + _json(payload)
 

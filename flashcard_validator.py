@@ -136,8 +136,10 @@ def parse_concept_plan(
     concepts_value = value.get("concepts")
     if not isinstance(concepts_value, list):
         raise ValidationError("concepts must be a JSON array")
-    if len(concepts_value) != 20:
-        raise ValidationError(f"expected exactly 20 concepts, received {len(concepts_value)}")
+    if len(concepts_value) < 20:
+        raise ValidationError(
+            f"expected at least 20 concepts, received {len(concepts_value)}"
+        )
 
     known = {fact.fact_id: fact.statement for fact in known_facts}
     results: list[ConceptPlan] = []
@@ -193,7 +195,7 @@ def parse_concept_plan(
 
     if errors:
         raise ValidationError(errors)
-    return tuple(results)
+    return tuple(results[:20])
 
 
 def _required_string(item: Mapping[str, Any], key: str, position: int) -> str:

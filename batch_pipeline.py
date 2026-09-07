@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
+import sys
 import tempfile
 import time
 from typing import Callable, Sequence
@@ -257,6 +258,7 @@ def _flashcard_stage(item: BatchItem, backend: object) -> Path | None:
     args = argparse.Namespace(**vars(item.args))
     args.graph = item.paths.graph_json
     args.output = item.paths.flashcards
+    args.course_corpus = item.paths.workspace.parent / "course_corpus.json"
     args.max_retries = item.args.attempts
     args.final_review = not item.args.skip_final_review
     args.smoke_test = False
@@ -329,6 +331,10 @@ def _run_stage(
     try:
         with loader(pending[0].item.args) as runtime:
             for state in pending:
+                print(
+                    f"[{state.item.filename}] Running {stage_name}...",
+                    flush=True,
+                )
                 start = (
                     dependencies.monotonic()
                     if state.remaining_seconds is not None
@@ -336,7 +342,7 @@ def _run_stage(
                 )
                 try:
                     try:
-                        stage(state.item, runtime)
+                        stage_result = stage(state.item, runtime)
                     finally:
                         if start is not None:
                             elapsed = dependencies.monotonic() - start
@@ -356,8 +362,26 @@ def _run_stage(
                             f"{stage_name} stage did not create a valid artifact: "
                             f"{_stage_output(state.item, stage_name)}"
                         )
+                    print(
+                        f"[{state.item.filename}] {stage_name} complete.",
+                        flush=True,
+                        )
+                    print(
+                        f"[{state.item.filename}] {stage_name} generated output: "
+                        f"{stage_result!r}",
+                        flush=True,
+                    )
                 except _STAGE_ERRORS as exc:
+                    print(
+                        f"[{state.item.filename}] {stage_name} failed: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                     _fail(state, str(exc))
+                    print(
+                        f"[{state.item.filename}] {stage_name} failed: {exc}",
+                        flush=True,
+                    )
     except _STAGE_ERRORS as exc:
         for state in states:
             if state.active and _has_remaining_work(state):

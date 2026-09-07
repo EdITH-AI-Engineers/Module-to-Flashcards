@@ -636,6 +636,9 @@ def test_production_flashcard_adapter_translates_review_settings(
     assert captured["backend"] is backend
     assert captured["args"]["graph"] == item.paths.graph_json
     assert captured["args"]["output"] == item.paths.flashcards
+    assert captured["args"]["course_corpus"] == (
+        item.paths.workspace.parent / "course_corpus.json"
+    )
     assert captured["args"]["max_retries"] == item.args.attempts
     assert captured["args"]["final_review"] is False
     assert captured["args"]["smoke_test"] is False

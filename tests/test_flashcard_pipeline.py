@@ -4,7 +4,7 @@ import json
 import pytest
 
 from flashcard_pipeline import FlashcardPipeline, GenerationError, PipelineConfig
-from flashcard_types import ModuleIdentity
+from flashcard_types import FlashcardDraft, ModuleIdentity
 from tests.factories import cluster_json, graph_facts, plan_json
 
 
@@ -109,7 +109,7 @@ def test_invalid_plan_retry_omits_rejected_bulk_response():
     pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
 
     retry_prompt = backend.calls[1][1]
-    assert "expected exactly 20 concepts" in retry_prompt
+    assert "expected at least 20 concepts" in retry_prompt
     assert '"rejected_candidate"' not in retry_prompt
 
 
@@ -138,6 +138,54 @@ def test_explicit_insufficient_content_stops_without_retries():
         pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
 
     assert len(backend.calls) == 1
+
+
+def test_prior_question_is_checked_without_current_module_clusters():
+    card = FlashcardDraft(
+        type="identification",
+        question="What term names the instruction cycle?",
+        correct_option="Instruction cycle",
+        wrong_option_1="",
+        wrong_option_2="",
+        wrong_option_3="",
+        is_true=None,
+        expalanation="The instruction cycle is the named process.",
+        hint="Think of the processor's repeated sequence.",
+        difficulty=1,
+        assessment_approach="recall",
+    )
+
+    errors = FlashcardPipeline._duplicate_errors(
+        (card,),
+        (),
+        ("What term names the instruction cycle?",),
+    )
+
+    assert errors == (
+        "card 1 duplicates a question from a previously generated module in this course",
+    )
+
+
+def test_pipeline_threads_prior_concepts_and_retries_prior_question_duplicate():
+    responses = [plan_json(), cluster_json(1), cluster_json(1, revision=1)]
+    responses.extend(cluster_json(index) for index in range(2, 21))
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+    )
+    duplicate_question = json.loads(cluster_json(1))["cards"][0]["question"]
+
+    pipeline.run(
+        ModuleIdentity("CPE0021", "2"),
+        graph_facts(),
+        prior_concept_names=("Earlier concept",),
+        prior_questions=(duplicate_question,),
+    )
+
+    plan_payload = json.loads(backend.calls[0][1].split("INPUT JSON:\n", 1)[1])
+    assert plan_payload["previously_covered_concepts"] == ["Earlier concept"]
+    assert "previously generated module" in backend.calls[2][1]
 
 
 def test_final_review_uses_five_groups_and_one_global_pass():

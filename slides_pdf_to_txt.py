@@ -95,6 +95,13 @@ def run(
         dpi=args.ocr_dpi,
     )
     print(f"Extracted {len(pages)} slide(s) locally.", file=sys.stderr, flush=True)
+    for page in pages:
+        print(
+            f"[pdf-ingestion] slide {page.number}/{len(pages)} generated output "
+            f"using {page.method}:\n{page.text}",
+            file=sys.stderr,
+            flush=True,
+        )
 
     if backend is None:
         model_path = ensure_model(args.model_dir)
@@ -118,6 +125,11 @@ def run(
     content = render_structured_module(module)
     output = args.output or Path("structured_text") / f"{_safe_stem(args.pdf)}.txt"
     _atomic_write(output, content)
+    print(
+        f"[slide-pipeline] generated structured module: {output.resolve()}\n{content}",
+        file=sys.stderr,
+        flush=True,
+    )
     return output
 
 

@@ -1,9 +1,11 @@
+import json
 from pathlib import Path
 import json
 
 import pytest
 
 import main
+from tests.factories import plan_json
 
 
 def test_course_corpus_round_trip_is_atomic_and_deduplicated(tmp_path):
@@ -98,6 +100,51 @@ def test_run_writes_pipeline_result(tmp_path, monkeypatch, valid_clusters):
 
     assert result == output_path
     assert output_path.read_text(encoding="utf-8").startswith("Module 1.1\n")
+
+
+def test_exhausted_bad_card_counts_do_not_create_output(tmp_path):
+    graph_path = tmp_path / "graph.json"
+    graph_path.write_text(
+        json.dumps(
+            {
+                "metadata": {},
+                "nodes": [],
+                "edges": [
+                    {
+                        "id": f"e{index}",
+                        "subject": f"subject{index}",
+                        "relation": "relates to",
+                        "object": f"object{index}",
+                    }
+                    for index in range(1, 21)
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "cards.txt"
+
+    class UnderfullBackend:
+        def __init__(self):
+            self.responses = iter((plan_json(), '{"cards": []}', '{"cards": []}', '{"cards": []}'))
+
+        def complete(self, system, user, *, max_tokens):
+            return next(self.responses)
+
+    args = main.parse_args(
+        [
+            str(graph_path),
+            "--course-code", "CPE0021",
+            "--module-number", "1",
+            "--output", str(output_path),
+            "--skip-final-review",
+        ]
+    )
+
+    with pytest.raises(main.GenerationError, match="expected exactly 5 cards"):
+        main.run(args, backend=UnderfullBackend())
+
+    assert not output_path.exists()
 
 
 def test_run_reuses_injected_backend(tmp_path, monkeypatch, valid_clusters):

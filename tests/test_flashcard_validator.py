@@ -227,7 +227,7 @@ def test_cluster_requires_five_distinct_assessment_approaches():
 
     errors = validate_cluster(tuple(values), valid_concept())
 
-    assert any("five distinct assessment approaches" in error for error in errors)
+    assert any("5 distinct assessment approaches" in error for error in errors)
 
 
 def test_cluster_requires_all_three_question_types():

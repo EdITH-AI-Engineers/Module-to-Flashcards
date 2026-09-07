@@ -239,6 +239,9 @@ It contains two labeled CSV blocks:
 - `Module 1.1`: ten complete clusters and 50 rows
 - `Module 1.2`: ten complete clusters and 50 rows
 
+The two module labels, two CSV headers, and blank separator are structural
+lines, not flashcards. Count the parsed CSV data rows in each block: 50 + 50.
+
 Every successful module contains 20 graph-supported concepts, five questions per concept, 20 UUID clusters, and exactly 100 questions. The program stops without writing partial output if it cannot validate those requirements.
 
 ## First-run model smoke test

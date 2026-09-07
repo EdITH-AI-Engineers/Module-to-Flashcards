@@ -1,18 +1,16 @@
 from __future__ import annotations
 
 import argparse
-import csv
 from dataclasses import dataclass
-import io
 from pathlib import Path
 import re
 import subprocess
 import sys
 import time
 from typing import Callable, Sequence
-from uuid import UUID
 
-from flashcard_csv import CSV_COLUMNS
+from flashcard_csv import parse_rendered_module
+from flashcard_types import ModuleIdentity
 from graph_input import GraphInputError, extract_graph_facts, load_graph
 from local_qwen import DEFAULT_N_CTX
 from structured_module import graph_ready_text, parse_module_metadata
@@ -238,57 +236,15 @@ def _valid_flashcards(
         text = path.read_text(encoding="utf-8-sig")
     except OSError:
         return False
-    first_label = f"Module {module_number}.1"
-    second_label = f"Module {module_number}.2"
-    lines = text.splitlines(keepends=True)
-    first_indexes = [
-        index
-        for index, line in enumerate(lines)
-        if line.rstrip("\r\n") == first_label
-    ]
-    second_indexes = [
-        index
-        for index, line in enumerate(lines)
-        if line.rstrip("\r\n") == second_label
-    ]
-    if (
-        first_indexes != [0]
-        or len(second_indexes) != 1
-        or second_indexes[0] <= first_indexes[0]
-    ):
+    try:
+        parse_rendered_module(
+            text,
+            ModuleIdentity(str(course_code or ""), str(module_number)),
+            validate_course_code=course_code is not None,
+        )
+    except ValueError:
         return False
-
-    def parse_block(block: str) -> list[list[str]] | None:
-        try:
-            rows = list(csv.reader(io.StringIO(block.strip("\r\n"), newline=""), strict=True))
-        except csv.Error:
-            return None
-        if not rows or tuple(rows[0]) != CSV_COLUMNS:
-            return None
-        data_rows = rows[1:]
-        if len(data_rows) != 50 or any(len(row) != len(CSV_COLUMNS) for row in data_rows):
-            return None
-        return data_rows
-
-    second_index = second_indexes[0]
-    first_rows = parse_block("".join(lines[1:second_index]))
-    second_rows = parse_block("".join(lines[second_index + 1 :]))
-    if first_rows is None or second_rows is None:
-        return False
-
-    rows = first_rows + second_rows
-    if len(rows) != 100 or any(row[12] != str(module_number) for row in rows):
-        return False
-    cluster_counts: dict[str, int] = {}
-    for row in rows:
-        if course_code is not None and row[11] != str(course_code):
-            return False
-        try:
-            cluster = str(UUID(row[10]))
-        except (AttributeError, ValueError):
-            return False
-        cluster_counts[cluster] = cluster_counts.get(cluster, 0) + 1
-    return len(cluster_counts) == 20 and all(count == 5 for count in cluster_counts.values())
+    return True
 
 
 def _invalidate_artifacts(paths: Sequence[Path]) -> None:

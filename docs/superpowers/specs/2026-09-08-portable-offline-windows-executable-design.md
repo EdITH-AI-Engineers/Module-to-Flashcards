@@ -1,8 +1,8 @@
 # Portable Offline Windows Executable Design
 
-**Status:** Approved in chat; awaiting written-spec review  
-**Date:** 2026-09-08  
-**Target release:** Windows 11 x64 portable directory for an NVIDIA GeForce RTX 5070 12 GB system
+- **Status:** Approved in chat; awaiting written-spec review
+- **Date:** 2026-09-08
+- **Target release:** Windows 11 x64 portable directory for an NVIDIA GeForce RTX 5070 12 GB system
 
 ## Context
 

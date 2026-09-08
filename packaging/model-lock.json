@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "qwen": {
+    "repo_id": "Qwen/Qwen2.5-3B-Instruct-GGUF",
+    "revision": "7dabda4d13d513e3e842b20f0d435c732f172cbe",
+    "filename": "qwen2.5-3b-instruct-q5_k_m.gguf",
+    "size": 2438740384,
+    "sha256": "2c63dde5f2c9ab1fd64d47dee2d34dade6ba9ff62442d1d20b5342310c982081"
+  },
+  "rebel": {
+    "repo_id": "Babelscape/rebel-large",
+    "revision": "44eb6cb4585df284ce6c4d6a7013f83fe473c052",
+    "allow_patterns": [
+      "config.json",
+      "model.safetensors",
+      "added_tokens.json",
+      "merges.txt",
+      "special_tokens_map.json",
+      "tokenizer.json",
+      "tokenizer_config.json",
+      "vocab.json"
+    ]
+  },
+  "tesseract": {
+    "version": "5.4.0.20240606",
+    "required_files": {
+      "tesseract.exe": "babb405f4366b480d02cd8ff2bac8d497170f6c1711ce6f3d5d8bf0fb7fa6ed9",
+      "tessdata/eng.traineddata": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
+    }
+  }
+}

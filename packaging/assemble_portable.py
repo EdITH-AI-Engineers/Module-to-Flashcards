@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import argparse
 from importlib import metadata
+import json
 from pathlib import Path
+from pathlib import PurePosixPath
 import shutil
-from typing import Iterable
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from portable_manifest import verify_manifest, write_manifest
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _VERSION_PACKAGES = (
     "fastapi",
     "huggingface-hub",
@@ -63,6 +68,50 @@ def _copy_license_files(source: Path, destination: Path, prefix: str) -> None:
                 shutil.copy2(candidate, destination / f"{prefix}-{candidate.name}")
 
 
+def _safe_declared_path(value: object, label: str) -> PurePosixPath:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a relative file path")
+    path = PurePosixPath(value.replace("\\", "/"))
+    if path.is_absolute() or ".." in path.parts or not path.parts or ":" in path.parts[0]:
+        raise ValueError(f"{label} must be a safe relative file path: {value}")
+    return path
+
+
+def _declared_model_files(repo_root: Path) -> tuple[PurePosixPath, tuple[PurePosixPath, ...]]:
+    lock_path = repo_root / "packaging" / "model-lock.json"
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        qwen = _safe_declared_path(lock["qwen"]["filename"], "Qwen filename")
+        rebel = tuple(
+            _safe_declared_path(item, "REBEL allow pattern")
+            for item in lock["rebel"]["allow_patterns"]
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ValueError(f"could not read asset declarations: {lock_path}") from exc
+    if len({item.as_posix().casefold() for item in rebel}) != len(rebel):
+        raise ValueError("REBEL asset declarations contain duplicate paths")
+    return qwen, rebel
+
+
+def _copy_declared_models(repo_root: Path, source: Path, destination: Path) -> None:
+    qwen, rebel_files = _declared_model_files(repo_root)
+    destination.mkdir()
+    qwen_source = source.joinpath(*qwen.parts)
+    if not qwen_source.is_file():
+        raise ValueError(f"staged Qwen model is missing: {qwen.as_posix()}")
+    shutil.copy2(qwen_source, destination.joinpath(*qwen.parts))
+
+    rebel_source = source / "rebel-large"
+    rebel_destination = destination / "rebel-large"
+    for relative in rebel_files:
+        source_file = rebel_source.joinpath(*relative.parts)
+        if not source_file.is_file():
+            raise ValueError(f"staged REBEL asset is missing: {relative.as_posix()}")
+        target = rebel_destination.joinpath(*relative.parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_file, target)
+
+
 def _manifest_assets(output: Path) -> tuple[Path, ...]:
     roots = (output / "models", output / "tesseract", output / "licenses")
     files = []
@@ -101,7 +150,7 @@ def assemble_portable(
     if output.exists():
         shutil.rmtree(output)
     shutil.copytree(frozen_app, output)
-    shutil.copytree(models_source, output / "models")
+    _copy_declared_models(repo_root, models_source, output / "models")
     shutil.copytree(tesseract_source, output / "tesseract")
 
     for relative in ("uploads", "pipeline_output", "temporary", "logs"):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import sys
 
 import pytest
@@ -61,10 +62,16 @@ def _fake_frozen_app(repo: Path) -> Path:
 def _fake_assets(repo: Path) -> Path:
     assets = repo / "packaging" / "assets"
     (assets / "models" / "rebel-large").mkdir(parents=True)
-    (assets / "models" / "qwen.gguf").write_bytes(b"qwen")
-    (assets / "models" / "rebel-large" / "config.json").write_text(
-        "{}", encoding="utf-8"
+    lock = _valid_lock()
+    (repo / "packaging" / "model-lock.json").write_text(
+        json.dumps(lock), encoding="utf-8"
     )
+    (assets / "models" / lock["qwen"]["filename"]).write_bytes(b"qwen")
+    for relative in lock["rebel"]["allow_patterns"]:
+        target = assets / "models" / "rebel-large" / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}", encoding="utf-8")
+    (assets / "models" / "unexpected-model.bin").write_bytes(b"unexpected")
     (assets / "tesseract" / "tessdata").mkdir(parents=True)
     (assets / "tesseract" / "tesseract.exe").write_bytes(b"ocr")
     (assets / "tesseract" / "tessdata" / "eng.traineddata").write_bytes(b"eng")
@@ -89,6 +96,7 @@ def test_assemble_copies_assets_and_writes_verifiable_manifest(tmp_path):
     assert (result / "ModuleToFlashcards.exe").is_file()
     assert (result / "runtime" / "python.dll").is_file()
     assert (result / "tesseract" / "tesseract.exe").is_file()
+    assert not (result / "models" / "unexpected-model.bin").exists()
     assert (result / "data" / "pipeline_output").is_dir()
     assert (result / "licenses" / "build-versions.txt").is_file()
 
@@ -118,3 +126,16 @@ def test_assemble_rejects_incomplete_frozen_application(tmp_path):
             frozen_app=frozen,
             assets=_fake_assets(repo),
         )
+
+
+def test_assemble_script_can_be_invoked_directly():
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "packaging" / "assemble_portable.py"), "--help"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Assemble the portable Windows bundle" in completed.stdout

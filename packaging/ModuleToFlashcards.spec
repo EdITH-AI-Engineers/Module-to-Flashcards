@@ -3,7 +3,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
 
 
-PROJECT_ROOT = Path(SPECPATH).resolve().parent.parent
+PROJECT_ROOT = Path(SPECPATH).resolve().parent
 hiddenimports = (
     collect_submodules("uvicorn")
     + collect_submodules("transformers")

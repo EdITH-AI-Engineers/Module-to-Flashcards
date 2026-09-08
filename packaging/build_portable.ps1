@@ -55,6 +55,11 @@ if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
 
 New-Item -ItemType Directory -Force -Path $BuildRoot, $DistRoot | Out-Null
 
+& $PythonExe -c "import fastapi, huggingface_hub, llama_cpp, PIL, pymupdf, pytesseract, sentencepiece, torch, transformers, uvicorn"
+if ($LASTEXITCODE -ne 0) {
+    throw "Runtime dependency preflight failed. Install requirements.txt before building."
+}
+
 if (-not $SkipGpuPreflight) {
     & $PythonExe -c "import llama_cpp, torch; ok = torch.cuda.is_available() and llama_cpp.llama_supports_gpu_offload(); print('CUDA preflight:', ok); raise SystemExit(0 if ok else 1)"
     if ($LASTEXITCODE -ne 0) {

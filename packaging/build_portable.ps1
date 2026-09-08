@@ -100,7 +100,10 @@ Assert-ChildPath -Path $Archive -Parent $DistRoot -Label "Release archive"
 if (Test-Path -LiteralPath $Archive -PathType Leaf) {
     Remove-Item -LiteralPath $Archive -Force
 }
-Compress-Archive -LiteralPath $BundleDir -DestinationPath $Archive -CompressionLevel Optimal
+& $PythonExe (Join-Path $PSScriptRoot "create_archive.py") --source-dir $BundleDir --output $Archive
+if ($LASTEXITCODE -ne 0) {
+    throw "Portable archive creation failed."
+}
 
 Write-Host "Portable release: $BundleDir"
 Write-Host "Archive: $Archive"

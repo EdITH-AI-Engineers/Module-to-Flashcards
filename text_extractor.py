@@ -284,7 +284,12 @@ def save_outputs(graph: dict, output_dir: Path) -> None:
     print(f"CSV:  {csv_path.resolve()}")
 
 
-def load_runtime(model_name: str, device: str) -> RebelRuntime:
+def load_runtime(
+    model_name: str | Path,
+    device: str,
+    *,
+    local_files_only: bool = False,
+) -> RebelRuntime:
     try:
         import torch
         from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
@@ -299,8 +304,13 @@ def load_runtime(model_name: str, device: str) -> RebelRuntime:
         raise ValueError("CUDA was requested, but PyTorch cannot access a CUDA GPU")
 
     print(f"Loading {model_name} on {device} ...", flush=True)
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_name).to(device).eval()
+    load_options = {"local_files_only": True} if local_files_only else {}
+    tokenizer = AutoTokenizer.from_pretrained(model_name, **load_options)
+    model = (
+        AutoModelForSeq2SeqLM.from_pretrained(model_name, **load_options)
+        .to(device)
+        .eval()
+    )
     return RebelRuntime(tokenizer, model, device)
 
 

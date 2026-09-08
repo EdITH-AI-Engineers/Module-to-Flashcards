@@ -49,9 +49,26 @@ def _open_document(path: Path) -> Any:
 def _configure_tesseract(
     pytesseract_module: Any,
     *,
+    portable_executable: Path | None = None,
+    tessdata_dir: Path | None = None,
     candidates: tuple[Path, ...] | None = None,
     path_lookup: Callable[[str], str | None] = shutil.which,
 ) -> None:
+    if portable_executable is not None:
+        executable = Path(portable_executable)
+        data_dir = Path(tessdata_dir) if tessdata_dir is not None else None
+        if not executable.is_file():
+            raise PdfExtractionError(
+                f"bundled Tesseract executable not found: {executable}"
+            )
+        if data_dir is None or not data_dir.is_dir():
+            raise PdfExtractionError(
+                f"bundled Tesseract language data not found: {data_dir}"
+            )
+        pytesseract_module.pytesseract.tesseract_cmd = str(executable)
+        os.environ["TESSDATA_PREFIX"] = str(data_dir)
+        return
+
     if path_lookup("tesseract"):
         return
     if candidates is None:

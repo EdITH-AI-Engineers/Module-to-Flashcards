@@ -2,6 +2,8 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from local_qwen import (
     MODEL_FILENAME,
     MODEL_REPO,
@@ -43,6 +45,18 @@ def test_existing_model_is_reused(tmp_path, monkeypatch):
     monkeypatch.setattr("local_qwen.hf_hub_download", fail_download)
 
     assert ensure_model(tmp_path) == path
+
+
+def test_missing_bundled_model_never_downloads_when_download_is_disabled(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "local_qwen.hf_hub_download",
+        lambda **kwargs: pytest.fail("portable mode must never download a model"),
+    )
+
+    with pytest.raises(FileNotFoundError, match="bundled Qwen model"):
+        ensure_model(tmp_path, allow_download=False)
 
 
 def test_backend_passes_chat_messages_and_returns_content():

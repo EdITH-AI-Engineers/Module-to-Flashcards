@@ -211,7 +211,10 @@ def _configuration_error(items: Sequence[BatchItem]) -> str | None:
 
 @contextmanager
 def _qwen_loader(args: argparse.Namespace):
-    model_path = ensure_model(args.model_dir)
+    if getattr(args, "portable", False):
+        model_path = ensure_model(args.model_dir, allow_download=False)
+    else:
+        model_path = ensure_model(args.model_dir)
     backend = LocalQwenBackend(
         model_path,
         n_ctx=args.n_ctx,
@@ -226,7 +229,14 @@ def _qwen_loader(args: argparse.Namespace):
 
 @contextmanager
 def _rebel_loader(args: argparse.Namespace):
-    runtime = load_runtime(DEFAULT_MODEL, args.kg_device)
+    if getattr(args, "portable", False):
+        runtime = load_runtime(
+            args.rebel_model,
+            args.kg_device,
+            local_files_only=True,
+        )
+    else:
+        runtime = load_runtime(DEFAULT_MODEL, args.kg_device)
     try:
         yield runtime
     finally:
@@ -244,7 +254,7 @@ def _graph_stage(item: BatchItem, runtime: object) -> tuple[Path, Path]:
     args = argparse.Namespace(**vars(item.args))
     args.input = item.paths.structured_text
     args.output_dir = item.paths.graph_dir
-    args.model = DEFAULT_MODEL
+    args.model = getattr(item.args, "rebel_model", DEFAULT_MODEL)
     args.chunk_tokens = getattr(args, "chunk_tokens", 384)
     args.overlap_tokens = getattr(args, "overlap_tokens", 64)
     args.batch_size = item.args.kg_batch_size

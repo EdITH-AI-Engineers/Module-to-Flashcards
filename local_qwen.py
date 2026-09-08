@@ -11,13 +11,16 @@ MODEL_FILENAME = "qwen2.5-3b-instruct-q5_k_m.gguf"
 DEFAULT_N_CTX = 8192
 
 
-def ensure_model(model_dir: Path) -> Path:
+def ensure_model(model_dir: Path, *, allow_download: bool = True) -> Path:
     """Return the exact local Q5 model path, downloading it when absent."""
     model_dir = Path(model_dir)
     model_dir.mkdir(parents=True, exist_ok=True)
     target = model_dir / MODEL_FILENAME
     if target.is_file():
         return target
+
+    if not allow_download:
+        raise FileNotFoundError(f"bundled Qwen model not found: {target}")
 
     downloaded = hf_hub_download(
         repo_id=MODEL_REPO,

@@ -25,6 +25,8 @@ _RUNTIME_PATHS = build_paths(PROJECT_DIR, portable=False)
 UPLOAD_DIR = _RUNTIME_PATHS.uploads
 OUTPUT_ROOT = _RUNTIME_PATHS.outputs
 MODEL_DIR = _RUNTIME_PATHS.models
+REBEL_MODEL = _RUNTIME_PATHS.rebel_model
+PORTABLE_MODE = _RUNTIME_PATHS.portable
 _REQUEST_LOCK = threading.Lock()
 _REQUEST_LOCK_EXECUTOR = ThreadPoolExecutor(
     max_workers=1, thread_name_prefix="batch-request-lock"
@@ -40,11 +42,14 @@ app.add_middleware(
 
 def configure_api_storage(paths: PortablePaths) -> None:
     global PROJECT_DIR, _RUNTIME_PATHS, UPLOAD_DIR, OUTPUT_ROOT, MODEL_DIR
+    global REBEL_MODEL, PORTABLE_MODE
     PROJECT_DIR = paths.root
     _RUNTIME_PATHS = paths
     UPLOAD_DIR = paths.uploads
     OUTPUT_ROOT = paths.outputs
     MODEL_DIR = paths.models
+    REBEL_MODEL = paths.rebel_model
+    PORTABLE_MODE = paths.portable
 
 
 def module_number_from_filename(filename: str) -> str:
@@ -136,6 +141,8 @@ def pipeline_args(pdf: Path, course_code: str, module_number: str) -> Namespace:
         module_title=None,
         output_root=OUTPUT_ROOT,
         model_dir=MODEL_DIR,
+        rebel_model=REBEL_MODEL,
+        portable=PORTABLE_MODE,
         attempts=3,
         seed=42,
         n_gpu_layers=-1,

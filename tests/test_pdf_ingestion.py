@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import sys
 from types import SimpleNamespace
 
@@ -164,3 +165,23 @@ def test_tesseract_uses_standard_install_when_executable_is_not_on_path(tmp_path
     )
 
     assert module.pytesseract.tesseract_cmd == str(executable)
+
+
+def test_tesseract_uses_explicit_portable_runtime_before_path(tmp_path, monkeypatch):
+    executable = tmp_path / "tesseract" / "tesseract.exe"
+    tessdata = tmp_path / "tesseract" / "tessdata"
+    executable.parent.mkdir()
+    executable.write_bytes(b"exe")
+    tessdata.mkdir()
+    module = SimpleNamespace(pytesseract=SimpleNamespace(tesseract_cmd="tesseract"))
+    monkeypatch.delenv("TESSDATA_PREFIX", raising=False)
+
+    _configure_tesseract(
+        module,
+        portable_executable=executable,
+        tessdata_dir=tessdata,
+        path_lookup=lambda name: "C:/system/tesseract.exe",
+    )
+
+    assert module.pytesseract.tesseract_cmd == str(executable)
+    assert os.environ["TESSDATA_PREFIX"] == str(tessdata)

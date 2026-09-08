@@ -230,6 +230,41 @@ def test_production_loaders_release_their_owned_runtimes(monkeypatch, tmp_path):
     assert released == [runtime]
 
 
+def test_production_loaders_disable_network_for_portable_items(monkeypatch, tmp_path):
+    item = make_items(tmp_path, "one.pdf")[0]
+    item.args.portable = True
+    item.args.rebel_model = tmp_path / "models" / "rebel-large"
+    qwen_calls = []
+    rebel_calls = []
+    backend = type("Backend", (), {"close": lambda self: None})()
+    runtime = object()
+
+    monkeypatch.setattr(
+        batch_pipeline,
+        "ensure_model",
+        lambda model_dir, **kwargs: qwen_calls.append((model_dir, kwargs))
+        or tmp_path / "qwen.gguf",
+    )
+    monkeypatch.setattr(batch_pipeline, "LocalQwenBackend", lambda *a, **k: backend)
+    monkeypatch.setattr(
+        batch_pipeline,
+        "load_runtime",
+        lambda model, device, **kwargs: rebel_calls.append((model, device, kwargs))
+        or runtime,
+    )
+    monkeypatch.setattr(batch_pipeline, "release_runtime", lambda value: None)
+
+    with batch_pipeline.PRODUCTION_DEPENDENCIES.qwen_loader(item.args):
+        pass
+    with batch_pipeline.PRODUCTION_DEPENDENCIES.rebel_loader(item.args):
+        pass
+
+    assert qwen_calls == [(item.args.model_dir, {"allow_download": False})]
+    assert rebel_calls == [
+        (item.args.rebel_model, item.args.kg_device, {"local_files_only": True})
+    ]
+
+
 @pytest.mark.parametrize(
     ("failing_loader", "failure_point"),
     (

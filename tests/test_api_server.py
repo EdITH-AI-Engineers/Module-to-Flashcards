@@ -40,6 +40,8 @@ def test_configure_api_storage_routes_portable_work_into_adjacent_data(tmp_path)
         assert api_server.UPLOAD_DIR == tmp_path / "data" / "uploads"
         assert args.output_root == tmp_path / "data" / "pipeline_output"
         assert args.model_dir == tmp_path / "models"
+        assert args.rebel_model == tmp_path / "models" / "rebel-large"
+        assert args.portable is True
     finally:
         api_server.configure_api_storage(original)
 

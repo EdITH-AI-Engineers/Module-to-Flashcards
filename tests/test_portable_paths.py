@@ -14,6 +14,7 @@ from portable_paths import (
 def test_portable_paths_keep_models_and_generated_data_beside_executable(tmp_path):
     paths = build_paths(tmp_path, portable=True)
 
+    assert paths.portable is True
     assert paths.models == tmp_path / "models"
     assert paths.qwen_model == tmp_path / "models" / MODEL_FILENAME
     assert paths.rebel_model == tmp_path / "models" / "rebel-large"

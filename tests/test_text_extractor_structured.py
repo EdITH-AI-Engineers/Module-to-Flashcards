@@ -1,5 +1,7 @@
 import importlib.util
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,6 +20,54 @@ def load_extractor():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+def test_local_rebel_load_never_uses_external_model_cache(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeModel:
+        def to(self, device):
+            calls.append(("to", device))
+            return self
+
+        def eval(self):
+            calls.append(("eval",))
+            return self
+
+    class FakeLoader:
+        @classmethod
+        def from_pretrained(cls, model, **kwargs):
+            calls.append((cls.__name__, model, kwargs))
+            return FakeModel() if cls is FakeModelLoader else object()
+
+    class FakeTokenizerLoader(FakeLoader):
+        pass
+
+    class FakeModelLoader(FakeLoader):
+        pass
+
+    fake_torch = SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False))
+    fake_transformers = SimpleNamespace(
+        AutoTokenizer=FakeTokenizerLoader,
+        AutoModelForSeq2SeqLM=FakeModelLoader,
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+    model_dir = tmp_path / "rebel-large"
+
+    runtime = text_extractor.load_runtime(
+        model_dir,
+        "cpu",
+        local_files_only=True,
+    )
+
+    assert runtime.device == "cpu"
+    assert calls == [
+        ("FakeTokenizerLoader", model_dir, {"local_files_only": True}),
+        ("FakeModelLoader", model_dir, {"local_files_only": True}),
+        ("to", "cpu"),
+        ("eval",),
+    ]
 
 
 def structured_text():

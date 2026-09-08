@@ -27,6 +27,8 @@ OUTPUT_ROOT = _RUNTIME_PATHS.outputs
 MODEL_DIR = _RUNTIME_PATHS.models
 REBEL_MODEL = _RUNTIME_PATHS.rebel_model
 PORTABLE_MODE = _RUNTIME_PATHS.portable
+QWEN_GPU_LAYERS = -1
+KG_DEVICE = "auto"
 _REQUEST_LOCK = threading.Lock()
 _REQUEST_LOCK_EXECUTOR = ThreadPoolExecutor(
     max_workers=1, thread_name_prefix="batch-request-lock"
@@ -50,6 +52,14 @@ def configure_api_storage(paths: PortablePaths) -> None:
     MODEL_DIR = paths.models
     REBEL_MODEL = paths.rebel_model
     PORTABLE_MODE = paths.portable
+
+
+def configure_api_runtime(*, n_gpu_layers: int, kg_device: str) -> None:
+    global QWEN_GPU_LAYERS, KG_DEVICE
+    if kg_device not in {"auto", "cpu", "cuda"}:
+        raise ValueError(f"unsupported knowledge-graph device: {kg_device}")
+    QWEN_GPU_LAYERS = int(n_gpu_layers)
+    KG_DEVICE = kg_device
 
 
 def module_number_from_filename(filename: str) -> str:
@@ -145,12 +155,12 @@ def pipeline_args(pdf: Path, course_code: str, module_number: str) -> Namespace:
         portable=PORTABLE_MODE,
         attempts=3,
         seed=42,
-        n_gpu_layers=-1,
+        n_gpu_layers=QWEN_GPU_LAYERS,
         n_ctx=DEFAULT_N_CTX,
         ocr_min_chars=40,
         ocr_dpi=200,
         timeout=0,
-        kg_device="auto",
+        kg_device=KG_DEVICE,
         kg_batch_size=1,
         kg_num_beams=1,
         skip_final_review=True,

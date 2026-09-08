@@ -46,6 +46,16 @@ def test_configure_api_storage_routes_portable_work_into_adjacent_data(tmp_path)
         api_server.configure_api_storage(original)
 
 
+def test_configure_api_runtime_sets_pipeline_device_options():
+    try:
+        api_server.configure_api_runtime(n_gpu_layers=0, kg_device="cpu")
+        args = api_server.pipeline_args(Path("module.pdf"), "CPE", "1")
+        assert args.n_gpu_layers == 0
+        assert args.kg_device == "cpu"
+    finally:
+        api_server.configure_api_runtime(n_gpu_layers=-1, kg_device="auto")
+
+
 def test_process_files_saves_all_uploads_then_runs_one_batch(monkeypatch, tmp_path):
     uploads = [FakeUpload("CPE-M1.pdf"), FakeUpload("CPE-M2.pdf")]
     events = []

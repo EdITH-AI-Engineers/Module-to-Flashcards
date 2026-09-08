@@ -79,8 +79,9 @@ def _concept_payload(concept: ConceptPlan) -> dict[str, object]:
 def build_concept_plan_prompt(
     identity: ModuleIdentity,
     facts: Sequence[GraphFact],
+    prior_concept_names: Sequence[str] = (),
 ) -> str:
-    payload = {
+    payload: dict[str, object] = {
         "course_code": identity.course_code,
         "module_number": identity.module_number,
         "graph_facts": [
@@ -96,6 +97,8 @@ Return one JSON object whose top-level key is "concepts" and whose value is an a
 
 Only if fewer than {CONCEPTS_PER_MODULE} distinct concepts are genuinely supported, return an object with the single key insufficient_content. Its value must specifically state how many concepts are supportable and why, using at least five words. Never copy generic placeholder wording into that field.
 
+Only if fewer than 20 distinct concepts are genuinely supported, return an object with the single key insufficient_content. Its value must specifically state how many concepts are supportable and why, using at least five words. Never copy generic placeholder wording into that field.
+""" + overlap_guidance + """
 INPUT JSON:
 """ + _json(payload)
 

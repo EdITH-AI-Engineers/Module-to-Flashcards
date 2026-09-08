@@ -139,6 +139,10 @@ def test_build_stage_commands_use_current_python_and_absolute_artifacts(tmp_path
     assert commands[1].command[commands[1].command.index("--num-beams") + 1] == "1"
     assert Path(commands[2].command[1]).name == "main.py"
     assert str(paths.graph_json.resolve()) in commands[2].command
+    corpus_index = commands[2].command.index("--course-corpus") + 1
+    assert commands[2].command[corpus_index] == str(
+        (paths.workspace.parent / "course_corpus.json").resolve()
+    )
 
 
 def test_run_executes_all_stages_in_order_when_artifacts_are_missing(tmp_path):

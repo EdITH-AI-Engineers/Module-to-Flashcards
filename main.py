@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import tempfile
 from typing import Sequence
 
 from flashcard_csv import render_module, write_module_output
@@ -18,6 +19,63 @@ from graph_input import (
 from local_qwen import DEFAULT_N_CTX, LocalQwenBackend, ensure_model
 
 
+def load_course_corpus(course_dir: Path) -> tuple[list[str], list[str]]:
+    path = Path(course_dir) / "course_corpus.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            return [], []
+        concepts = value.get("concept_names", [])
+        questions = value.get("questions", [])
+        if not isinstance(concepts, list) or not isinstance(questions, list):
+            return [], []
+        return (
+            [item for item in concepts if isinstance(item, str)],
+            [item for item in questions if isinstance(item, str)],
+        )
+    except (OSError, json.JSONDecodeError, TypeError):
+        return [], []
+
+
+def append_course_corpus(
+    course_dir: Path,
+    concept_names: Sequence[str],
+    questions: Sequence[str],
+) -> None:
+    course_dir = Path(course_dir)
+    existing_concepts, existing_questions = load_course_corpus(course_dir)
+    merged_concepts = list(dict.fromkeys((*existing_concepts, *concept_names)))
+    merged_questions = list(dict.fromkeys((*existing_questions, *questions)))
+    path = course_dir / "course_corpus.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            delete=False,
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        ) as handle:
+            temporary_path = Path(handle.name)
+            json.dump(
+                {
+                    "concept_names": merged_concepts,
+                    "questions": merged_questions,
+                },
+                handle,
+                ensure_ascii=False,
+                indent=2,
+            )
+            handle.write("\n")
+        temporary_path.replace(path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -29,6 +87,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--course-code", help="exact course code")
     parser.add_argument("--module-number", help="exact module number")
     parser.add_argument("--output", type=Path, help="output text file")
+    parser.add_argument(
+        "--course-corpus",
+        type=Path,
+        help="per-course corpus JSON path for cross-module deduplication",
+    )
     parser.add_argument(
         "--model-dir",
         type=Path,
@@ -105,6 +168,20 @@ def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path
             raise RuntimeError("Qwen smoke test returned an unexpected JSON value")
         return None
 
+    output = args.output or Path("flashcards") / f"module_{identity.module_number}.txt"
+    course_dir = (
+        Path(args.course_corpus).parent
+        if getattr(args, "course_corpus", None)
+        else output.parent.parent
+    )
+    prior_concept_names, prior_questions = load_course_corpus(course_dir)
+    print(
+        f"[flashcard-pipeline] loaded course corpus from "
+        f"{(course_dir / 'course_corpus.json').resolve()}: "
+        f"{len(prior_concept_names)} concepts, {len(prior_questions)} questions",
+        file=sys.stderr,
+        flush=True,
+    )
     pipeline = FlashcardPipeline(
         backend,
         PipelineConfig(
@@ -113,10 +190,31 @@ def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path
         ),
         progress=lambda message: print(message, file=sys.stderr, flush=True),
     )
-    clusters = pipeline.run(identity, facts)
+    clusters = pipeline.run(
+        identity,
+        facts,
+        prior_concept_names=prior_concept_names,
+        prior_questions=prior_questions,
+    )
     content = render_module(identity, clusters)
-    output = args.output or Path("flashcards") / f"module_{identity.module_number}.txt"
     write_module_output(output, content)
+    print(
+        f"[flashcard-pipeline] generated module output: {output.resolve()}\n{content}",
+        file=sys.stderr,
+        flush=True,
+    )
+    append_course_corpus(
+        course_dir,
+        [cluster.concept.name for cluster in clusters],
+        [card.question for cluster in clusters for card in cluster.cards],
+    )
+    updated_concepts, updated_questions = load_course_corpus(course_dir)
+    print(
+        f"[flashcard-pipeline] updated course corpus: "
+        f"{len(updated_concepts)} concepts, {len(updated_questions)} questions",
+        file=sys.stderr,
+        flush=True,
+    )
     return output
 
 

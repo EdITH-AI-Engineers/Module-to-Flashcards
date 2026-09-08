@@ -182,6 +182,8 @@ def build_stage_commands(
         args.module_number,
         "--output",
         str(paths.flashcards.resolve()),
+        "--course-corpus",
+        str((paths.workspace.parent / "course_corpus.json").resolve()),
         "--model-dir",
         model_dir,
         "--max-retries",

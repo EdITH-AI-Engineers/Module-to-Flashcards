@@ -81,7 +81,22 @@ def test_plan_prompt_serializes_relationships_without_provenance():
     assert "slide" not in prompt.lower()
     assert '"concepts"' in prompt
     assert "array must contain exactly 20 concept objects" in prompt.lower()
+    assert "1, 2, 3, 4, 5" in prompt
+    assert "19, 20" in prompt
+    assert 'key "fact_ids" literally' in prompt
     assert "concise reason" not in prompt.lower()
+
+
+def test_plan_prompt_includes_prior_concepts_when_supplied():
+    prompt = build_concept_plan_prompt(
+        ModuleIdentity("CPE0021", "2"),
+        (GraphFact("e1", "binary | uses | base 2"),),
+        ("Binary base",),
+    )
+
+    payload = json.loads(prompt.split("INPUT JSON:\n", 1)[1])
+    assert payload["previously_covered_concepts"] == ["Binary base"]
+    assert "same underlying learning point" in prompt
 
 
 def test_cluster_prompt_contains_only_the_selected_concept_evidence():

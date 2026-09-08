@@ -208,7 +208,7 @@ def parse_concept_plan(
 
     if errors:
         raise ValidationError(errors)
-    return tuple(results)
+    return tuple(results[:20])
 
 
 def _required_string(item: Mapping[str, Any], key: str, position: int) -> str:

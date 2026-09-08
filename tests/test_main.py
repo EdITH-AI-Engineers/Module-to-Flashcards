@@ -1,10 +1,32 @@
 import json
 from pathlib import Path
+import json
 
 import pytest
 
 import main
 from tests.factories import plan_json
+
+
+def test_course_corpus_round_trip_is_atomic_and_deduplicated(tmp_path):
+    main.append_course_corpus(tmp_path, ("Concept A",), ("Question A?",))
+    main.append_course_corpus(
+        tmp_path,
+        ("Concept A", "Concept B"),
+        ("Question A?", "Question B?"),
+    )
+
+    assert main.load_course_corpus(tmp_path) == (
+        ["Concept A", "Concept B"],
+        ["Question A?", "Question B?"],
+    )
+    assert not list(tmp_path.glob(".course_corpus.json.*.tmp"))
+
+
+def test_load_course_corpus_tolerates_missing_and_corrupt_files(tmp_path):
+    assert main.load_course_corpus(tmp_path) == ([], [])
+    (tmp_path / "course_corpus.json").write_text("not json", encoding="utf-8")
+    assert main.load_course_corpus(tmp_path) == ([], [])
 
 
 def test_parse_args_defaults_to_8k_context():
@@ -58,7 +80,7 @@ def test_run_writes_pipeline_result(tmp_path, monkeypatch, valid_clusters):
         def __init__(self, backend, config, **kwargs):
             pass
 
-        def run(self, identity, facts):
+        def run(self, identity, facts, **kwargs):
             return valid_clusters
 
     monkeypatch.setattr(main, "FlashcardPipeline", FakePipeline)
@@ -144,7 +166,7 @@ def test_run_reuses_injected_backend(tmp_path, monkeypatch, valid_clusters):
         def __init__(self, backend, config, **kwargs):
             assert backend is shared_backend
 
-        def run(self, identity, facts):
+        def run(self, identity, facts, **kwargs):
             return valid_clusters
 
     monkeypatch.setattr(main, "FlashcardPipeline", FakePipeline)
@@ -158,6 +180,109 @@ def test_run_reuses_injected_backend(tmp_path, monkeypatch, valid_clusters):
     )
 
     assert main.run(args, backend=shared_backend) == output_path
+
+
+def test_run_threads_and_updates_course_corpus(tmp_path, monkeypatch, valid_clusters):
+    graph_path = tmp_path / "graph.json"
+    graph_path.write_text(
+        '{"metadata": {}, "nodes": [], "edges": '
+        '[{"id":"e1","subject":"a","relation":"is","object":"b"}]}',
+        encoding="utf-8",
+    )
+    course_dir = tmp_path / "CPE0021"
+    course_dir.mkdir()
+    corpus_path = course_dir / "course_corpus.json"
+    corpus_path.write_text(
+        json.dumps(
+            {
+                "concept_names": ["Earlier concept"],
+                "questions": ["What was asked earlier?"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_path = course_dir / "module-2" / "flashcards.txt"
+    captured = {}
+
+    class FakePipeline:
+        def __init__(self, backend, config, **kwargs):
+            pass
+
+        def run(self, identity, facts, **kwargs):
+            captured.update(kwargs)
+            return valid_clusters
+
+    monkeypatch.setattr(main, "FlashcardPipeline", FakePipeline)
+    args = main.parse_args(
+        [
+            str(graph_path),
+            "--course-code",
+            "CPE0021",
+            "--module-number",
+            "2",
+            "--output",
+            str(output_path),
+            "--course-corpus",
+            str(corpus_path),
+        ]
+    )
+
+    main.run(args, backend=object())
+
+    assert captured == {
+        "prior_concept_names": ["Earlier concept"],
+        "prior_questions": ["What was asked earlier?"],
+    }
+    concepts, questions = main.load_course_corpus(course_dir)
+    assert concepts[0] == "Earlier concept"
+    assert questions[0] == "What was asked earlier?"
+    assert len(concepts) == 21
+    assert len(questions) == 101
+
+
+def test_failed_output_write_does_not_update_course_corpus(
+    tmp_path, monkeypatch, valid_clusters
+):
+    graph_path = tmp_path / "graph.json"
+    graph_path.write_text(
+        '{"metadata": {}, "nodes": [], "edges": '
+        '[{"id":"e1","subject":"a","relation":"is","object":"b"}]}',
+        encoding="utf-8",
+    )
+    course_dir = tmp_path / "course"
+    corpus_path = course_dir / "course_corpus.json"
+
+    class FakePipeline:
+        def __init__(self, backend, config, **kwargs):
+            pass
+
+        def run(self, identity, facts, **kwargs):
+            return valid_clusters
+
+    monkeypatch.setattr(main, "FlashcardPipeline", FakePipeline)
+    monkeypatch.setattr(
+        main,
+        "write_module_output",
+        lambda output, content: (_ for _ in ()).throw(OSError("write failed")),
+    )
+    args = main.parse_args(
+        [
+            str(graph_path),
+            "--course-code",
+            "CPE0021",
+            "--module-number",
+            "1",
+            "--output",
+            str(course_dir / "module-1" / "flashcards.txt"),
+            "--course-corpus",
+            str(corpus_path),
+        ]
+    )
+
+    with pytest.raises(OSError, match="write failed"):
+        main.run(args, backend=object())
+
+    assert not corpus_path.exists()
 
 
 def test_default_output_uses_resolved_graph_module(tmp_path, monkeypatch, valid_clusters):
@@ -175,7 +300,7 @@ def test_default_output_uses_resolved_graph_module(tmp_path, monkeypatch, valid_
         def __init__(self, backend, config, **kwargs):
             pass
 
-        def run(self, identity, facts):
+        def run(self, identity, facts, **kwargs):
             return valid_clusters
 
     monkeypatch.setattr(main, "FlashcardPipeline", FakePipeline)

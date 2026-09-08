@@ -153,6 +153,10 @@ def extract_relations(chunks: list[dict], tokenizer, model, device: str, args):
 
         decoded_batch = tokenizer.batch_decode(generated, skip_special_tokens=False)
         for chunk, decoded in zip(batch, decoded_batch):
+            print(
+                f"[knowledge-graph] chunk {chunk['id']} generated output:\n{decoded}",
+                flush=True,
+            )
             for subject, relation, object_ in parse_rebel_output(decoded):
                 if not subject or not relation or not object_:
                     continue

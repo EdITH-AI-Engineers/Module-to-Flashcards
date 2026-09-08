@@ -70,7 +70,7 @@ class FlashcardPipeline:
     ) -> None:
         self.backend = backend
         self.config = config
-        self._progress = progress or (lambda _message: None)
+        self._progress = progress or (lambda message: print(message, flush=True))
 
     def _complete_with_retries(
         self,
@@ -89,12 +89,20 @@ class FlashcardPipeline:
                 prompt,
                 max_tokens=max_tokens,
             )
+            self._progress(
+                f"[{label}] attempt {attempt}/{self.config.max_retries} "
+                f"generated output:\n{candidate}"
+            )
             try:
                 return parser(candidate)
             except InsufficientContentError as exc:
                 raise GenerationError(f"more content is required: {exc}") from exc
             except ValidationError as exc:
                 last_errors = exc.errors
+                self._progress(
+                    f"[{label}] attempt {attempt}/{self.config.max_retries} "
+                    f"rejected: {' | '.join(last_errors)}"
+                )
                 rejected = candidate if include_rejected_candidate else None
                 prompt = build_retry_prompt(original_prompt, rejected, last_errors)
                 if attempt < self.config.max_retries:
@@ -113,6 +121,7 @@ class FlashcardPipeline:
     def _duplicate_errors(
         cards: Sequence[FlashcardDraft],
         existing: Sequence[FlashcardCluster],
+        prior_questions: Sequence[str] = (),
     ) -> tuple[str, ...]:
         errors: list[str] = []
         for left_index, left in enumerate(cards):
@@ -128,6 +137,12 @@ class FlashcardPipeline:
                             f"card {left_index + 1} duplicates card {prior_index} "
                             f"from concept {cluster.concept.name!r}"
                         )
+            for prior_question in prior_questions:
+                if are_near_duplicates(left.question, prior_question):
+                    errors.append(
+                        f"card {left_index + 1} duplicates a question from a "
+                        "previously generated module in this course"
+                    )
         return tuple(errors)
 
     def _generate_cards(
@@ -140,6 +155,7 @@ class FlashcardPipeline:
         review_feedback: Sequence[str] = (),
         rejected_cards: Sequence[FlashcardDraft] = (),
         cluster_id: str | None = None,
+        prior_questions: Sequence[str] = (),
     ) -> tuple[FlashcardDraft, ...]:
         base_prompt = build_cluster_prompt(identity, concept)
         if review_feedback:
@@ -154,8 +170,13 @@ class FlashcardPipeline:
 
         def parse_and_validate(raw: str) -> tuple[FlashcardDraft, ...]:
             cards = parse_cards(raw)
+            for card_position, card in enumerate(cards, start=1):
+                self._progress(
+                    f"[{label}] card {card_position}/{len(cards)} generated: "
+                    + json.dumps(asdict(card), ensure_ascii=False)
+                )
             errors = list(validate_cluster(cards, concept))
-            errors.extend(self._duplicate_errors(cards, existing))
+            errors.extend(self._duplicate_errors(cards, existing, prior_questions))
             if errors:
                 raise ValidationError(errors)
             return cards
@@ -227,6 +248,9 @@ class FlashcardPipeline:
         self,
         identity: ModuleIdentity,
         facts: Sequence[GraphFact],
+        *,
+        prior_concept_names: Sequence[str] = (),
+        prior_questions: Sequence[str] = (),
     ) -> tuple[FlashcardCluster, ...]:
         self._progress(f"Planning {CONCEPTS_PER_MODULE} concepts...")
         plan_prompt = build_concept_plan_prompt(identity, facts)
@@ -248,6 +272,7 @@ class FlashcardPipeline:
                 concept,
                 clusters,
                 label=f"concept {position} ({concept.name})",
+                prior_questions=prior_questions,
             )
             clusters.append(
                 FlashcardCluster(
@@ -287,6 +312,7 @@ class FlashcardPipeline:
                         review_feedback=reasons,
                         rejected_cards=old.cards,
                         cluster_id=old.cluster,
+                        prior_questions=prior_questions,
                     )
                     clusters[index] = replace(old, cards=cards)
 

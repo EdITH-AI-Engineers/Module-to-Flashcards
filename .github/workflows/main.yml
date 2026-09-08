@@ -50,13 +50,15 @@ jobs:
         id: tesseract
         shell: pwsh
         run: |
-          $exe = (Get-Command tesseract.exe -ErrorAction SilentlyContinue)
-          if (-not $exe) {
-            $exe = Get-ChildItem "C:\Program Files\Tesseract-OCR\tesseract.exe" -ErrorAction SilentlyContinue
-          }
-          if (-not $exe) { throw "tesseract.exe not found after install" }
-          $dir = Split-Path -Parent $exe.Source
+          $candidates = @(
+            (Get-Command tesseract.exe -ErrorAction SilentlyContinue).Source,
+            "C:\Program Files\Tesseract-OCR\tesseract.exe"
+          ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+          if (-not $candidates) { throw "tesseract.exe not found after install" }
+          $exePath = $candidates[0]
+          $dir = Split-Path -Parent $exePath
           echo "dir=$dir" >> $env:GITHUB_OUTPUT
+          Write-Host "Tesseract dir: $dir"
 
       # Installs the CUDA Toolkit (nvcc + libraries) onto the runner so we can
       # compile a CUDA-enabled extension, with no GPU hardware required for

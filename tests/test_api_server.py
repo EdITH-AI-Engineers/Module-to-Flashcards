@@ -7,6 +7,7 @@ import pytest
 
 import api_server
 from batch_pipeline import BatchResult
+from portable_paths import build_paths
 
 
 class FakeUpload:
@@ -27,6 +28,20 @@ class ClosingUpload(FakeUpload):
         self.closed = True
         if self.close_error:
             raise self.close_error
+
+
+def test_configure_api_storage_routes_portable_work_into_adjacent_data(tmp_path):
+    original = build_paths(api_server.PROJECT_DIR, portable=False)
+    portable = build_paths(tmp_path, portable=True)
+    try:
+        api_server.configure_api_storage(portable)
+
+        args = api_server.pipeline_args(Path("module.pdf"), "CPE", "1")
+        assert api_server.UPLOAD_DIR == tmp_path / "data" / "uploads"
+        assert args.output_root == tmp_path / "data" / "pipeline_output"
+        assert args.model_dir == tmp_path / "models"
+    finally:
+        api_server.configure_api_storage(original)
 
 
 def test_process_files_saves_all_uploads_then_runs_one_batch(monkeypatch, tmp_path):

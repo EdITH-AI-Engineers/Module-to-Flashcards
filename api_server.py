@@ -16,12 +16,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from batch_pipeline import BatchItem, run_batch
 from local_qwen import DEFAULT_N_CTX
 from pipeline import pipeline_paths
+from portable_paths import PortablePaths, build_paths
 from version import __version__
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-UPLOAD_DIR = PROJECT_DIR / "pipeline_uploads"
-OUTPUT_ROOT = PROJECT_DIR / "pipeline_output"
+_RUNTIME_PATHS = build_paths(PROJECT_DIR, portable=False)
+UPLOAD_DIR = _RUNTIME_PATHS.uploads
+OUTPUT_ROOT = _RUNTIME_PATHS.outputs
+MODEL_DIR = _RUNTIME_PATHS.models
 _REQUEST_LOCK = threading.Lock()
 _REQUEST_LOCK_EXECUTOR = ThreadPoolExecutor(
     max_workers=1, thread_name_prefix="batch-request-lock"
@@ -33,6 +36,15 @@ app.add_middleware(
     allow_methods=["POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+def configure_api_storage(paths: PortablePaths) -> None:
+    global PROJECT_DIR, _RUNTIME_PATHS, UPLOAD_DIR, OUTPUT_ROOT, MODEL_DIR
+    PROJECT_DIR = paths.root
+    _RUNTIME_PATHS = paths
+    UPLOAD_DIR = paths.uploads
+    OUTPUT_ROOT = paths.outputs
+    MODEL_DIR = paths.models
 
 
 def module_number_from_filename(filename: str) -> str:
@@ -123,7 +135,7 @@ def pipeline_args(pdf: Path, course_code: str, module_number: str) -> Namespace:
         module_number=module_number,
         module_title=None,
         output_root=OUTPUT_ROOT,
-        model_dir=PROJECT_DIR / "models",
+        model_dir=MODEL_DIR,
         attempts=3,
         seed=42,
         n_gpu_layers=-1,

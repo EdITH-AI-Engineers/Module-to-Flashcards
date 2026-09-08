@@ -6,6 +6,12 @@ models/
 flashcards/
 pipeline_output/
 pipeline_uploads/
+pipeline_temporary/
+pipeline_logs/
+data/
+dist/
+build/
+packaging/assets/
 structured_text/
 progress.json
 progress.log

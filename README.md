@@ -4,7 +4,85 @@ This project turns slide PDFs into structured text, extracts a relationship grap
 
 Current release: 1.1.0
 
-The flashcard generator uses the official Hugging Face repository `Qwen/Qwen2.5-3B-Instruct-GGUF` and the exact file `qwen2.5-3b-instruct-q5_k_m.gguf`. The first run downloads it into `models/`; later runs reuse that local Q5_K_M model. Qwen uses an 8K-token context window by default.
+## Portable Windows release
+
+The Windows release is a portable, fully offline, one-directory application for Windows 11 x64. It includes the Python runtime, Qwen Q5 model, REBEL model, Tesseract OCR, and required CUDA libraries. The complete extracted directory is approximately 8-14 GB; copying only `ModuleToFlashcards.exe` is not supported.
+
+Quick start:
+
+1. Extract the complete `ModuleToFlashcards` directory to a writable location.
+2. Keep `ModuleToFlashcards.exe`, `runtime`, `models`, `tesseract`, and `licenses` together.
+3. Double-click `ModuleToFlashcards.exe` and leave its console open.
+4. Wait for the `http://127.0.0.1:8000` readiness message.
+5. Use the existing browser extension. Results appear under `data/pipeline_output` beside the EXE.
+6. Press Ctrl+C in the console to stop the server.
+
+Input files must be PDF files. Export `.ppt` or `.pptx` presentations to PDF before selecting them in the extension. The packaged release neither downloads models nor uses a Hugging Face user cache; missing or modified bundle files cause startup to stop instead of accessing the network.
+
+The portable layout is:
+
+```text
+ModuleToFlashcards/
+  ModuleToFlashcards.exe
+  runtime/
+  models/
+    qwen2.5-3b-instruct-q5_k_m.gguf
+    rebel-large/
+    manifest.json
+  tesseract/
+    tesseract.exe
+    tessdata/
+  licenses/
+  data/
+    uploads/
+    pipeline_output/
+    temporary/
+    logs/
+```
+
+Run a full integrity and device check without starting the server:
+
+```powershell
+.\ModuleToFlashcards.exe --verify
+```
+
+Use another port when the extension is configured for it:
+
+```powershell
+.\ModuleToFlashcards.exe --port 8010
+```
+
+The launcher reports `GPU acceleration ready` only when PyTorch CUDA and llama.cpp GPU offload both work. Otherwise it prints `CPU fallback active` and runs both models on the CPU. A release intended for the RTX 5070 must report CUDA for both runtimes during final target-machine validation.
+
+For five typical text-heavy modules of about 20 slides each, allow roughly 15-40 minutes on the RTX 5070 12 GB after startup. OCR-heavy slides, very dense content, or model validation retries can extend that to 30-90 minutes or more. Processing is deliberately sequential to keep Qwen and REBEL from occupying the 12 GB VRAM at the same time. These are planning estimates; record the actual end-to-end time with a representative five-module batch before treating them as a performance guarantee.
+
+### Portable troubleshooting
+
+- Run `nvidia-smi` if the launcher selects CPU unexpectedly. Then confirm the packaged PyTorch and llama.cpp builds both support the installed NVIDIA driver.
+- A writable-folder error means the extracted directory does not permit creating `data`. Move the complete directory to a user-writable location such as Documents.
+- If port 8000 belongs to another program, close that program or start with `--port 8010` and set the extension to the same port. A healthy copy of the same application is detected and reused.
+- An integrity error names the missing, resized, or modified bundled file. Re-extract the entire release; do not download a replacement model into the bundle manually.
+- Startup failures are recorded in `data/logs/startup-YYYYMMDD-HHMMSS-ffffff.log` when that directory is writable.
+
+### Build the portable release
+
+Maintainer builds require Windows x64, Python 3.11 or 3.12, the project dependencies, the pinned PyInstaller dependency, a CUDA-enabled PyTorch installation, a CUDA-enabled `llama-cpp-python` installation, internet access while staging locked models, and Tesseract 5.4.0.20240606. The produced release itself runs offline.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-build.txt
+.\.venv\Scripts\python.exe -c "import torch, llama_cpp; print(torch.cuda.is_available()); print(llama_cpp.llama_supports_gpu_offload())"
+powershell -ExecutionPolicy Bypass -File packaging/build_portable.ps1 -TesseractDir "C:\Program Files\Tesseract-OCR"
+```
+
+The build script validates `packaging/model-lock.json`, downloads the exact locked Qwen file and immutable REBEL snapshot into the ignored `packaging/assets` directory, validates the supplied portable Tesseract files, freezes the application, assembles and verifies `dist/ModuleToFlashcards`, and creates `dist/ModuleToFlashcards-1.1.0-windows-x64.zip`.
+
+Use `-SkipAssetPreparation` only when the locked assets are already staged. `-SkipGpuPreflight` is for CPU-hosted configuration checks and must not be used to label an archive GPU-ready. Never commit `packaging/assets`, `build`, `dist`, model files, runtime binaries, uploads, generated outputs, temporary data, or logs.
+
+## Python source installation
+
+The flashcard generator uses the official Hugging Face repository `Qwen/Qwen2.5-3B-Instruct-GGUF` and the exact file `qwen2.5-3b-instruct-q5_k_m.gguf`. In source mode, the first run downloads it into `models/`; later runs reuse that local Q5_K_M model. Qwen uses an 8K-token context window by default.
 
 The complete local sequence is:
 
@@ -304,4 +382,4 @@ The default tests never download or load the model:
 
 ## Privacy and output behavior
 
-After the first model download, graph processing and assessment generation run locally. The program sends only graph relationship triples to Qwen, excluding stored evidence chunks, slide numbers, filenames, and other provenance. It assembles the complete result in memory and replaces the destination atomically only after final validation succeeds.
+The portable release runs locally without any model download. In source mode, processing runs locally after the initial model downloads. The program sends only graph relationship triples to Qwen, excluding stored evidence chunks, slide numbers, filenames, and other provenance. It assembles the complete result in memory and replaces the destination atomically only after final validation succeeds.

@@ -33,7 +33,14 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    # Pinned to windows-2022 (not windows-latest) on purpose: CUDA Toolkit
+    # 12.4's installer only registers its MSBuild/CMake toolset integration
+    # for Visual Studio versions that existed when it shipped. windows-latest
+    # can point at a newer VS release CUDA 12.4 doesn't know about yet, which
+    # surfaces as CMake's "No CUDA toolset found" even though the toolkit
+    # itself installed correctly. windows-2022 ships VS2022, the toolset this
+    # CUDA version was actually built and tested against.
+    runs-on: windows-2022
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4

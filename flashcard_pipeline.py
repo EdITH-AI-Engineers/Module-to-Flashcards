@@ -253,7 +253,7 @@ class FlashcardPipeline:
         prior_questions: Sequence[str] = (),
     ) -> tuple[FlashcardCluster, ...]:
         self._progress(f"Planning {CONCEPTS_PER_MODULE} concepts...")
-        plan_prompt = build_concept_plan_prompt(identity, facts)
+        plan_prompt = build_concept_plan_prompt(identity, facts, prior_concept_names)
         concepts = self._complete_with_retries(
             plan_prompt,
             lambda raw: parse_concept_plan(raw, facts),

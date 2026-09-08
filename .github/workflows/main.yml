@@ -1,0 +1,125 @@
+name: Build portable Windows release (GPU-capable, EXPERIMENTAL)
+
+# ---------------------------------------------------------------------------
+# WHY THIS FILE IS SEPARATE FROM build-portable.yml:
+#
+# This build compiles llama-cpp-python from source with CUDA support for
+# several GPU generations at once (Turing/Ampere/Ada: sm_75, sm_80, sm_86,
+# sm_89 -- roughly RTX 20-series through RTX 40-series). torch also gets an
+# official CUDA wheel, which is well-tested and safe on GPU-less machines.
+#
+# The llama-cpp-python side is NOT well-tested here, for reasons worth
+# understanding before you rely on it:
+#   - This runner has no physical GPU, so nothing in this workflow can
+#     confirm the compiled binary actually offloads to a GPU correctly,
+#     or that it even *loads* without error on a machine with no NVIDIA
+#     driver installed at all. Community Windows CUDA wheels for this
+#     library have a documented history of crashing at runtime despite
+#     building successfully.
+#   - Multi-architecture builds are less common than single-architecture
+#     ones in the community wheels this was modeled on, so there's less
+#     of a track record to lean on.
+#
+# Treat the artifact from this workflow as a release candidate, not a
+# finished release. Validate it (see the checklist in the job summary
+# output) on at least one real GPU machine AND one real GPU-less machine
+# before rolling it out. If it fails on the GPU-less machine, fall back to
+# distributing build-portable.yml's CPU-only artifact to those devices and
+# keep this one only for machines you've confirmed a supported GPU on.
+# ---------------------------------------------------------------------------
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Tesseract OCR
+        run: choco install tesseract --version=5.4.0.20240606 -y --no-progress
+
+      - name: Locate Tesseract install directory
+        id: tesseract
+        shell: pwsh
+        run: |
+          $exe = (Get-Command tesseract.exe -ErrorAction SilentlyContinue)
+          if (-not $exe) {
+            $exe = Get-ChildItem "C:\Program Files\Tesseract-OCR\tesseract.exe" -ErrorAction SilentlyContinue
+          }
+          if (-not $exe) { throw "tesseract.exe not found after install" }
+          $dir = Split-Path -Parent $exe.Source
+          echo "dir=$dir" >> $env:GITHUB_OUTPUT
+
+      # Installs the CUDA Toolkit (nvcc + libraries) onto the runner so we can
+      # compile a CUDA-enabled extension, with no GPU hardware required for
+      # compilation itself -- only for actually running the result later.
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.19
+        id: cuda-toolkit
+        with:
+          cuda: "12.4.0"
+          method: "network"
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "visual_studio_integration"]'
+
+      - name: Create virtual environment and install base dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Install CUDA-enabled torch
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe -m pip install torch --index-url https://download.pytorch.org/whl/cu124
+
+      - name: Compile llama-cpp-python with multi-architecture CUDA support
+        shell: pwsh
+        env:
+          CMAKE_ARGS: "-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=75;80;86;89"
+          FORCE_CMAKE: "1"
+        run: |
+          .\.venv\Scripts\python.exe -m pip install llama-cpp-python --no-binary llama-cpp-python --force-reinstall --no-cache-dir
+
+      - name: Verify the compiled extension at least imports
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe -c "import llama_cpp; print('llama_cpp imported OK'); print('GPU offload compiled in:', llama_cpp.llama_supports_gpu_offload())"
+
+      - name: Build the portable bundle
+        shell: pwsh
+        env:
+          TESSERACT_DIR: ${{ steps.tesseract.outputs.dir }}
+        run: |
+          # SkipGpuPreflight is required here because this runner has no GPU to
+          # test against -- NOT because the build is confirmed CPU-only. See
+          # the warning banner at the top of this file.
+          powershell -ExecutionPolicy Bypass -File packaging/build_portable.ps1 `
+            -TesseractDir "$env:TESSERACT_DIR" `
+            -SkipGpuPreflight
+
+      - name: Upload the release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModuleToFlashcards-portable-windows-x64-GPU-CANDIDATE
+          path: dist/ModuleToFlashcards-*-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Print validation checklist
+        shell: pwsh
+        run: |
+          echo "## Before trusting this build" >> $env:GITHUB_STEP_SUMMARY
+          echo "1. Extract it on one machine WITH a supported NVIDIA GPU (RTX 20/30/40-series or equivalent, current driver)." >> $env:GITHUB_STEP_SUMMARY
+          echo "   Run ModuleToFlashcards.exe --verify, then run it normally and confirm it prints 'GPU acceleration ready'." >> $env:GITHUB_STEP_SUMMARY
+          echo "2. Extract it separately on one machine with NO NVIDIA GPU at all." >> $env:GITHUB_STEP_SUMMARY
+          echo "   Confirm it still starts and prints 'CPU fallback active' -- it must not crash or fail a DLL load." >> $env:GITHUB_STEP_SUMMARY
+          echo "3. Only after both checks pass, distribute this build to your GPU-equipped devices." >> $env:GITHUB_STEP_SUMMARY
+          echo "   Keep using the plain build-portable.yml artifact for anything unconfirmed or GPU-less." >> $env:GITHUB_STEP_SUMMARY

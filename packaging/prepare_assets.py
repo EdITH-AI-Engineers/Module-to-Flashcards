@@ -5,10 +5,17 @@ import json
 from pathlib import Path
 import re
 import shutil
+import sys
 from typing import Any, Callable, Mapping
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from portable_manifest import sha256_file
+
+
 LOCK_PATH = Path(__file__).with_name("model-lock.json")
 ASSETS_DIR = Path(__file__).with_name("assets")
 _REVISION_PATTERN = re.compile(r"[0-9a-f]{40}")
@@ -94,8 +101,6 @@ def load_model_lock(path: Path = LOCK_PATH) -> Mapping[str, Any]:
 
 
 def _sha256(path: Path) -> str:
-    from portable_manifest import sha256_file
-
     return sha256_file(path)
 
 

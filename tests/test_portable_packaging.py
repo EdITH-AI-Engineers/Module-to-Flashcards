@@ -139,3 +139,16 @@ def test_assemble_script_can_be_invoked_directly():
 
     assert completed.returncode == 0, completed.stderr
     assert "Assemble the portable Windows bundle" in completed.stdout
+
+
+def test_prepare_script_can_be_invoked_directly():
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "packaging" / "prepare_assets.py"), "--help"],
+        cwd=ROOT.parent,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Stage locked portable release assets" in completed.stdout

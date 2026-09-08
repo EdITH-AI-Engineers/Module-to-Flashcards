@@ -17,6 +17,7 @@ $FrozenDist = [IO.Path]::GetFullPath((Join-Path $BuildRoot "pyinstaller-dist"))
 $PyInstallerWork = [IO.Path]::GetFullPath((Join-Path $BuildRoot "pyinstaller-work"))
 $BundleDir = [IO.Path]::GetFullPath((Join-Path $DistRoot "ModuleToFlashcards"))
 $SpecPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "ModuleToFlashcards.spec"))
+Set-Location -LiteralPath $RepoRoot
 
 function Assert-ChildPath {
     param(

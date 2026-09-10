@@ -21,6 +21,9 @@ Use only the supplied graph facts as factual authority. Do not add outside knowl
 INTERNAL OUTPUT
 Return JSON only for every internal request. Do not use Markdown fences, CSV, headings, commentary, or text outside the requested JSON object. Use exactly the requested keys and value types. Preserve the required key spelling expalanation.
 
+CARD FIELD CONTRACT
+Every card, with no exceptions, must include all eleven fields: type, question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, is_true, expalanation, hint, difficulty, assessment_approach. Before returning JSON, verify every card object has exactly these eleven keys. If any card is missing a key, add it before responding.
+
 QUESTION QUALITY
 Write clear, authentic college-level assessment items. Assess terminology, distinctions, relationships, mechanisms, processes, causes, effects, classifications, applications, implications, conditions, limitations, or technical reasoning only when the supplied facts support them. Difficulty must come from the required thinking, never confusing wording. Do not mechanically convert a fact into a stem or reveal an answer through its full definition. Within a concept, use {CARDS_PER_CLUSTER} meaningfully different assessment approaches. Changes limited to wording, names, punctuation, order, or distractors are not distinct approaches.
 
@@ -37,27 +40,18 @@ Multiple-choice rules:
 Identification rules:
 - Supply one concise identifiable term, name, concept, classification, principle, process, figure, or title as correct_option.
 - The answer must be a short phrase, not a sentence or explanation.
-<<<<<<< HEAD
-- Include only correct_option and is_true for identification; wrong_option fields are not applicable.
-- Set is_true to null.
-=======
-- Set every wrong option to an empty string and is_true to null.
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
+- Set wrong_option_1, wrong_option_2, wrong_option_3 to empty strings and is_true to null.
 - Ask directly without embedding the answer or its full definition in the stem.
 
 True-false rules:
 - Write only a declarative statement in question.
-<<<<<<< HEAD
-- Include only is_true for true-false; option fields are not applicable.
-=======
-- Set correct_option and every wrong option to an empty string.
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
+- For true-false cards, correct_option, wrong_option_1, wrong_option_2, and wrong_option_3 must ALL be empty strings. The only fields that carry the answer are is_true (0 or 1) and expalanation.
 - Set is_true to integer 1 for true or integer 0 for false.
 - Do not add True or False, labels, or evaluation instructions.
 - False items must state a plausible misconception or incorrect relationship that the supplied facts resolve.
 
 DIRECT STEMS
-For multiple-choice and identification, use a natural direct form beginning with What, Which, Who, Where, When, Why, How, or What term. Do not use wrappers such as According to, Based on, The material states, The following claim, Consider this statement, Evaluate this statement, Identify the concept associated with, or equivalents.
+For multiple-choice and identification, use a natural direct form beginning with What, Which, Who, Where, When, Why, How, or What term. Do not use wrappers such as According to, Based on, The material states, The following claim, Consider this statement, Evaluate this statement, Identify the concept associated with, or equivalents. Do not use vague subjective-comparison framings such as Which best describes, Which most accurately, Which is the best, or similar wording. Ask a direct single-fact question instead, such as What does Article 2 Section 13 promote regarding the youth?
 
 DIFFICULTY
 Use integer 1 only for recall or straightforward understanding. Use integer 2 for interpretation, comparison, classification, application, or distinction. Use integer 3 for analysis, complex application, multi-step reasoning, competing explanations, or an unfamiliar but fully supported scenario.
@@ -83,7 +77,6 @@ def _concept_payload(concept: ConceptPlan) -> dict[str, object]:
         "facts": list(concept.facts),
         "assessment_approaches": list(concept.assessment_approaches),
     }
-
 
 def build_concept_plan_prompt(
     identity: ModuleIdentity,
@@ -138,36 +131,38 @@ INPUT JSON:
 def build_cluster_prompt(
     identity: ModuleIdentity,
     concept: ConceptPlan,
-<<<<<<< HEAD
     module_facts: Sequence[GraphFact] = (),
-=======
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 ) -> str:
     payload = {
         "course_code": identity.course_code,
         "module_number": identity.module_number,
         "concept": _concept_payload(concept),
-<<<<<<< HEAD
         "module_facts": [
             {"fact_id": fact.fact_id, "statement": fact.statement}
             for fact in module_facts
         ],
     }
+    approach_order = "\n".join(
+        f"{index}. {approach}"
+        for index, approach in enumerate(concept.assessment_approaches, start=1)
+    )
     return f"""Generate exactly {CARDS_PER_CLUSTER} assessment cards for the one supplied concept.
-Use each listed assessment approach exactly once. Include at least one multiple-choice, one identification, and one true-false card; vary the other two types naturally. Every claim, correct answer, distractor judgment, explanation, and hint must be resolvable using only the supplied facts. Every wrong_option must be a plausible-but-incorrect term drawn from elsewhere in the provided module content; never invent a topic, term, or fact absent from the supplied facts.
+This cluster must produce exactly {CARDS_PER_CLUSTER} cards using these assessment approaches, in this exact order:
+{approach_order}
+Card N's assessment_approach field must equal the Nth item above. Use each listed approach exactly once. Include at least one multiple-choice, one identification, and one true-false card; vary the other two types naturally. Every claim, correct answer, distractor judgment, explanation, and hint must be resolvable using only the supplied facts. Every wrong_option must be a plausible-but-incorrect term drawn from elsewhere in the provided module content; never invent a topic, term, or fact absent from the supplied facts.
 
-Return this JSON shape with exactly {CARDS_PER_CLUSTER} objects in cards:
-{{"cards":[{{"type":"multiple-choice","question":"...","correct_option":"...","wrong_option_1":"...","wrong_option_2":"...","wrong_option_3":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":2,"assessment_approach":"application"}},{{"type":"identification","question":"...","correct_option":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":1,"assessment_approach":"recall"}},{{"type":"true-false","question":"...","is_true":1,"expalanation":"...","hint":"...","difficulty":2,"assessment_approach":"comparison"}}]}}
-=======
-    }
-    return f"""Generate exactly {CARDS_PER_CLUSTER} assessment cards for the one supplied concept.
-Use each listed assessment approach exactly once. Include at least one multiple-choice, one identification, and one true-false card; vary the other two types naturally. Every claim, correct answer, distractor judgment, explanation, and hint must be resolvable using only the supplied facts.
+Return this JSON shape with exactly {CARDS_PER_CLUSTER} objects in cards. Every object must contain exactly these eleven keys:
+type, question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, is_true, expalanation, hint, difficulty, assessment_approach
 
-Return this JSON shape with exactly {CARDS_PER_CLUSTER} objects in cards:
-{{"cards":[{{"type":"multiple-choice","question":"...","correct_option":"...","wrong_option_1":"...","wrong_option_2":"...","wrong_option_3":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":2,"assessment_approach":"application"}}]}}
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
+Example of a complete card:
+{{"type":"multiple-choice","question":"...","correct_option":"...","wrong_option_1":"...","wrong_option_2":"...","wrong_option_3":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":2,"assessment_approach":"recall"}}
 
-Use empty strings for fields that the selected type requires to be empty. Use JSON null only where the type rules require null.
+Example of a complete true-false card:
+{{"type":"true-false","question":"The stated relationship is supported.","correct_option":"","wrong_option_1":"","wrong_option_2":"","wrong_option_3":"","is_true":1,"expalanation":"The supplied facts support the relationship.","hint":"Check the relationship itself.","difficulty":1,"assessment_approach":"recall"}}
+
+For identification and true-false cards, keep all eleven keys and use empty strings for fields that do not apply.
+
+Use empty strings for fields that the selected type requires to be empty. Use JSON null only where the type rules require null. Before returning your answer, verify every card has all eleven keys and that difficulty and assessment_approach are present.
 
 INPUT JSON:
 """ + _json(payload)
@@ -181,7 +176,9 @@ def build_retry_prompt(
     payload: dict[str, object] = {"validation_errors": list(errors)}
     if candidate is not None:
         payload["rejected_candidate"] = candidate
-    return f"""The previous response failed validation. Return a complete replacement response for the original request, not a patch, explanation, or commentary. Correct every listed error without relaxing any original rule.
+    error_text = "; ".join(str(error) for error in errors)
+    return f"""The previous response was rejected: {error_text}
+Return a complete replacement for the full card set, not a patch, explanation, or commentary. Ensure every card includes all eleven required fields, especially difficulty and assessment_approach, and correct every listed error without relaxing any original rule.
 
 ORIGINAL REQUEST:
 {original_prompt}

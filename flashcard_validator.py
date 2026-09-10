@@ -5,6 +5,7 @@ import difflib
 import re
 import unicodedata
 import uuid
+import warnings
 from collections import Counter
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -44,6 +45,10 @@ BANNED_FRAMING = (
     "consider this statement",
     "evaluate this statement",
     "identify the concept associated with",
+    "which best describes",
+    "which most accurately",
+    "which is the best",
+    "which best explains",
 )
 PROVENANCE_PATTERNS = (
     r"\bknowledge graph\b",
@@ -72,7 +77,6 @@ CARD_FIELDS = {
     "difficulty",
     "assessment_approach",
 }
-<<<<<<< HEAD
 COMMON_CARD_FIELDS = {
     "type",
     "question",
@@ -85,8 +89,13 @@ TYPE_SPECIFIC_FIELDS = {
     "identification": {"correct_option", "is_true"},
     "true-false": {"is_true"},
 }
-=======
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
+DEFAULT_ASSESSMENT_APPROACHES = (
+    "recall",
+    "comparison",
+    "application",
+    "misconception detection",
+    "reversed reasoning",
+)
 
 
 class ValidationError(ValueError):
@@ -125,10 +134,6 @@ def _string_list(value: Any, label: str) -> tuple[str, ...]:
         raise ValidationError(f"{label} must contain only non-empty strings")
     return tuple(value)
 
-<<<<<<< HEAD
-=======
-
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 def _tolerant_string_list(value: Any, label: str) -> tuple[str, ...]:
     """Like _string_list, but also accepts a single comma-separated string
     in place of a proper JSON array — the local model sometimes collapses
@@ -153,7 +158,6 @@ def normalize_stem(value: str) -> str:
     return " ".join(value.split())
 
 
-<<<<<<< HEAD
 def _grounding_tokens(value: str) -> set[str]:
     stop_words = {"a", "an", "and", "or", "the", "of", "to", "in", "is", "are"}
     return {
@@ -163,8 +167,6 @@ def _grounding_tokens(value: str) -> set[str]:
     }
 
 
-=======
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 def _normalized(value: str) -> str:
     return normalize_stem(value)
 
@@ -262,37 +264,15 @@ def parse_concept_plan(
 
 def _required_string(item: Mapping[str, Any], key: str, position: int) -> str:
     value = item.get(key)
+    return _required_string_value(value, key, position)
+
+
+def _required_string_value(value: Any, key: str, position: int) -> str:
     if not isinstance(value, str):
         raise ValidationError(f"card {position} field {key!r} must be a string")
     return value
 
 
-<<<<<<< HEAD
-=======
-def _normalize_card_shape(item: Mapping[str, Any]) -> dict[str, Any]:
-    """Supply only empty fields that a card type cannot legitimately use."""
-    normalized = dict(item)
-    card_type = normalized.get("type")
-    if card_type == "identification":
-        for key in ("wrong_option_1", "wrong_option_2", "wrong_option_3"):
-            normalized.setdefault(key, "")
-    elif card_type == "true-false":
-        for key in (
-            "correct_option",
-            "wrong_option_1",
-            "wrong_option_2",
-            "wrong_option_3",
-        ):
-            value = normalized.get(key)
-            if key not in normalized or (
-                isinstance(value, str)
-                and value.strip().casefold() in {"true", "false"}
-            ):
-                normalized[key] = ""
-    return normalized
-
-
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
     value = _parse_json_object(raw)
     cards_value = value.get("cards")
@@ -303,7 +283,6 @@ def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
     for position, item in enumerate(cards_value, start=1):
         if not isinstance(item, Mapping):
             raise ValidationError(f"card {position} must be an object")
-<<<<<<< HEAD
         card_type = item.get("type")
         if not isinstance(card_type, str):
             raise ValidationError(f"card {position} field 'type' must be a string")
@@ -311,29 +290,38 @@ def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
         missing = sorted(required - set(item))
         if "expalanation" not in item and "explanation" not in item:
             missing.append("expalanation")
+        metadata_missing = set(missing) & {"difficulty", "assessment_approach"}
+        missing = [field for field in missing if field not in metadata_missing]
         if missing:
             raise ValidationError(f"card {position} is missing fields: {', '.join(missing)}")
+
+        if "difficulty" in metadata_missing:
+            warnings.warn(
+                f"card {position} missing difficulty; defaulting to 2",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        if "assessment_approach" in metadata_missing:
+            warnings.warn(
+                f"card {position} missing assessment_approach; defaulting to a standard approach",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
         is_true = item.get("is_true")
-=======
-        item = _normalize_card_shape(item)
-        missing = sorted(CARD_FIELDS - set(item))
-        if missing:
-            raise ValidationError(f"card {position} is missing fields: {', '.join(missing)}")
-
-        is_true = item["is_true"]
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
         if is_true is not None and not (type(is_true) is int and is_true in (0, 1)):
             raise ValidationError(
                 f"card {position} is_true must be integer 0, integer 1, or null"
             )
-        difficulty = item["difficulty"]
+        difficulty = item.get("difficulty", 2)
         if type(difficulty) is not int:
             raise ValidationError(f"card {position} difficulty must be an integer")
+        assessment_approach = item.get("assessment_approach")
+        if assessment_approach is None:
+            assessment_approach = DEFAULT_ASSESSMENT_APPROACHES[(position - 1) % len(DEFAULT_ASSESSMENT_APPROACHES)]
 
         results.append(
             FlashcardDraft(
-<<<<<<< HEAD
                 type=card_type,
                 question=_required_string(item, "question", position),
                 correct_option=_required_string(item, "correct_option", position)
@@ -354,20 +342,10 @@ def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
                     "expalanation" if "expalanation" in item else "explanation",
                     position,
                 ),
-=======
-                type=_required_string(item, "type", position),
-                question=_required_string(item, "question", position),
-                correct_option=_required_string(item, "correct_option", position),
-                wrong_option_1=_required_string(item, "wrong_option_1", position),
-                wrong_option_2=_required_string(item, "wrong_option_2", position),
-                wrong_option_3=_required_string(item, "wrong_option_3", position),
-                is_true=is_true,
-                expalanation=_required_string(item, "expalanation", position),
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
                 hint=_required_string(item, "hint", position),
                 difficulty=difficulty,
-                assessment_approach=_required_string(
-                    item, "assessment_approach", position
+                assessment_approach=_required_string_value(
+                    assessment_approach, "assessment_approach", position
                 ),
             )
         )
@@ -393,10 +371,7 @@ def _contains_provenance(value: str) -> bool:
 def validate_cluster(
     cards: Sequence[FlashcardDraft],
     concept: ConceptPlan,
-<<<<<<< HEAD
     source_facts: Sequence[GraphFact] = (),
-=======
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 ) -> tuple[str, ...]:
     errors: list[str] = []
     if len(cards) != CARDS_PER_CLUSTER:
@@ -418,10 +393,11 @@ def validate_cluster(
         errors.append(
             f"cluster must use {CARDS_PER_CLUSTER} distinct assessment approaches"
         )
-    if set(approaches) != set(concept.assessment_approaches):
-        errors.append("cluster approaches must exactly match the planned assessment approaches")
+    if tuple(approaches) != tuple(concept.assessment_approaches):
+        errors.append(
+            "cluster approaches must match the planned assessment approaches in order"
+        )
 
-<<<<<<< HEAD
     if source_facts:
         grounded_terms = {
             token
@@ -447,8 +423,6 @@ def validate_cluster(
                         f"card {position} {option_name} is not grounded in supplied module facts"
                     )
 
-=======
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
     for position, card in enumerate(cards, start=1):
         prefix = f"card {position}"
         if card.type not in ALLOWED_TYPES:
@@ -540,7 +514,6 @@ def validate_cluster(
     return tuple(errors)
 
 
-<<<<<<< HEAD
 def _polarity_variant(left: str, right: str) -> bool:
     polarity = {"not", "never", "without", "except", "least", "most"}
     left_tokens = normalize_stem(left).split()
@@ -552,8 +525,6 @@ def _polarity_variant(left: str, right: str) -> bool:
     )
 
 
-=======
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 def are_near_duplicates(left: str, right: str) -> bool:
     normalized_left = normalize_stem(left)
     normalized_right = normalize_stem(right)
@@ -572,10 +543,7 @@ def are_near_duplicates(left: str, right: str) -> bool:
 
 def validate_module(
     clusters: Sequence[FlashcardCluster],
-<<<<<<< HEAD
     source_facts: Sequence[GraphFact] = (),
-=======
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 ) -> tuple[str, ...]:
     errors: list[str] = []
     if len(clusters) != CLUSTERS_PER_MODULE:
@@ -605,11 +573,7 @@ def validate_module(
 
     indexed_cards: list[tuple[int, int, FlashcardDraft]] = []
     for cluster_position, cluster in enumerate(clusters, start=1):
-<<<<<<< HEAD
         cluster_errors = validate_cluster(cluster.cards, cluster.concept, source_facts)
-=======
-        cluster_errors = validate_cluster(cluster.cards, cluster.concept)
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
         errors.extend(
             f"cluster {cluster_position}: {error}" for error in cluster_errors
         )

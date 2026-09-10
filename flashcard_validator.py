@@ -110,6 +110,23 @@ def _string_list(value: Any, label: str) -> tuple[str, ...]:
         raise ValidationError(f"{label} must contain only non-empty strings")
     return tuple(value)
 
+def _tolerant_string_list(value: Any, label: str) -> tuple[str, ...]:
+    """Like _string_list, but also accepts a single comma-separated string
+    in place of a proper JSON array — the local model sometimes collapses
+    a short list of tokens (fact IDs, approach names) into one string
+    instead of an actual array. Only use this for token-like fields with
+    no legitimate commas inside a single item; freeform text fields
+    (e.g. review reasons) must keep using the strict _string_list."""
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if trimmed.startswith("[") and trimmed.endswith("]"):
+            trimmed = trimmed[1:-1]
+        parts = [part.strip().strip("'\"") for part in trimmed.split(",")]
+        parts = [part for part in parts if part]
+        if parts:
+            value = parts
+    return _string_list(value, label)
+
 
 def normalize_stem(value: str) -> str:
     value = unicodedata.normalize("NFKC", value).casefold()

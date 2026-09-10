@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+<<<<<<< HEAD
 import difflib
+=======
+>>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 import gc
 import json
 import re
@@ -20,6 +23,7 @@ from structured_module import (
 
 DEFAULT_MODEL = "Babelscape/rebel-large"
 
+<<<<<<< HEAD
 CONTROLLED_RELATIONS = frozenset(
     {
         "defines",
@@ -78,6 +82,8 @@ LEGAL_KIND_ALIASES = {
     "resolution": "resolution",
 }
 
+=======
+>>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 
 @dataclass
 class RebelRuntime:
@@ -183,6 +189,7 @@ def parse_rebel_output(decoded: str) -> list[tuple[str, str, str]]:
     return triples
 
 
+<<<<<<< HEAD
 def normalize_relation(value: str) -> str | None:
     """Map REBEL wording to the small relation vocabulary used downstream."""
     normalized = re.sub(r"\s+", " ", value.replace("_", " ").strip().casefold())
@@ -265,6 +272,8 @@ def _chunk_evidence(chunk: dict, subject: str, object_: str) -> list[dict]:
     return evidence or [_evidence_record(chunk, text, chunk.get("slides", []))]
 
 
+=======
+>>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 def batches(items: list[dict], size: int) -> Iterable[list[dict]]:
     for start in range(0, len(items), size):
         yield items[start : start + size]
@@ -274,6 +283,7 @@ def canonical(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip().casefold()
 
 
+<<<<<<< HEAD
 def canonical_entity_key(value: str) -> str:
     normalized = canonical(value).replace("–", "-")
     identifier = LEGAL_IDENTIFIER.search(normalized)
@@ -426,6 +436,15 @@ def extract_relations(
     total_batches = (len(extraction_items) + args.batch_size - 1) // args.batch_size
 
     for batch_number, batch in enumerate(batches(extraction_items, args.batch_size), start=1):
+=======
+def extract_relations(chunks: list[dict], tokenizer, model, device: str, args):
+    import torch
+
+    collected: dict[tuple[str, str, str], dict] = {}
+    total_batches = (len(chunks) + args.batch_size - 1) // args.batch_size
+
+    for batch_number, batch in enumerate(batches(chunks, args.batch_size), start=1):
+>>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
         encoded = tokenizer(
             [item["text"] for item in batch],
             return_tensors="pt",
@@ -450,6 +469,7 @@ def extract_relations(
             for subject, relation, object_ in parse_rebel_output(decoded):
                 if not subject or not relation or not object_:
                     continue
+<<<<<<< HEAD
                 normalized_relation = normalize_relation(relation)
                 if normalized_relation is None:
                     print(
@@ -484,6 +504,23 @@ def extract_relations(
                 for evidence in _chunk_evidence(chunk, subject, object_):
                     if evidence not in collected[key]["evidence"]:
                         collected[key]["evidence"].append(evidence)
+=======
+                key = (canonical(subject), canonical(relation), canonical(object_))
+                if key not in collected:
+                    collected[key] = {
+                        "subject": subject,
+                        "relation": relation,
+                        "object": object_,
+                        "evidence": [],
+                    }
+                evidence = {
+                    "chunk_id": chunk["id"],
+                    "slides": chunk["slides"],
+                    "text": chunk["text"],
+                }
+                if evidence not in collected[key]["evidence"]:
+                    collected[key]["evidence"].append(evidence)
+>>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 
         print(f"Processed batch {batch_number}/{total_batches}", flush=True)
 
@@ -497,13 +534,20 @@ def build_graph(
     module_metadata: dict[str, str] | None = None,
     lesson_facts: Sequence[dict[str, object]] = (),
 ) -> dict:
+<<<<<<< HEAD
     triples = list(resolve_entity_aliases(sanitize_triples(triples)))
+=======
+>>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
     node_names: dict[str, str] = {}
     degrees: defaultdict[str, int] = defaultdict(int)
     for triple in triples:
         for field in ("subject", "object"):
             name = triple[field]
+<<<<<<< HEAD
             key = canonical_entity_key(name)
+=======
+            key = canonical(name)
+>>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
             node_names.setdefault(key, name)
             degrees[key] += 1
 
@@ -515,6 +559,7 @@ def build_graph(
     ]
     edges = []
     for index, triple in enumerate(triples, start=1):
+<<<<<<< HEAD
         edge = {
                 "id": f"e{index}",
                 "source": node_ids[canonical_entity_key(triple["subject"])],
@@ -529,6 +574,16 @@ def build_graph(
                 if isinstance(item, dict)
             )
         edges.append(edge)
+=======
+        edges.append(
+            {
+                "id": f"e{index}",
+                "source": node_ids[canonical(triple["subject"])],
+                "target": node_ids[canonical(triple["object"])],
+                **triple,
+            }
+        )
+>>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 
     metadata = {
         "source_file": source_file.name,
@@ -677,12 +732,16 @@ def run(
         print(f"Created {len(chunks)} overlapping chunks", flush=True)
 
         triples = extract_relations(
+<<<<<<< HEAD
             chunks,
             runtime.tokenizer,
             runtime.model,
             runtime.device,
             args,
             lesson_facts,
+=======
+            chunks, runtime.tokenizer, runtime.model, runtime.device, args
+>>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
         )
         graph = build_graph(
             triples,

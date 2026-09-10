@@ -37,13 +37,21 @@ Multiple-choice rules:
 Identification rules:
 - Supply one concise identifiable term, name, concept, classification, principle, process, figure, or title as correct_option.
 - The answer must be a short phrase, not a sentence or explanation.
+<<<<<<< HEAD
 - Include only correct_option and is_true for identification; wrong_option fields are not applicable.
 - Set is_true to null.
+=======
+- Set every wrong option to an empty string and is_true to null.
+>>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 - Ask directly without embedding the answer or its full definition in the stem.
 
 True-false rules:
 - Write only a declarative statement in question.
+<<<<<<< HEAD
 - Include only is_true for true-false; option fields are not applicable.
+=======
+- Set correct_option and every wrong option to an empty string.
+>>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 - Set is_true to integer 1 for true or integer 0 for false.
 - Do not add True or False, labels, or evaluation instructions.
 - False items must state a plausible misconception or incorrect relationship that the supplied facts resolve.
@@ -130,12 +138,16 @@ INPUT JSON:
 def build_cluster_prompt(
     identity: ModuleIdentity,
     concept: ConceptPlan,
+<<<<<<< HEAD
     module_facts: Sequence[GraphFact] = (),
+=======
+>>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 ) -> str:
     payload = {
         "course_code": identity.course_code,
         "module_number": identity.module_number,
         "concept": _concept_payload(concept),
+<<<<<<< HEAD
         "module_facts": [
             {"fact_id": fact.fact_id, "statement": fact.statement}
             for fact in module_facts
@@ -146,6 +158,14 @@ Use each listed assessment approach exactly once. Include at least one multiple-
 
 Return this JSON shape with exactly {CARDS_PER_CLUSTER} objects in cards:
 {{"cards":[{{"type":"multiple-choice","question":"...","correct_option":"...","wrong_option_1":"...","wrong_option_2":"...","wrong_option_3":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":2,"assessment_approach":"application"}},{{"type":"identification","question":"...","correct_option":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":1,"assessment_approach":"recall"}},{{"type":"true-false","question":"...","is_true":1,"expalanation":"...","hint":"...","difficulty":2,"assessment_approach":"comparison"}}]}}
+=======
+    }
+    return f"""Generate exactly {CARDS_PER_CLUSTER} assessment cards for the one supplied concept.
+Use each listed assessment approach exactly once. Include at least one multiple-choice, one identification, and one true-false card; vary the other two types naturally. Every claim, correct answer, distractor judgment, explanation, and hint must be resolvable using only the supplied facts.
+
+Return this JSON shape with exactly {CARDS_PER_CLUSTER} objects in cards:
+{{"cards":[{{"type":"multiple-choice","question":"...","correct_option":"...","wrong_option_1":"...","wrong_option_2":"...","wrong_option_3":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":2,"assessment_approach":"application"}}]}}
+>>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 
 Use empty strings for fields that the selected type requires to be empty. Use JSON null only where the type rules require null.
 

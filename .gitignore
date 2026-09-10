@@ -11,7 +11,10 @@ pipeline_logs/
 
 # Generated portable bundles are multi-gigabyte GitHub Release artifacts.
 dist/
+<<<<<<< HEAD
 tesseract/
+=======
+>>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 data/
 build/
 packaging/assets/

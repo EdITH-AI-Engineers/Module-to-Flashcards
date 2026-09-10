@@ -26,6 +26,22 @@ name: Build portable Windows release (GPU-capable, EXPERIMENTAL)
 # before rolling it out. If it fails on the GPU-less machine, fall back to
 # distributing build-portable.yml's CPU-only artifact to those devices and
 # keep this one only for machines you've confirmed a supported GPU on.
+#
+# NOTE on the DLL-loading steps below: a source build of llama-cpp-python
+# with CUDA does NOT reliably ship the CUDA runtime DLLs (cudart64_12.dll,
+# cublas64_12.dll, cublasLt64_12.dll) alongside the compiled llama.dll the
+# way a pre-built wheel does. Without them, `import llama_cpp` fails with
+# "Could not find module '...\llama.dll' (or one of its dependencies)" --
+# a DLL-dependency-resolution error, not a "no GPU present" error. This
+# happens at import time, before any GPU hardware is touched, so it is
+# NOT explained by this runner lacking a physical GPU. The steps below
+# diagnose the exact missing dependency and stage the CUDA runtime DLLs
+# next to llama.dll so both this verification step and (assuming
+# packaging/build_portable.ps1's PyInstaller collection already bundles
+# llama_cpp's lib/ directory, since it must already do so to ship
+# llama.dll itself) the final portable release have what they need.
+# CONFIRM the staged DLLs actually end up in dist/ -- this workflow does
+# not verify that on its own.
 # ---------------------------------------------------------------------------
 
 on:
@@ -98,6 +114,79 @@ jobs:
         run: |
           .\.venv\Scripts\python.exe -m pip install llama-cpp-python --no-binary llama-cpp-python --force-reinstall --no-cache-dir
 
+      # NEW: make sure the CUDA Toolkit's bin directory (which holds the
+      # cudart/cublas runtime DLLs, not just the dev-time nvcc/headers) is
+      # genuinely on PATH for this job. Jimver/cuda-toolkit is expected to
+      # do this itself, but making it explicit here removes ambiguity and
+      # gives us a clear log line to check if the later steps still fail.
+      - name: Confirm CUDA runtime directory is on PATH
+        shell: pwsh
+        run: |
+          $cudaPath = "${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+          if (-not $cudaPath) { $cudaPath = $env:CUDA_PATH }
+          if (-not $cudaPath) { throw "CUDA_PATH was not set by the CUDA Toolkit install step" }
+          $cudaBin = Join-Path $cudaPath "bin"
+          if (-not (Test-Path -LiteralPath $cudaBin)) {
+            throw "Expected CUDA bin directory not found: $cudaBin"
+          }
+          echo "$cudaBin" >> $env:GITHUB_PATH
+          Write-Host "CUDA bin directory: $cudaBin"
+          Write-Host "Runtime DLLs present there:"
+          Get-ChildItem -LiteralPath $cudaBin -Filter "cu*.dll" | Format-Table Name, Length
+
+      # NEW: reveal exactly what got installed and what llama.dll actually
+      # declares as dependencies, instead of guessing at the missing DLL.
+      - name: Inspect llama.dll and its declared dependencies
+        shell: pwsh
+        run: |
+          $libDir = ".venv\Lib\site-packages\llama_cpp\lib"
+          if (-not (Test-Path -LiteralPath $libDir)) {
+            throw "llama_cpp lib directory not found at $libDir -- build may not have installed correctly"
+          }
+          Write-Host "Contents of ${libDir}:"
+          Get-ChildItem -LiteralPath $libDir | Format-Table Name, Length
+
+          $llamaDll = Join-Path $libDir "llama.dll"
+          if (-not (Test-Path -LiteralPath $llamaDll)) {
+            throw "llama.dll not found in $libDir"
+          }
+
+          $dumpbin = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -products * -find "**\dumpbin.exe" | Select-Object -First 1
+          if ($dumpbin) {
+            Write-Host "Declared dependencies of llama.dll (via dumpbin):"
+            & $dumpbin /dependents $llamaDll
+          } else {
+            Write-Host "dumpbin.exe not found via vswhere; skipping dependency listing"
+          }
+
+      # NEW: stage the CUDA runtime DLLs next to llama.dll so it can resolve
+      # them regardless of PATH quirks in whatever process loads it later
+      # (this CI check, and -- pending confirmation against the packaged
+      # dist/ output -- the shipped portable release itself). The exact
+      # filenames below match CUDA 12.4; if the dumpbin output from the
+      # previous step names something different, update this list to match.
+      - name: Stage CUDA runtime DLLs alongside llama.dll
+        shell: pwsh
+        run: |
+          $cudaPath = "${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+          if (-not $cudaPath) { $cudaPath = $env:CUDA_PATH }
+          $cudaBin = Join-Path $cudaPath "bin"
+          $libDir = ".venv\Lib\site-packages\llama_cpp\lib"
+          $required = @(
+            "cudart64_12.dll",
+            "cublas64_12.dll",
+            "cublasLt64_12.dll"
+          )
+          foreach ($name in $required) {
+            $source = Join-Path $cudaBin $name
+            if (-not (Test-Path -LiteralPath $source)) {
+              throw "Required CUDA runtime DLL not found: $source -- check the dumpbin output from the previous step for the actual expected name"
+            }
+            Copy-Item -LiteralPath $source -Destination $libDir -Force
+            Write-Host "Copied $name into $libDir"
+          }
+
       - name: Verify the compiled extension at least imports
         shell: pwsh
         run: |
@@ -115,6 +204,29 @@ jobs:
             -TesseractDir "$env:TESSERACT_DIR" `
             -SkipGpuPreflight
 
+      # NEW: confirm the staged CUDA DLLs actually made it into the frozen
+      # dist output. If this fails, packaging/build_portable.ps1's
+      # PyInstaller collection is not sweeping up llama_cpp/lib the way the
+      # comment at the top of this file assumes, and that script needs a
+      # matching change to copy these DLLs into dist/ explicitly.
+      - name: Confirm CUDA runtime DLLs reached the packaged bundle
+        shell: pwsh
+        run: |
+          $distRoot = Get-ChildItem -Path "dist" -Directory | Select-Object -First 1
+          if (-not $distRoot) { throw "no dist/<AppDir> found after build" }
+          $required = @("cudart64_12.dll", "cublas64_12.dll", "cublasLt64_12.dll")
+          $missing = @()
+          foreach ($name in $required) {
+            $found = Get-ChildItem -Path $distRoot.FullName -Filter $name -Recurse -ErrorAction SilentlyContinue
+            if (-not $found) { $missing += $name }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Host "::warning::CUDA runtime DLLs missing from packaged bundle: $($missing -join ', ')"
+            Write-Host "packaging/build_portable.ps1 likely needs an explicit copy step for these -- do not treat this artifact as GPU-ready until fixed."
+          } else {
+            Write-Host "All required CUDA runtime DLLs found in the packaged bundle."
+          }
+
       - name: Upload the release candidate
         uses: actions/upload-artifact@v4
         with:
@@ -130,5 +242,7 @@ jobs:
           echo "   Run ModuleToFlashcards.exe --verify, then run it normally and confirm it prints 'GPU acceleration ready'." >> $env:GITHUB_STEP_SUMMARY
           echo "2. Extract it separately on one machine with NO NVIDIA GPU at all." >> $env:GITHUB_STEP_SUMMARY
           echo "   Confirm it still starts and prints 'CPU fallback active' -- it must not crash or fail a DLL load." >> $env:GITHUB_STEP_SUMMARY
-          echo "3. Only after both checks pass, distribute this build to your GPU-equipped devices." >> $env:GITHUB_STEP_SUMMARY
+          echo "3. Check the 'Confirm CUDA runtime DLLs reached the packaged bundle' step above for warnings." >> $env:GITHUB_STEP_SUMMARY
+          echo "   If it warned about missing DLLs, this candidate is not GPU-ready on a machine without CUDA Toolkit installed system-wide." >> $env:GITHUB_STEP_SUMMARY
+          echo "4. Only after all checks pass, distribute this build to your GPU-equipped devices." >> $env:GITHUB_STEP_SUMMARY
           echo "   Keep using the plain build-portable.yml artifact for anything unconfirmed or GPU-less." >> $env:GITHUB_STEP_SUMMARY

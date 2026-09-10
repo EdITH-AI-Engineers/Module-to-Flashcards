@@ -1,6 +1,6 @@
 # Python Codebase Cleanup and Artifact Reliability Design
 
-- **Status:** Approved in chat; awaiting written-spec review
+- **Status:** Approved; implementation plan written
 - **Date:** 2026-09-10
 - **Scope:** Behavior-preserving cleanup of the Python pipeline, with targeted fixes for stale normalized/graph artifacts and noisy concept-plan failures
 

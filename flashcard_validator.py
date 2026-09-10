@@ -110,6 +110,7 @@ def _string_list(value: Any, label: str) -> tuple[str, ...]:
         raise ValidationError(f"{label} must contain only non-empty strings")
     return tuple(value)
 
+
 def _tolerant_string_list(value: Any, label: str) -> tuple[str, ...]:
     """Like _string_list, but also accepts a single comma-separated string
     in place of a proper JSON array — the local model sometimes collapses
@@ -236,6 +237,29 @@ def _required_string(item: Mapping[str, Any], key: str, position: int) -> str:
     return value
 
 
+def _normalize_card_shape(item: Mapping[str, Any]) -> dict[str, Any]:
+    """Supply only empty fields that a card type cannot legitimately use."""
+    normalized = dict(item)
+    card_type = normalized.get("type")
+    if card_type == "identification":
+        for key in ("wrong_option_1", "wrong_option_2", "wrong_option_3"):
+            normalized.setdefault(key, "")
+    elif card_type == "true-false":
+        for key in (
+            "correct_option",
+            "wrong_option_1",
+            "wrong_option_2",
+            "wrong_option_3",
+        ):
+            value = normalized.get(key)
+            if key not in normalized or (
+                isinstance(value, str)
+                and value.strip().casefold() in {"true", "false"}
+            ):
+                normalized[key] = ""
+    return normalized
+
+
 def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
     value = _parse_json_object(raw)
     cards_value = value.get("cards")
@@ -246,6 +270,7 @@ def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
     for position, item in enumerate(cards_value, start=1):
         if not isinstance(item, Mapping):
             raise ValidationError(f"card {position} must be an object")
+        item = _normalize_card_shape(item)
         missing = sorted(CARD_FIELDS - set(item))
         if missing:
             raise ValidationError(f"card {position} is missing fields: {', '.join(missing)}")

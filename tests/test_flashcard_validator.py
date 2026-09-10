@@ -9,6 +9,7 @@ from flashcard_validator import (
     ValidationError,
     parse_cards,
     parse_concept_plan,
+    parse_review_issues,
     validate_cluster,
 )
 
@@ -139,6 +140,50 @@ def test_cards_parser_rejects_boolean_true_false_value():
         parse_cards(cards_json(tuple(values)))
 
 
+def test_cards_parser_supplies_omitted_empty_identification_options():
+    payload = json.loads(cards_json())
+    identification = payload["cards"][1]
+    identification.pop("wrong_option_1")
+    identification.pop("wrong_option_2")
+    identification.pop("wrong_option_3")
+
+    cards = parse_cards(json.dumps(payload))
+
+    assert cards[1].wrong_option_1 == ""
+    assert cards[1].wrong_option_2 == ""
+    assert cards[1].wrong_option_3 == ""
+
+
+def test_cards_parser_clears_conventional_true_false_option_labels():
+    payload = json.loads(cards_json())
+    true_false = payload["cards"][2]
+    true_false["wrong_option_1"] = "True"
+    true_false["wrong_option_2"] = "False"
+
+    cards = parse_cards(json.dumps(payload))
+
+    assert cards[2].correct_option == ""
+    assert cards[2].wrong_option_1 == ""
+    assert cards[2].wrong_option_2 == ""
+    assert cards[2].wrong_option_3 == ""
+
+
+def test_cards_parser_supplies_omitted_true_false_answer_options():
+    payload = json.loads(cards_json())
+    true_false = payload["cards"][2]
+    true_false.pop("correct_option")
+    true_false.pop("wrong_option_1")
+    true_false.pop("wrong_option_2")
+    true_false.pop("wrong_option_3")
+
+    cards = parse_cards(json.dumps(payload))
+
+    assert cards[2].correct_option == ""
+    assert cards[2].wrong_option_1 == ""
+    assert cards[2].wrong_option_2 == ""
+    assert cards[2].wrong_option_3 == ""
+
+
 def test_concept_plan_requires_twenty_supported_concepts():
     raw, known = plan_json(count=1)
     with pytest.raises(ValidationError, match="at least 20 concepts"):
@@ -161,6 +206,48 @@ def test_concept_plan_attaches_exact_fact_text_from_known_ids():
 
     assert concepts[0].fact_ids == ("e1",)
     assert concepts[0].facts == ("subject 1 | relates to | object 1",)
+
+
+def test_concept_plan_accepts_comma_separated_token_fields():
+    raw, known = plan_json()
+    payload = json.loads(raw)
+    payload["concepts"][0]["fact_ids"] = "e1,e2,e3"
+    payload["concepts"][0]["assessment_approaches"] = (
+        "recall,comparison,classification,application,scenario analysis"
+    )
+
+    concepts = parse_concept_plan(json.dumps(payload), known)
+
+    assert concepts[0].fact_ids == ("e1", "e2", "e3")
+    assert concepts[0].assessment_approaches == (
+        "recall",
+        "comparison",
+        "classification",
+        "application",
+        "scenario analysis",
+    )
+
+
+@pytest.mark.parametrize("value", (123, None, ""))
+def test_concept_plan_rejects_malformed_fact_id_scalars(value):
+    raw, known = plan_json()
+    payload = json.loads(raw)
+    payload["concepts"][0]["fact_ids"] = value
+
+    with pytest.raises(ValidationError, match="fact_ids must be a non-empty JSON array"):
+        parse_concept_plan(json.dumps(payload), known)
+
+
+def test_review_reason_with_a_comma_remains_one_freeform_string():
+    cluster = "00000000-0000-4000-8000-000000000001"
+    reason = "the option overlaps with another, and the explanation is unclear"
+
+    issues = parse_review_issues(
+        json.dumps({"issues": [{"cluster": cluster, "reasons": [reason]}]}),
+        {cluster},
+    )
+
+    assert issues[0].reasons == (reason,)
 
 
 def test_concept_plan_rejects_unknown_fact_id():

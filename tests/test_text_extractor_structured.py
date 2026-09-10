@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -139,6 +140,45 @@ def test_build_graph_propagates_structured_module_metadata(tmp_path):
     assert graph["metadata"]["source_file"] == "slides.pdf"
 
 
+def test_build_graph_includes_normalized_lesson_facts(tmp_path):
+    extractor = load_extractor()
+    lesson_facts = (
+        {
+            "id": "f1",
+            "statement": "A processor executes instructions.",
+            "slides": [1],
+            "kind": "knowledge_statement",
+            "topic": "Processor",
+        },
+    )
+
+    graph = extractor.build_graph(
+        [],
+        tmp_path / "structured_module.txt",
+        "Babelscape/rebel-large",
+        lesson_facts=lesson_facts,
+    )
+
+    assert graph["facts"] == list(lesson_facts)
+    assert graph["metadata"]["fact_count"] == 1
+
+
+def test_save_outputs_serializes_portable_model_path(tmp_path):
+    extractor = load_extractor()
+    model_path = tmp_path / "models" / "rebel-large"
+    graph = extractor.build_graph(
+        [],
+        tmp_path / "structured_module.txt",
+        model_path,
+    )
+    output_dir = tmp_path / "graph"
+
+    extractor.save_outputs(graph, output_dir)
+
+    saved = json.loads((output_dir / "knowledge_graph.json").read_text("utf-8"))
+    assert saved["metadata"]["model"] == str(model_path)
+
+
 def test_plain_text_input_remains_supported():
     extractor = load_extractor()
     plain = "Processor\r\n\r\nA processor executes instructions."
@@ -199,6 +239,11 @@ def test_run_reuses_injected_runtime(tmp_path, monkeypatch):
 
     assert json_path.is_file()
     assert csv_path.is_file()
+    saved_graph = json.loads(json_path.read_text(encoding="utf-8"))
+    assert saved_graph["metadata"]["fact_count"] == 1
+    assert saved_graph["facts"][0]["statement"] == (
+        "A processor contains an arithmetic logic unit."
+    )
     assert args.batch_size == 1
     assert args.num_beams == 1
 

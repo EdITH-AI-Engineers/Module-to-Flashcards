@@ -85,10 +85,22 @@ def build_concept_plan_prompt(
         "course_code": identity.course_code,
         "module_number": identity.module_number,
         "graph_facts": [
-            {"fact_id": fact.fact_id, "statement": fact.statement} for fact in facts
+            {
+                "fact_id": fact.fact_id,
+                "statement": fact.statement,
+                **({"topic": fact.topic} if fact.topic else {}),
+                **({"slides": list(fact.slides)} if fact.slides else {}),
+            }
+            for fact in facts
         ],
     }
     overlap_guidance = ""
+    context_guidance = ""
+    if any(fact.topic or fact.slides for fact in facts):
+        context_guidance = (
+            " The optional topic and slides fields provide context and provenance, "
+            "not additional facts."
+        )
     if prior_concept_names:
         payload["previously_covered_concepts"] = list(prior_concept_names)
         overlap_guidance = (
@@ -99,7 +111,7 @@ def build_concept_plan_prompt(
     return f"""Select exactly {CONCEPTS_PER_MODULE} distinct, explicitly supported concepts for this module.
 Each concept must be assessable in {CARDS_PER_CLUSTER} genuinely different ways. Keep concepts semantically distinct and do not use presentation or provenance details as concepts.
 
-For each concept, copy one or more fact_ids exactly from the input. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements. Choose exactly {CARDS_PER_CLUSTER} distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
+For each concept, copy one or more fact_ids exactly from the input. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements.{context_guidance} Choose exactly {CARDS_PER_CLUSTER} distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
 
 Return one JSON object whose top-level key is "concepts" and whose value is an array. The array must contain exactly {CONCEPTS_PER_MODULE} concept objects before its closing bracket. Every concept object has these keys: name (string), fact_ids (non-empty string array), and assessment_approaches (array of exactly {CARDS_PER_CLUSTER} distinct allowed approaches). Do not treat a one-object shape illustration as a complete answer.
 

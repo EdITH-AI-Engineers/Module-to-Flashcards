@@ -4,7 +4,7 @@ import json
 import pytest
 
 from flashcard_pipeline import FlashcardPipeline, GenerationError, PipelineConfig
-from flashcard_types import FlashcardDraft, ModuleIdentity
+from flashcard_types import FlashcardDraft, GraphFact, ModuleIdentity
 from tests.factories import cluster_json, graph_facts, plan_json
 
 
@@ -75,10 +75,38 @@ def test_pipeline_reports_major_generation_stages():
 
     pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
 
-    assert messages[0] == "Planning 20 concepts..."
+    assert messages[0] == "Planning 20 concepts from 20 grounded lesson facts..."
     assert "Generating cluster 1/20: Concept 1 topic1 alpha1 beta1" in messages
     assert "Generating cluster 20/20: Concept 20 topic20 alpha20 beta20" in messages
     assert messages[-1] == "100 flashcards generated (50 + 50)."
+
+
+def test_pipeline_balances_large_fact_set_across_slides_and_bounds_prompt():
+    facts = tuple(
+        GraphFact(
+            f"e{index}",
+            f"Grounded lesson fact {index} with enough detail.",
+            slides=((index - 1) % 3 + 1,),
+            topic=f"Topic {(index - 1) % 3 + 1}",
+        )
+        for index in range(1, 61)
+    )
+    backend = FakeBackend(
+        [plan_json()] + [cluster_json(index) for index in range(1, 21)]
+    )
+    messages = []
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(final_review=False),
+        progress=messages.append,
+    )
+
+    pipeline.run(ModuleIdentity("CPE0021", "1"), facts)
+
+    payload = json.loads(backend.calls[0][1].split("INPUT JSON:\n", 1)[1])
+    assert len(payload["graph_facts"]) == 50
+    assert {item["slides"][0] for item in payload["graph_facts"]} == {1, 2, 3}
+    assert messages[0] == "Planning 20 concepts from 50 grounded lesson facts..."
 
 
 def test_invalid_cluster_is_retried_with_validator_feedback():

@@ -10,7 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from structured_module import graph_ready_text, parse_module_metadata
+from structured_module import (
+    extract_lesson_facts,
+    graph_ready_text,
+    parse_module_metadata,
+)
 
 
 DEFAULT_MODEL = "Babelscape/rebel-large"
@@ -184,8 +188,9 @@ def extract_relations(chunks: list[dict], tokenizer, model, device: str, args):
 def build_graph(
     triples: list[dict],
     source_file: Path,
-    model_name: str,
+    model_name: str | Path,
     module_metadata: dict[str, str] | None = None,
+    lesson_facts: Sequence[dict[str, object]] = (),
 ) -> dict:
     node_names: dict[str, str] = {}
     degrees: defaultdict[str, int] = defaultdict(int)
@@ -215,9 +220,10 @@ def build_graph(
 
     metadata = {
         "source_file": source_file.name,
-        "model": model_name,
+        "model": str(model_name),
         "node_count": len(nodes),
         "edge_count": len(edges),
+        "fact_count": len(lesson_facts),
     }
     approved_metadata = {
         key: value
@@ -237,6 +243,7 @@ def build_graph(
         "metadata": metadata,
         "nodes": nodes,
         "edges": edges,
+        "facts": [dict(fact) for fact in lesson_facts],
     }
 
 
@@ -353,13 +360,20 @@ def run(
     try:
         source_text = args.input.read_text(encoding="utf-8-sig", errors="replace")
         text, module_metadata = prepare_input_text(source_text)
+        lesson_facts = extract_lesson_facts(source_text)
         chunks = make_chunks(text, runtime.tokenizer, args.chunk_tokens, args.overlap_tokens)
         print(f"Created {len(chunks)} overlapping chunks", flush=True)
 
         triples = extract_relations(
             chunks, runtime.tokenizer, runtime.model, runtime.device, args
         )
-        graph = build_graph(triples, args.input, args.model, module_metadata)
+        graph = build_graph(
+            triples,
+            args.input,
+            args.model,
+            module_metadata,
+            lesson_facts,
+        )
         save_outputs(graph, args.output_dir)
         return args.output_dir / "knowledge_graph.json", args.output_dir / "triples.csv"
     finally:

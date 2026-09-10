@@ -302,11 +302,17 @@ def normalize_document(
             )
         )
 
-    first = results[0]
+    def first_candidate(field: str) -> str | None:
+        for result in results:
+            value = getattr(result, field)
+            if value and str(value).strip().casefold() != NOT_SPECIFIED.casefold():
+                return str(value).strip()
+        return None
+
     return StructuredModule(
         course_code=course_code or NOT_SPECIFIED,
-        module_number=module_number or first.module_number or NOT_SPECIFIED,
-        module_title=module_title or first.module_title or NOT_SPECIFIED,
+        module_number=module_number or first_candidate("module_number") or NOT_SPECIFIED,
+        module_title=module_title or first_candidate("module_title") or NOT_SPECIFIED,
         source_file=source_file,
         slides=tuple(result.slide for result in results),
     )

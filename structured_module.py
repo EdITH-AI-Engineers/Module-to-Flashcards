@@ -15,6 +15,12 @@ _CONTROL_TAG = re.compile(
     flags=re.IGNORECASE,
 )
 _SECTION_TAG = re.compile(r"^\[(/?)([A-Z_]+)(?:\s+\d+)?\]$")
+_SLIDE_OPEN_TAG = re.compile(r"^\[SLIDE\s+(\d+)\]$", flags=re.IGNORECASE)
+_PRESENTATION_NOISE = re.compile(
+    r"^(?:(?:this|the|the first|the current|first)\s+(?:slide|page)\b|"
+    r"the module title\b)",
+    flags=re.IGNORECASE,
+)
 
 
 def _single_line(value: object, fallback: str = NOT_SPECIFIED) -> str:
@@ -184,6 +190,147 @@ def parse_module_metadata(text: str) -> dict[str, str]:
     return metadata
 
 
+def _lesson_fact_text(value: str) -> str | None:
+    text = re.sub(r"\s+", " ", value).strip()
+    if text.startswith("- "):
+        text = text[2:].strip()
+    if not _meaningful(text) or _PRESENTATION_NOISE.match(text):
+        return None
+    if len(text) < 12 or len(text.split()) < 3:
+        return None
+    return text
+
+
+def extract_lesson_facts(text: str) -> tuple[dict[str, object], ...]:
+    """Extract grounded lesson facts from normalized structured module text."""
+    metadata = parse_module_metadata(text)
+    if not metadata:
+        return ()
+
+    slides: list[dict[str, object]] = []
+    current_slide: dict[str, object] | None = None
+    current_section: str | None = None
+    included_sections = {"TITLE", "CONTENT", "DEFINITIONS", "KNOWLEDGE_STATEMENTS"}
+
+    for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").splitlines():
+        line = raw_line.strip()
+        slide_tag = _SLIDE_OPEN_TAG.fullmatch(line)
+        if slide_tag:
+            current_slide = {
+                "number": int(slide_tag.group(1)),
+                "TITLE": [],
+                "CONTENT": [],
+                "DEFINITIONS": [],
+                "KNOWLEDGE_STATEMENTS": [],
+            }
+            slides.append(current_slide)
+            current_section = None
+            continue
+        if line.casefold() == "[/slide]":
+            current_slide = None
+            current_section = None
+            continue
+
+        tag = _SECTION_TAG.fullmatch(line)
+        if tag:
+            closing, name = tag.groups()
+            current_section = None if closing else name
+            continue
+        if (
+            current_slide is None
+            or current_section not in included_sections
+            or not line
+        ):
+            continue
+        values = current_slide[current_section]
+        assert isinstance(values, list)
+        values.append(line)
+
+    module_title = metadata.get("module_title", "")
+    facts: list[dict[str, object]] = []
+    used_statements: set[str] = set()
+
+    def add_fact(
+        statement: str,
+        *,
+        slide_number: int,
+        kind: str,
+        topic: str,
+    ) -> None:
+        cleaned = _lesson_fact_text(statement)
+        if cleaned is None:
+            return
+        key = re.sub(r"[^\w]+", " ", cleaned, flags=re.UNICODE).strip().casefold()
+        if key in used_statements:
+            return
+        used_statements.add(key)
+        facts.append(
+            {
+                "id": f"f{len(facts) + 1}",
+                "statement": cleaned,
+                "slides": [slide_number],
+                "kind": kind,
+                "topic": topic,
+            }
+        )
+
+    for slide in slides:
+        slide_number = int(slide["number"])
+        title_values = slide["TITLE"]
+        assert isinstance(title_values, list)
+        title = next(
+            (
+                value
+                for raw_value in title_values
+                if _meaningful(value := re.sub(r"\s+", " ", str(raw_value)).strip())
+            ),
+            None,
+        )
+        topic = title or (
+            module_title if _meaningful(module_title) else f"Slide {slide_number}"
+        )
+
+        fact_count_before_slide = len(facts)
+        definition_values = slide["DEFINITIONS"]
+        assert isinstance(definition_values, list)
+        for raw_definition in definition_values:
+            definition = str(raw_definition)
+            if definition.startswith("- "):
+                definition = definition[2:].strip()
+            if " :: " not in definition:
+                continue
+            term, meaning = definition.split(" :: ", 1)
+            add_fact(
+                f"{term.strip()}: {meaning.strip()}",
+                slide_number=slide_number,
+                kind="definition",
+                topic=topic,
+            )
+
+        statement_values = slide["KNOWLEDGE_STATEMENTS"]
+        assert isinstance(statement_values, list)
+        for statement in statement_values:
+            add_fact(
+                str(statement),
+                slide_number=slide_number,
+                kind="knowledge_statement",
+                topic=topic,
+            )
+
+        if len(facts) == fact_count_before_slide:
+            content_values = slide["CONTENT"]
+            assert isinstance(content_values, list)
+            for statement in content_values:
+                add_fact(
+                    str(statement),
+                    slide_number=slide_number,
+                    kind="content",
+                    topic=topic,
+                )
+
+    return tuple(facts)
+
+
 def graph_ready_text(text: str) -> str:
     if not parse_module_metadata(text):
         return text.strip()
@@ -200,6 +347,13 @@ def graph_ready_text(text: str) -> str:
     }
     for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").splitlines():
         line = raw_line.strip()
+        slide_tag = _SLIDE_OPEN_TAG.fullmatch(line)
+        if slide_tag:
+            if output:
+                output.append("")
+            output.append(f"Slide {slide_tag.group(1)}")
+            current_section = None
+            continue
         tag = _SECTION_TAG.fullmatch(line)
         if tag:
             closing, name = tag.groups()

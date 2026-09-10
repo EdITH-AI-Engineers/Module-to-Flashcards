@@ -89,8 +89,10 @@ The complete local sequence is:
 1. PyMuPDF extracts each PDF slide's embedded text.
 2. Sparse or image-only slides use local Tesseract OCR.
 3. Qwen organizes the extracted page text into a validated structured TXT file.
-4. REBEL converts the structured learning content into a knowledge graph.
-5. Qwen generates and validates the flashcards from graph relationships.
+4. The graph stage preserves normalized definitions and knowledge statements with
+   their slide/topic context, while REBEL adds relationship nodes and edges.
+5. Qwen generates and validates flashcards from a balanced set of grounded lesson
+   facts covering the readable slides.
 
 No PDF or extracted document content is uploaded to Mistral or another API. The selected Qwen model is text-only: Tesseract recovers visible labels from slide images, but Qwen does not perform visual interpretation of diagrams or photographs.
 
@@ -382,4 +384,9 @@ The default tests never download or load the model:
 
 ## Privacy and output behavior
 
-The portable release runs locally without any model download. In source mode, processing runs locally after the initial model downloads. The program sends only graph relationship triples to Qwen, excluding stored evidence chunks, slide numbers, filenames, and other provenance. It assembles the complete result in memory and replaces the destination atomically only after final validation succeeds.
+The portable release runs locally without any model download. In source mode,
+processing runs locally after the initial model downloads. Qwen receives grounded
+lesson statements plus compact topic and slide provenance; raw evidence chunks and
+filenames are excluded. All inference remains on the computer. The program assembles
+the complete result in memory and replaces the destination atomically only after
+final validation succeeds.

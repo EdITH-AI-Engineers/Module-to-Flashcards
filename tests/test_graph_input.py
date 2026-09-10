@@ -59,6 +59,27 @@ def test_extract_facts_excludes_provenance_text():
     assert "do not expose" not in facts[0].statement
 
 
+def test_extract_facts_prefers_normalized_lesson_facts_with_context():
+    value = graph()
+    value["facts"] = [
+        {
+            "id": "f1",
+            "statement": "A project is a temporary endeavor.",
+            "slides": [4],
+            "kind": "definition",
+            "topic": "Project Foundations",
+        }
+    ]
+
+    facts = extract_graph_facts(value)
+
+    assert len(facts) == 1
+    assert facts[0].fact_id == "f1"
+    assert facts[0].statement == "A project is a temporary endeavor."
+    assert facts[0].slides == (4,)
+    assert facts[0].topic == "Project Foundations"
+
+
 def test_extract_facts_rejects_graph_without_usable_relationships():
     value = graph()
     value["edges"] = [{"id": "e1", "subject": "binary", "relation": "uses"}]

@@ -58,6 +58,42 @@ class PipelineConfig:
 
 
 Parsed = TypeVar("Parsed")
+PLAN_FACT_LIMIT = 50
+
+
+def _balanced_plan_facts(
+    facts: Sequence[GraphFact],
+    limit: int = PLAN_FACT_LIMIT,
+) -> tuple[GraphFact, ...]:
+    """Bound prompt size while retaining coverage across lesson topics/slides."""
+    values = tuple(facts)
+    if len(values) <= limit:
+        return values
+
+    buckets: dict[tuple[str, object], list[GraphFact]] = {}
+    for fact in values:
+        if fact.slides:
+            key: tuple[str, object] = ("slide", fact.slides[0])
+        elif fact.topic:
+            key = ("topic", fact.topic.casefold())
+        else:
+            key = ("general", "")
+        buckets.setdefault(key, []).append(fact)
+
+    selected: list[GraphFact] = []
+    offset = 0
+    while len(selected) < limit:
+        added = False
+        for bucket in buckets.values():
+            if offset < len(bucket):
+                selected.append(bucket[offset])
+                added = True
+                if len(selected) == limit:
+                    break
+        if not added:
+            break
+        offset += 1
+    return tuple(selected)
 
 
 class FlashcardPipeline:
@@ -252,11 +288,19 @@ class FlashcardPipeline:
         prior_concept_names: Sequence[str] = (),
         prior_questions: Sequence[str] = (),
     ) -> tuple[FlashcardCluster, ...]:
-        self._progress(f"Planning {CONCEPTS_PER_MODULE} concepts...")
-        plan_prompt = build_concept_plan_prompt(identity, facts, prior_concept_names)
+        plan_facts = _balanced_plan_facts(facts)
+        self._progress(
+            f"Planning {CONCEPTS_PER_MODULE} concepts from "
+            f"{len(plan_facts)} grounded lesson facts..."
+        )
+        plan_prompt = build_concept_plan_prompt(
+            identity,
+            plan_facts,
+            prior_concept_names,
+        )
         concepts = self._complete_with_retries(
             plan_prompt,
-            lambda raw: parse_concept_plan(raw, facts),
+            lambda raw: parse_concept_plan(raw, plan_facts),
             max_tokens=self.config.plan_max_tokens,
             label="concept plan",
             include_rejected_candidate=False,

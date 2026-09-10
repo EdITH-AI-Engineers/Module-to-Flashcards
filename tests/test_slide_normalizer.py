@@ -185,3 +185,26 @@ def test_document_uses_first_slide_metadata_candidates_when_not_explicit():
     assert module.course_code == "Not Specified"
     assert module.module_number == "4"
     assert module.module_title == "Networks"
+
+
+def test_document_uses_later_metadata_when_first_slide_is_unreadable():
+    backend = FakeBackend(
+        [response(module_number="1", module_title="Project Management Foundations")]
+    )
+    pages = (
+        SimpleNamespace(number=1, text="[Unreadable Text]", method="ocr"),
+        SimpleNamespace(number=2, text="IT project management", method="text"),
+    )
+
+    module = normalize_document(
+        backend,
+        pages,
+        source_file="module.pdf",
+        course_code="CS0033",
+        module_number=None,
+        module_title=None,
+        attempts=1,
+    )
+
+    assert module.module_number == "1"
+    assert module.module_title == "Project Management Foundations"

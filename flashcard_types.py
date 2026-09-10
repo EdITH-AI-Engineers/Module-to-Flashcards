@@ -14,6 +14,8 @@ class ModuleIdentity:
 class GraphFact:
     fact_id: str
     statement: str
+    slides: tuple[int, ...] = ()
+    topic: str | None = None
 
 
 @dataclass(frozen=True)
@@ -55,4 +57,3 @@ class ReviewIssue:
 class ChatBackend(Protocol):
     def complete(self, system: str, user: str, *, max_tokens: int) -> str:
         """Return only the assistant's textual content."""
-

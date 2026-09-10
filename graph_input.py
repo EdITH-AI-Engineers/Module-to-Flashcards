@@ -69,6 +69,48 @@ def resolve_identity(
 
 
 def extract_graph_facts(graph: Mapping[str, Any]) -> tuple[GraphFact, ...]:
+    lesson_values = graph.get("facts")
+    lesson_facts: list[GraphFact] = []
+    used_lesson_ids: set[str] = set()
+    used_statements: set[str] = set()
+    if isinstance(lesson_values, list):
+        for index, item in enumerate(lesson_values, start=1):
+            if not isinstance(item, Mapping):
+                continue
+            statement = str(item.get("statement", "")).strip()
+            statement_key = " ".join(statement.casefold().split())
+            if not statement or statement_key in used_statements:
+                continue
+            fact_id = str(item.get("id") or f"f{index}").strip()
+            if not fact_id:
+                fact_id = f"f{index}"
+            if fact_id in used_lesson_ids:
+                fact_id = f"{fact_id}#{index}"
+            slide_values = item.get("slides")
+            slides: list[int] = []
+            if isinstance(slide_values, list):
+                for value in slide_values:
+                    try:
+                        number = int(value)
+                    except (TypeError, ValueError):
+                        continue
+                    if number > 0 and number not in slides:
+                        slides.append(number)
+            topic_value = item.get("topic")
+            topic = str(topic_value).strip() if topic_value is not None else None
+            used_lesson_ids.add(fact_id)
+            used_statements.add(statement_key)
+            lesson_facts.append(
+                GraphFact(
+                    fact_id=fact_id,
+                    statement=statement,
+                    slides=tuple(sorted(slides)),
+                    topic=topic or None,
+                )
+            )
+    if lesson_facts:
+        return tuple(lesson_facts)
+
     edges = graph.get("edges")
     if not isinstance(edges, list):
         raise GraphInputError("knowledge graph must contain an edges list")
@@ -85,7 +127,26 @@ def extract_graph_facts(graph: Mapping[str, Any]) -> tuple[GraphFact, ...]:
         if fact_id in used_ids:
             fact_id = f"{fact_id}#{index}"
         used_ids.add(fact_id)
-        facts.append(GraphFact(fact_id=fact_id, statement=" | ".join(parts)))
+        slide_numbers: set[int] = set()
+        evidence = edge.get("evidence")
+        if isinstance(evidence, list):
+            for item in evidence:
+                if not isinstance(item, Mapping) or not isinstance(item.get("slides"), list):
+                    continue
+                for value in item["slides"]:
+                    try:
+                        number = int(value)
+                    except (TypeError, ValueError):
+                        continue
+                    if number > 0:
+                        slide_numbers.add(number)
+        facts.append(
+            GraphFact(
+                fact_id=fact_id,
+                statement=" | ".join(parts),
+                slides=tuple(sorted(slide_numbers)),
+            )
+        )
 
     if not facts:
         raise GraphInputError("graph contains no usable relationship facts")

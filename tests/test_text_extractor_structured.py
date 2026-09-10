@@ -163,7 +163,6 @@ def test_build_graph_includes_normalized_lesson_facts(tmp_path):
     assert graph["metadata"]["fact_count"] == 1
 
 
-<<<<<<< HEAD
 def test_relation_labels_are_limited_to_controlled_vocabulary():
     assert text_extractor.normalize_relation("defines") == "defines"
     assert text_extractor.normalize_relation("created by") == "created_by"
@@ -232,8 +231,6 @@ def test_chunk_evidence_keeps_supporting_slide_only():
     assert evidence[0]["confidence"] == 0.5
 
 
-=======
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 def test_save_outputs_serializes_portable_model_path(tmp_path):
     extractor = load_extractor()
     model_path = tmp_path / "models" / "rebel-large"

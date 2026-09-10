@@ -271,6 +271,24 @@ def _required_string_value(value: Any, key: str, position: int) -> str:
     return value
 
 
+def _option_value(
+    item: Mapping[str, Any], key: str, position: int, card_type: str
+) -> str:
+    """Return an option value, normalizing structural True/False labels.
+
+    Some local models fill the otherwise-unused option fields of a true-false
+    card with the literal labels ``True`` and ``False``. The actual answer is
+    carried by ``is_true``, so those labels are safe to treat as empty fields.
+    Other non-empty values remain untouched and are rejected by validation.
+    """
+    if key not in item:
+        return ""
+    value = _required_string(item, key, position)
+    if card_type == "true-false" and value.strip().casefold() in {"true", "false"}:
+        return ""
+    return value
+
+
 def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
     value = _parse_json_object(raw)
     cards_value = value.get("cards")
@@ -328,18 +346,18 @@ def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
             FlashcardDraft(
                 type=card_type,
                 question=_required_string(item, "question", position),
-                correct_option=_required_string(item, "correct_option", position)
-                if "correct_option" in item
-                else "",
-                wrong_option_1=_required_string(item, "wrong_option_1", position)
-                if "wrong_option_1" in item
-                else "",
-                wrong_option_2=_required_string(item, "wrong_option_2", position)
-                if "wrong_option_2" in item
-                else "",
-                wrong_option_3=_required_string(item, "wrong_option_3", position)
-                if "wrong_option_3" in item
-                else "",
+                correct_option=_option_value(
+                    item, "correct_option", position, card_type
+                ),
+                wrong_option_1=_option_value(
+                    item, "wrong_option_1", position, card_type
+                ),
+                wrong_option_2=_option_value(
+                    item, "wrong_option_2", position, card_type
+                ),
+                wrong_option_3=_option_value(
+                    item, "wrong_option_3", position, card_type
+                ),
                 is_true=is_true,
                 expalanation=_required_string(
                     item,
@@ -397,19 +415,10 @@ def validate_cluster(
         errors.append(
             f"cluster must use {CARDS_PER_CLUSTER} distinct assessment approaches"
         )
-    expected_approaches = tuple(concept.assessment_approaches)
-    if tuple(approaches) != expected_approaches:
+    if set(approaches) != set(concept.assessment_approaches):
         errors.append(
-            "cluster approaches must match the planned assessment approaches in order"
+            "cluster approaches must exactly match the planned assessment approaches"
         )
-        for position, (actual, expected) in enumerate(
-            zip(approaches, expected_approaches), start=1
-        ):
-            if actual != expected:
-                errors.append(
-                    f"card {position} assessment_approach must be {expected!r}, "
-                    f"received {actual!r}"
-                )
 
     if source_facts:
         grounded_terms = {

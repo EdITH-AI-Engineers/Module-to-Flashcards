@@ -142,20 +142,19 @@ def build_cluster_prompt(
             for fact in module_facts
         ],
     }
-    approach_order = "\n".join(
-        f"{index}. {approach}"
-        for index, approach in enumerate(concept.assessment_approaches, start=1)
+    approach_list = "\n".join(
+        f"- {approach}" for approach in concept.assessment_approaches
     )
     return f"""Generate exactly {CARDS_PER_CLUSTER} assessment cards for the one supplied concept.
-This cluster must produce exactly {CARDS_PER_CLUSTER} cards using these assessment approaches, in this exact order:
-{approach_order}
-Card N's assessment_approach field must equal the Nth item above. Use each listed approach exactly once. Include at least one multiple-choice, one identification, and one true-false card; vary the other two types naturally. Every claim, correct answer, distractor judgment, explanation, and hint must be resolvable using only the supplied facts. Every wrong_option must be a plausible-but-incorrect term drawn from elsewhere in the provided module content; never invent a topic, term, or fact absent from the supplied facts.
+This cluster must produce exactly {CARDS_PER_CLUSTER} cards using each of these assessment approaches exactly once:
+{approach_list}
+Include at least one multiple-choice, one identification, and one true-false card; vary the other two types naturally. Every claim, correct answer, distractor judgment, explanation, and hint must be resolvable using only the supplied facts. Every wrong_option must be a plausible-but-incorrect term drawn from elsewhere in the provided module content; never invent a topic, term, or fact absent from the supplied facts.
 
 Return this JSON shape with exactly {CARDS_PER_CLUSTER} objects in cards. Every object must contain exactly these eleven keys:
 type, question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, is_true, expalanation, hint, difficulty, assessment_approach
 
-Example of a complete card:
-{{"type":"multiple-choice","question":"...","correct_option":"...","wrong_option_1":"...","wrong_option_2":"...","wrong_option_3":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":2,"assessment_approach":"recall"}}
+Example of the required top-level shape (expand cards to exactly {CARDS_PER_CLUSTER} objects):
+{{"cards":[{{"type":"multiple-choice","question":"...","correct_option":"...","wrong_option_1":"...","wrong_option_2":"...","wrong_option_3":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":2,"assessment_approach":"recall"}}]}}
 
 Example of a complete true-false card:
 {{"type":"true-false","question":"The stated relationship is supported.","correct_option":"","wrong_option_1":"","wrong_option_2":"","wrong_option_3":"","is_true":1,"expalanation":"The supplied facts support the relationship.","hint":"Check the relationship itself.","difficulty":1,"assessment_approach":"recall"}}

@@ -9,10 +9,7 @@ from flashcard_validator import (
     ValidationError,
     parse_cards,
     parse_concept_plan,
-<<<<<<< HEAD
-=======
     parse_review_issues,
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
     validate_cluster,
 )
 
@@ -143,8 +140,6 @@ def test_cards_parser_rejects_boolean_true_false_value():
         parse_cards(cards_json(tuple(values)))
 
 
-<<<<<<< HEAD
-=======
 def test_cards_parser_supplies_omitted_empty_identification_options():
     payload = json.loads(cards_json())
     identification = payload["cards"][1]
@@ -189,7 +184,6 @@ def test_cards_parser_supplies_omitted_true_false_answer_options():
     assert cards[2].wrong_option_3 == ""
 
 
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 def test_concept_plan_requires_twenty_supported_concepts():
     raw, known = plan_json(count=1)
     with pytest.raises(ValidationError, match="at least 20 concepts"):
@@ -214,8 +208,6 @@ def test_concept_plan_attaches_exact_fact_text_from_known_ids():
     assert concepts[0].facts == ("subject 1 | relates to | object 1",)
 
 
-<<<<<<< HEAD
-=======
 def test_concept_plan_accepts_comma_separated_token_fields():
     raw, known = plan_json()
     payload = json.loads(raw)
@@ -258,7 +250,6 @@ def test_review_reason_with_a_comma_remains_one_freeform_string():
     assert issues[0].reasons == (reason,)
 
 
->>>>>>> 57756b4a7cbb850c9cc4535c92977efa22d5b65b
 def test_concept_plan_rejects_unknown_fact_id():
     raw, known = plan_json()
     payload = json.loads(raw)

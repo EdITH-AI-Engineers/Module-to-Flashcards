@@ -1,0 +1,2144 @@
+Module #: CPE0021
+
+Module Title: Logic Circuits and Design
+
+---
+
+Slide 1:
+{
+Title:
+Logic Circuits and Design
+
+Content:
+Course Code: CPE0021
+
+Campus Locations:
+- PEU ALABANG
+- PEU DILUAN
+- PEU TECH
+
+Tagline: Technology Driven by Innovation
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces the course titled 'Logic Circuits and Design' with the code CPE0021. It lists the campus locations where the course is offered: PEU Alabang, PEU Diluan, and PEU Tech. The slide emphasizes the institution's focus on innovation through the tagline 'Technology Driven by Innovation.'
+
+---
+
+Slide 2:
+{
+Title:
+Review on Number Systems and Digital Codes
+
+Content:
+Module 1
+Review on Number Systems and Digital Codes
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces Module 1, which focuses on reviewing fundamental concepts related to number systems and digital codes. These concepts are essential building blocks in digital electronics and computer engineering, providing the basis for understanding how data is represented and processed in digital systems.
+
+---
+
+Slide 3:
+{
+Title:
+What is Number System?
+
+Content:
+- It is defined as a system of writing for expressing numbers.
+- It is the mathematical notation for representing numbers of a given set by using digits or other symbols in a consistent manner.
+- The value of any digit in a number can be determined by:
+  - The digit
+  - Its position in the number
+  - The base of the number system
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+A number system is a structured method for representing numbers using digits or symbols in a consistent way. It allows us to express numerical values and perform calculations by considering the digit itself, its position, and the base of the system. This foundational concept is essential in mathematics and computing.
+
+---
+
+Slide 4:
+{
+Title:
+What is Number Base?
+
+Content:
+- A number base is a specific collection of symbols on which a number system can be built.
+- The number base familiar to us is base 10, upon which the decimal number system is built. There are ten symbols (0 to 9) used in the decimal system.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces the concept of a number base, which refers to the set of symbols used to construct a number system. The most common example is base 10, or the decimal system, which uses ten distinct symbols (0 through 9) to represent numerical values. Understanding number bases is fundamental to exploring different numerical representations in computing and mathematics.
+
+---
+
+Slide 5:
+{
+Title:
+Place Value
+
+Content:
+- What is the concept of place value?
+
+Place value means that the value of a digit in a number depends not only on its own natural value but also on its location in the number.
+
+It is used interchangeably with the term positional notation.
+
+- Place value tells us that the two 4s in the number 3474 have different values, that is, 400 and 4, respectively, in the decimal number system.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains the concept of place value in the decimal number system. It highlights that the position of a digit within a number determines its value, not just the digit itself. For example, in the number 3474, the digit 4 appears twice but represents 400 and 4 due to its place in the number.
+
+---
+
+Slide 6:
+{
+Title:
+Review of the Decimal Number System
+
+Content:
+PEU ALABANG
+PEU DILIPAN
+PEU TIDAY
+
+*Technology Driven by Innovation*
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces a review of the decimal number system, which is the standard system for denoting integer and non-integer numbers. The decimal system is base-10, meaning it uses ten distinct digits (0 through 9) to represent numbers. This foundational concept is essential for understanding more complex numerical and computational systems.
+
+---
+
+Slide 7:
+{
+Title:
+Review of the Decimal Number System
+
+Content:
+- The word 'decimal' comes from the Latin word *decem*, meaning *ten*.
+- Thus, the number base of the decimal number system is *base 10*.
+- Since it is in base 10, ten symbols are used in the decimal number system:
+  {0,1,2,3,4,5,6,7,8,9}
+- This means that only the digits in the above set can be used for each position in every place value in a given decimal number.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces the decimal number system, which is fundamental in mathematics and computing. The system is based on ten distinct symbols (0 through 9) and operates in base 10, meaning each digit's value depends on its position or place value. The term 'decimal' originates from the Latin word for ten, reflecting its base-10 structure.
+
+---
+
+Slide 8:
+{
+Title:
+Review of the Decimal Number System
+
+Content:
+2 7 0
+
+- Note that the highlighted place value can be filled by the digits in the set {0,1,2,3,4,5,6,7,8,9}.
+- Thus, it can be increased by 1 until it reaches
+
+2 7 9
+
+- At this point, the symbols that can be used to fill the highlighted position have been exhausted. Increasing it further causes a shift in place value, and resets the initial place value to zero. Thus,
+
+2 8 0
+
+Image/Diagram Description:
+The slide visually demonstrates the decimal number system by showing the progression of digits in the units place (0 to 9) and the resulting carry-over to the tens place when the digit 9 is incremented. The numbers 270, 279, and 280 are displayed with the units digit highlighted to illustrate the concept.
+}
+
+Brief Explanation:
+This slide explains the fundamental principle of the decimal number system, which is base-10. It illustrates how each digit in a number can only range from 0 to 9. When a digit exceeds 9, it resets to 0, and the next higher place value is incremented by 1, demonstrating the concept of carrying over in arithmetic operations.
+
+---
+
+Slide 9:
+{
+Title:
+Review of the Decimal Number System
+
+Content:
+Case Study: 3474
+
+- Using place values, the number 3474 is understood to mean:
+  3000 + 400 + 70 + 4 = 3474
+- This can also be expressed as:
+  (3x1000) + (4x100) + (7x10) + 4 = 3474
+- Note that each digit is multiplied by powers of 10, so that the above is equal to:
+  (3x10³) + (4x10²) + (7x10¹) + (4x10⁰) = 3474
+- Note that the rightmost exponent starts from zero and increases by 1 as the place value increases.
+
+Hence, the decimal number system is said to be in base 10.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains the decimal number system using the example of the number 3474. It demonstrates how each digit in a number corresponds to a specific place value, which is a power of 10. The slide clarifies that the decimal system operates in base 10, where exponents increase from right to left starting at zero.
+
+---
+
+Slide 10:
+{
+Title:
+Base 2: The Binary Number System
+
+Content:
+Not Specified
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces the binary number system, which is also known as Base 2. The binary system is fundamental in computing and digital electronics, as it uses only two digits, 0 and 1, to represent all data and instructions. Understanding Base 2 is essential for grasping how computers process and store information.
+
+---
+
+Slide 11:
+{
+Title:
+Base 2: The Binary Number System
+
+Content:
+- The word "binary" comes from the Latin word *bis*, meaning *double*.
+- Thus, the number base of the binary number system is *base 2*.
+- Since it is in base 2, *two symbols* are used in the binary number system:
+  {0,1}
+- This means that only the digits in the above set can be used for each position in every place value in a given binary number.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+The binary number system, or base 2, is a fundamental numerical system in computing and digital electronics. It uses only two symbols, 0 and 1, to represent all possible values, with each digit position corresponding to a power of 2. This simplicity makes it ideal for machine processing and logical operations.
+
+---
+
+Slide 12:
+{
+Title:
+Base 2: The Binary Number System
+
+Content:
+1 1 0 0
+
+- Note that the highlighted place value can be filled by the digits in the set {0,1}.
+- Thus, it can be increased by 1 until it reaches:
+  1 1 0 1
+- At this point, the symbols that can be used to fill the highlighted position have been exhausted. Increasing it further causes a shift in place value, and resets the initial place value to zero. Thus:
+  1 1 1 0
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains the binary number system, which uses only two digits: 0 and 1. It demonstrates how incrementing a binary number works, showing the transition from 1100 to 1101 and then to 1110 when a place value overflows. The process illustrates the fundamental principle of binary arithmetic used in digital technology.
+
+---
+
+Slide 13:
+{
+Title:
+Base 2: The Binary Number System
+
+Content:
+- To avoid confusion, one should write a binary number with *base 2* as its subscript whenever necessary.
+- Thus, the binary number 10110 should be written as 10110₂
+- It should be read as “one-zero-one-one-zero base two” and NOT “ten-thousand one-hundred ten” since each phrase denotes an entirely different number.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces the binary number system, which is base 2. It explains the importance of using a subscript ₂ to denote binary numbers, such as 10110₂, to avoid confusion with decimal numbers. The slide also clarifies how to verbally read binary numbers to prevent misinterpretation.
+
+---
+
+Slide 14:
+{
+Title:
+Base 2: The Binary Number System
+
+Content:
+Case Study: 10110₂
+
+- We know that the decimal number 3474 can be expressed as powers of 10:
+
+(3 × 10³) + (4 × 10²) + (7 × 10¹) + (4 × 10⁰) = 3474₁₀
+
+- In the same manner, the binary number 10110₂ can be expressed as powers of 2:
+
+(1 × 2⁴) + (0 × 2³) + (1 × 2²) + (1 × 2¹) + (0 × 2⁰) = 22₁₀
+
+Note that the rightmost exponent starts from zero and increases by 1 as the place value increases.
+
+Hence, the binary number system is said to be in base 2.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains the binary number system, which operates in base 2. It demonstrates how a binary number, such as 10110₂, can be converted to its decimal equivalent by expressing each digit as a power of 2. The example highlights the positional values of binary digits, reinforcing the concept that binary is foundational in computing and digital systems.
+
+---
+
+Slide 15:
+{
+Title:
+Base 8: The Octal Number System
+
+Content:
+Not Specified
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces the octal number system, which is a base-8 numeral system. It is commonly used in computing and digital electronics as a more compact representation of binary-coded values. The octal system simplifies binary by grouping bits into sets of three.
+
+---
+
+Slide 16:
+{
+Title:
+Base 8: The Octal Number System
+
+Content:
+- The word 'octal' comes from the Greek word *oktō*, meaning *eight*.
+- Thus, the number base of the octal number system is *base 8*.
+- Since it is in base 8, eight symbols are used in the octal number system:
+  {0,1,2,3,4,5,6,7}
+- This means that only the digits in the above set can be used for each position in every place value in a given octal number.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+The octal number system, or base 8, is a numeral system that uses eight distinct symbols (0 through 7) to represent values. It derives its name from the Greek word for eight, reflecting its foundational base. Each digit in an octal number corresponds to a power of 8, restricting valid digits to the set {0,1,2,3,4,5,6,7}.
+
+---
+
+Slide 17:
+{
+Title:
+Base 8: The Octal Number System
+
+Content:
+The octal number system uses digits from the set {0,1,2,3,4,5,6,7} for each place value.
+
+Example:
+- Start with the number: 3 6 0
+- Increase the last digit by 1 until it reaches: 3 6 7
+- Once the digits for a place value are exhausted, the next increment causes a shift in place value and resets the current place value to zero:
+  3 7 0
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains the base-8 or octal number system, which uses digits 0 through 7. When a digit in a place value reaches 7, incrementing it further rolls over to 0 and increases the next higher place value by 1, similar to how the decimal system works but with a base of 8 instead of 10.
+
+---
+
+Slide 18:
+{
+Title:
+Base 8: The Octal Number System
+
+Content:
+- To avoid confusion, one should write an octal number with *base 8* as its subscript whenever necessary.
+- Thus, the octal number 72143 should be written as: 72143₈
+- It should be read as “seven-two-one-four-three base eight” and NOT “seventy two-thousand one-hundred forty three” since each phrase denotes an entirely different number.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces the octal (base 8) number system, emphasizing the importance of using a subscript to denote the base. It clarifies how to correctly read and write octal numbers to prevent confusion with decimal numbers, as identical digits represent different values in each system.
+
+---
+
+Slide 19:
+{
+Title:
+Base 8: The Octal Number System
+
+Content:
+Case Study: 72143₈
+
+We know that the decimal number 3474 can be expressed as powers of 10:
+(3 × 10³) + (4 × 10²) + (7 × 10¹) + (4 × 10⁰) = 3474₁₀
+
+In the same manner, the octal number 72143₈ can be expressed as powers of 8:
+(7 × 8⁴) + (2 × 8³) + (1 × 8²) + (4 × 8¹) + (3 × 8⁰) = 29795₁₀
+
+Note that the rightmost exponent starts from zero and increases by 1 as the place value increases.
+
+Hence, the octal number system is said to be in base 8.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains the octal (base 8) number system using a case study of the octal number 72143₈. It demonstrates how each digit in an octal number represents a power of 8, analogous to how digits in a decimal number represent powers of 10. The conversion of 72143₈ to its decimal equivalent, 29795₁₀, is shown through a step-by-step expansion of powers.
+
+---
+
+Slide 20:
+{
+Title:
+Base 16: The Hexadecimal Number System
+
+Content:
+Not Specified
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces the hexadecimal number system, commonly referred to as Base 16. Hexadecimal is widely used in computing and digital electronics as a human-friendly representation of binary-coded values. It simplifies the expression of large binary numbers by grouping them into sets of four bits.
+
+---
+
+Slide 21:
+{
+Title:
+Base 16: The Hexadecimal Number System
+
+Content:
+The word "hexadecimal" is a combination of the Greek word *hex*, meaning *six*, and the Latin word *decem*, meaning *ten*.
+
+Thus, the number base of the hexadecimal number system is *base 16*.
+
+Since it is in base 16, *sixteen symbols* are used in the hexadecimal number system:
+{0,1,2,3,4,5,6,7,8,9,A,B,C,D,E,F}
+
+This means that only the digits in the above set can be used for each position in every place value in a given hexadecimal number.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+The hexadecimal number system, or base 16, extends beyond the decimal system by using sixteen distinct symbols: digits 0-9 and letters A-F. Each position in a hexadecimal number represents a power of 16, allowing compact representation of large binary values commonly used in computing and digital systems.
+
+---
+
+Slide 22:
+{
+Title:
+Base 16: The Hexadecimal Number System
+
+Content:
+A 3 B 0
+
+Note that the highlighted place value can be filled by the digits in the set {0,1,2,3,4,5,6,7,8,9,A,B,C,D,E,F}.
+
+Thus, it can be increased by 1 until it reaches:
+A 3 B F
+
+At this point, the symbols that can be used to fill the highlighted position have been exhausted. Increasing it further causes a shift in place value, and resets the initial place value to zero. Thus:
+A 3 C 0
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains the hexadecimal (base 16) number system, which uses digits 0-9 and letters A-F to represent values. It demonstrates how incrementing a hexadecimal number works, particularly when a digit reaches its maximum value (F), causing a carryover to the next higher place value. The example shows the transition from A3B0 to A3BF, then to A3C0 after the carryover.
+
+---
+
+Slide 23:
+{
+Title:
+Base 16: The Hexadecimal Number System
+
+Content:
+To avoid confusion, one should write a hexadecimal number with base 16 as its subscript whenever necessary.
+
+Thus, the hexadecimal number B23C should be written as:
+B23C₁₆
+
+It should be read as 'b-two-three-c base sixteen'.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces the hexadecimal number system, which is base 16. It explains the convention of writing hexadecimal numbers with a subscript 16 to indicate their base, using the example B23C₁₆. The slide also clarifies how to verbally express such numbers to avoid ambiguity in technical contexts.
+
+---
+
+Slide 24:
+{
+Title:
+Base 16: The Hexadecimal Number System
+
+Content:
+Case Study: B23C₁₆
+
+We know that the decimal number 3474 can be expressed as powers of 10:
+(3 × 10³) + (4 × 10²) + (7 × 10¹) + (4 × 10⁰) = 3474₁₀
+
+In the same manner, the hexadecimal number B23C₁₆ can be expressed as powers of 16:
+(11 × 16³) + (2 × 16²) + (3 × 16¹) + (12 × 16⁰) = 45628₁₀
+
+Note that the rightmost exponent starts from zero and increases by 1 as the place value increases.
+
+Hence, the hexadecimal number system is said to be in base 16.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains the hexadecimal (base 16) number system using a case study of the hexadecimal number B23C₁₆. It demonstrates how each digit in a hexadecimal number corresponds to a power of 16, analogous to how decimal numbers correspond to powers of 10. The conversion process is illustrated by breaking down B23C₁₆ into its decimal equivalent, 45628.
+
+---
+
+Slide 25:
+{
+Title:
+Comparative Values: Bases 10, 2, 8, 16
+
+Content:
+This slide appears to introduce a comparison of numerical values across different bases (10, 2, 8, 16).
+
+The following institutional labels are present:
+- PEU ALABANG
+- PEU DILIPIAN
+- PEU TECH
+
+Footer note: Technology Driven by Innovation
+
+Image/Diagram Description:
+Not Specified. The slide contains only text elements, including a title, institutional labels, and a footer note, with no visible diagrams, images, or tables.
+}
+
+Brief Explanation:
+This slide is likely part of a lecture or presentation on number systems, specifically comparing values in decimal (base 10), binary (base 2), octal (base 8), and hexadecimal (base 16) formats. The institutional labels suggest the content may be tailored for students or affiliates of specific campuses or departments. The footer reinforces a theme of innovation in technology.
+
+---
+
+Slide 26:
+{
+Title:
+Comparative Values: Bases 10, 2, 8, 16
+
+Content:
+Base 10 (Decimal), Base 2 (Binary), Base 8 (Octal), and Base 16 (Hexadecimal) comparative values:
+
+Base 10 | Base 2  | Base 8 | Base 16
+Decimal | Binary  | Octal  | Hexadecimal
+0       | 0000    | 0      | 0
+1       | 0001    | 1      | 1
+2       | 0010    | 2      | 2
+3       | 0011    | 3      | 3
+4       | 0100    | 4      | 4
+5       | 0101    | 5      | 5
+6       | 0110    | 6      | 6
+7       | 0111    | 7      | 7
+8       | 1000    | 10     | 8
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide presents a comparison of numerical values across four common number bases: decimal (base 10), binary (base 2), octal (base 8), and hexadecimal (base 16). Each row shows how the same quantity is represented in these different systems, illustrating the fundamental relationships between them. Understanding these conversions is essential for computer science and digital electronics, where binary and hexadecimal systems are frequently used.
+
+---
+
+Slide 27:
+{
+Title:
+Comparative Values: Bases 10, 2, 8, 16
+
+Content:
+Decimal, Binary, Octal, and Hexadecimal Values:
+
+Base 10 (Decimal) | Base 2 (Binary) | Base 8 (Octal) | Base 16 (Hexadecimal)
+9 | 1001 | 11 | 9
+10 | 1010 | 12 | A
+11 | 1011 | 13 | B
+12 | 1100 | 14 | C
+13 | 1101 | 15 | D
+14 | 1110 | 16 | E
+15 | 1111 | 17 | F
+16 | 10000 | 20 | 10
+17 | 10001 | 21 | 11
+
+PEU ALABANG
+PEU DILUAN
+PEU TECH
+*Technology Driven by Innovation*
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide presents a comparison of numerical values across four common number bases: decimal (base 10), binary (base 2), octal (base 8), and hexadecimal (base 16). Each row shows how a decimal number is represented in the other three bases, illustrating the conversion process and differences in notation. Understanding these conversions is fundamental in computer science and digital systems.
+
+---
+
+Slide 28:
+{
+Title:
+Conversion from One Base to Another
+
+Content:
+Conversion from Bases 2, 8, 16 to Base 10
+Conversion from Base 10 to Bases 2, 8, 16
+Conversion from Base 8 to Base 2 and vice versa
+Conversion from Base 16 to Base 2 and vice versa
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide outlines the fundamental methods for converting numbers between different bases, specifically base 2 (binary), base 8 (octal), base 10 (decimal), and base 16 (hexadecimal). It highlights four key conversion processes, which are essential for understanding how data is represented and manipulated in computing systems. Mastery of these conversions is critical for fields such as computer science and digital electronics.
+
+---
+
+Slide 29:
+{
+Title:
+Conversion from Bases 2, 8, 16 to Base 10
+
+Content:
+Technique: Expand the number using the appropriate base.
+
+Convert 11010₂ to base 10.
+(1x2⁴) + (1x2³) + (0x2²) + (1x2¹) + (0x2⁰) = ?
+(1x16) + (1x8) + (0x4) + (1x2) + (0x1) = ?
+16 + 8 + 0 + 2 + 0 = 26₁₀
+
+Convert 1537₈ to base 10.
+(1x8³) + (5x8²) + (3x8¹) + (7x8⁰) = ?
+(1x512) + (5x64) + (3x8) + (7x1) = ?
+512 + 320 + 24 + 7 = 863₁₀
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide demonstrates the method for converting numbers from bases 2 (binary) and 8 (octal) to base 10 (decimal) by expanding each digit using powers of the original base. The process involves multiplying each digit by the base raised to the power of its position and summing the results to obtain the decimal equivalent.
+
+---
+
+Slide 30:
+{
+Title:
+Conversion from Bases 2, 8, 16 to Base 10
+
+Content:
+Convert AF4₁₆ to base 10.
+
+(A × 16²) + (F × 16¹) + (4 × 16⁰) = ?
+(10 × 256) + (15 × 16) + (4 × 1) = ?
+2560 + 240 + 4 = 2804₁₀
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide demonstrates the conversion of a hexadecimal (base 16) number, AF4, to its decimal (base 10) equivalent. Each digit is multiplied by 16 raised to the power of its position, starting from zero on the right. The results are summed to obtain the final decimal value, 2804.
+
+---
+
+Slide 31:
+{
+Title:
+Conversion from Base 10 to Bases 2, 8, 16
+
+Content:
+Technique: Divide the number using the appropriate base, then repeatedly divide the resulting quotients by the same base until it becomes zero. The answer is the combined remainders in reverse order accumulated from the divisions. This technique is called the remainder method.
+
+Convert 133₁₀ to base 2.
+
+133 ÷ 2 = 66  r. 1
+66 ÷ 2 = 33   r. 0
+33 ÷ 2 = 16   r. 1
+16 ÷ 2 = 8    r. 0
+8 ÷ 2 = 4     r. 0
+4 ÷ 2 = 2     r. 0
+2 ÷ 2 = 1     r. 0
+1 ÷ 2 = 0     r. 1
+
+Answer: 10000101₂
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide demonstrates the process of converting a base 10 number to base 2 using the remainder method. The number 133 is repeatedly divided by 2, and the remainders are recorded. The final binary representation is obtained by reading the remainders in reverse order, resulting in 10000101₂. This method is fundamental for understanding number base conversions in computer science and digital systems.
+
+---
+
+Slide 32:
+{
+Title:
+Conversion from Base 10 to Bases 2, 8, 16
+
+Content:
+Convert 7863₁₀ to base 8.
+
+7863 ÷ 8 = 982
+982 ÷ 8 = 122
+122 ÷ 8 = 15
+15 ÷ 8 = 1
+1 ÷ 8 = 0
+Remainders: 7, 6, 2, 7, 1
+Answer: 17267₈
+
+Convert 2926₁₀ to base 16.
+
+2926 ÷ 16 = 182
+182 ÷ 16 = 11
+11 ÷ 16 = 0
+Remainders: 14 (E), 6, 11 (B)
+Answer: B6E₁₆
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide demonstrates the process of converting decimal (base 10) numbers into octal (base 8) and hexadecimal (base 16) systems using division and remainder methods. The remainders from each division step are recorded and read in reverse order to form the final converted number. Hexadecimal values above 9 are represented by letters A through F.
+
+---
+
+Slide 33:
+{
+Title:
+Conversion from Base 8 to Base 2
+
+Content:
+Technique: Convert each octal digit to a set of three binary digits.
+
+Convert 5641₈ to base 2.
+
+5 6 4 1
+101 110 100 001
+
+Answer: 101110100001₂
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide demonstrates the method for converting a number from base 8 (octal) to base 2 (binary). Each digit in the octal number is replaced by its equivalent three-digit binary representation. The example provided shows the conversion of 5641₈ into its binary form, resulting in 101110100001₂.
+
+---
+
+Slide 34:
+{
+Title:
+Conversion from Base 2 to Base 8
+
+Content:
+Technique: Convert each set of three binary digits to an octal digit starting from the right going to the left, adding leading zeroes if necessary.
+
+Convert 1111010₂ to base 8.
+
+001 111 010
+1   7   2
+
+Answer: 172₈
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide demonstrates the method for converting a binary (base 2) number to an octal (base 8) number. The process involves grouping the binary digits into sets of three, starting from the right, and then converting each group into its corresponding octal digit. Leading zeroes are added to the leftmost group if necessary to complete a set of three.
+
+---
+
+Slide 35:
+{
+Title:
+Conversion from Base 16 to Base 2
+
+Content:
+Technique: Convert each hexadecimal digit to a set of four binary digits.
+
+Convert A3CF₁₆ to base 2:
+A → 1010
+3 → 0011
+C → 1100
+F → 1111
+
+Answer: 1010001111001111₂
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide demonstrates the method for converting a hexadecimal (base 16) number to its binary (base 2) equivalent. Each hexadecimal digit is directly translated into a four-digit binary sequence, as shown in the example of A3CF₁₆. The process ensures an accurate and systematic conversion between these two numeral systems.
+
+---
+
+Slide 36:
+{
+Title:
+Conversion from Base 2 to Base 16
+
+Content:
+Technique: Convert each set of four binary digits to a hexadecimal digit starting from the right going to the left, adding leading zeroes if necessary.
+
+Convert 101011010₂ to base 16.
+
+Binary grouping: 0001 0101 1010
+Hexadecimal equivalent: 1 5 A
+
+Answer: 15A₁₆
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide demonstrates the method for converting a binary (base 2) number to hexadecimal (base 16). The process involves grouping the binary digits into sets of four, starting from the right, and then converting each group into its corresponding hexadecimal digit. Leading zeros are added to the leftmost group if necessary to complete a set of four.
+
+---
+
+Slide 37:
+{
+Title:
+Fractions
+
+Content:
+- Binary to decimal
+
+10.1011 =>
+1 x 2⁻⁴ = 0.0625
+1 x 2⁻³ = 0.125
+0 x 2⁻² = 0.0
+1 x 2⁻¹ = 0.5
+0 x 2⁰ = 0.0
+1 x 2¹ = 2.0
+Total = 2.6875
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide demonstrates the conversion of a binary fraction to its decimal equivalent. The binary number 10.1011 is broken down by multiplying each bit by 2 raised to the power of its position, including negative powers for the fractional part. The sum of these products yields the decimal value 2.6875.
+
+---
+
+Slide 38:
+{
+Title:
+Fractions
+
+Content:
+- Decimal to binary
+
+Image/Diagram Description:
+A diagram illustrating the step-by-step conversion of the decimal number 3.14579 to its binary equivalent, showing intermediate calculations and results in a vertical sequence.
+}
+
+Brief Explanation:
+This slide focuses on converting decimal fractions to binary form. The diagram visually demonstrates the process, breaking down the decimal number 3.14579 into its binary components through systematic multiplication and integer extraction. Understanding this conversion is essential for computer science applications where binary representation is fundamental.
+
+---
+
+Slide 39:
+{
+Title:
+Exercise
+
+Content:
+Complete the following number system conversion table for the given decimal value:
+
+Decimal: 29.8
+Binary: 
+Octal: 
+Hexadecimal:
+
+Image/Diagram Description:
+A table with four columns labeled 'Decimal,' 'Binary,' 'Octal,' and 'Hexadecimal.' Only the decimal value 29.8 is filled in; the other columns are empty.
+}
+
+Brief Explanation:
+This slide presents an exercise on number system conversions, focusing on converting the decimal value 29.8 into binary, octal, and hexadecimal formats. Understanding these conversions is fundamental in computer science and digital electronics, as different number systems are used for various computational and hardware design purposes.
+
+---
+
+Slide 40:
+{
+Title:
+Exercise
+
+Content:
+Complete the following number system conversion table:
+
+Decimal - Binary - Octal - Hexadecimal
+        | 101.1101   |       |
+
+Image/Diagram Description:
+A table with four columns labeled Decimal, Binary, Octal, and Hexadecimal. The Binary column contains the value 101.1101, while the other columns are empty, indicating missing values to be filled.
+}
+
+Brief Explanation:
+This slide presents an exercise on number system conversions, focusing on translating a binary number (101.1101) into its decimal, octal, and hexadecimal equivalents. Understanding these conversions is essential for computer science and digital electronics, as different number systems are used for various computational tasks.
+
+---
+
+Slide 41:
+{
+Title:
+Exercise
+
+Content:
+Complete the following number system conversion table:
+
+Decimal - Binary - Octal - Hexadecimal
+[Empty] - [Empty] - 3.07 - [Empty]
+
+PEU ALABANG
+PEU DILINAN
+PEU TECH
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide presents an exercise on number system conversions, focusing on filling in missing values in a table that includes decimal, binary, octal, and hexadecimal representations. The given value, 3.07 in octal, requires conversion to the other number systems, reinforcing understanding of base conversions in computing and digital systems.
+
+---
+
+Slide 42:
+{
+Title:
+Exercise
+
+Content:
+Complete the following number system conversion table:
+
+Decimal - Binary - Octal - Hexadecimal
+[Empty] - [Empty] - [Empty] - C.82
+
+Institutional Labels:
+- PEU ALABANG
+- PEU DILWAN
+- PEU TECH
+
+Image/Diagram Description:
+A table with four columns labeled Decimal, Binary, Octal, and Hexadecimal. Only the Hexadecimal column contains a partial entry: C.82. The rest of the cells are empty.
+}
+
+Brief Explanation:
+This slide presents an exercise on number system conversions, focusing on decimal, binary, octal, and hexadecimal representations. Students are expected to fill in the missing values in the table, starting from the given hexadecimal value C.82. The exercise reinforces understanding of how different number systems relate to each other.
+
+---
+
+Slide 43:
+{
+Title:
+Exercise
+
+Content:
+Convert the following decimal numbers to binary and hexadecimal:
+
+Decimal: 29.8
+Binary: 11101.110011...
+Hexadecimal: 1D.CC...
+
+Decimal: 5.8125
+Binary: 101.1101
+Hexadecimal: 5.D
+
+Decimal: 3.109375
+Binary: 11.000111
+Hexadecimal: 3.1C
+
+Decimal: 12.5078125
+Binary: 1100.10000010
+Hexadecimal: C.82
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide presents an exercise on number base conversion, specifically converting decimal numbers to binary and hexadecimal formats. The table provides decimal values alongside their corresponding binary and hexadecimal equivalents, illustrating the process of fractional number conversion in different numeral systems.
+
+---
+
+Slide 44:
+{
+Title:
+Decimal Arithmetic
+
+Content:
+- Addition
+- Subtraction
+- Multiplication
+- Division
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces the four fundamental operations of decimal arithmetic: addition, subtraction, multiplication, and division. These operations form the basis for more complex calculations involving decimal numbers. Understanding each operation is essential for accurate computation and problem-solving in mathematics.
+
+---
+
+Slide 45:
+{
+Title:
+Decimal Addition
+
+Content:
+❖ Single Digit Addition Table
+
++ | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+0 | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+1 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
+2 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11
+3 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12
+4 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13
+5 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14
+6 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15
+7 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16
+8 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17
+9 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18
+
+Image/Diagram Description:
+A single-digit addition table showing the sum of two digits (0 through 9) in a grid format. The first row and column represent the addends, while the intersecting cells display their sums.
+}
+
+Brief Explanation:
+This slide presents a single-digit addition table used to demonstrate the basic concept of decimal addition. Each cell in the table represents the sum of the corresponding row and column digits, ranging from 0 to 9. Such tables are fundamental tools for teaching arithmetic by visually reinforcing the results of simple addition operations.
+
+---
+
+Slide 46:
+{
+Title:
+Decimal Addition
+
+Content:
+Example:
+Add the decimal numbers below.
+
+Step 1:
+  199
++  73
+-----
+
+Step 2:
+  1 1 9 9
++    7 3
+-----
+
+Step 3:
+  1 1 1 9 9
++      7 3
+-----
+    2 7 2
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide demonstrates the process of adding two decimal numbers, 199 and 73, through a step-by-step method. The first step shows the initial alignment of the numbers, the second step includes carrying over values, and the final step presents the correct sum of 272. The example reinforces proper digit alignment and carrying techniques in decimal addition.
+
+---
+
+Slide 47:
+{
+Title:
+Decimal Subtraction
+
+Content:
+Example:
+Subtract the decimal numbers below.
+
+123
+-  77
+
+Step-by-step subtraction:
+  0 1 1
+123
+-  77
+ 046
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide demonstrates the process of subtracting decimal numbers using a simple example. The subtraction of 77 from 123 is shown step-by-step, including borrowing across digits. The result, 46, is clearly presented to illustrate the correct method for performing decimal subtraction.
+
+---
+
+Slide 48:
+{
+Title:
+Decimal Multiplication
+
+Content:
+❖ Single Digit Multiplication Table
+
+0 × 0 = 0, 0 × 1 = 0, 0 × 2 = 0, 0 × 3 = 0, 0 × 4 = 0, 0 × 5 = 0, 0 × 6 = 0, 0 × 7 = 0, 0 × 8 = 0, 0 × 9 = 0
+1 × 0 = 0, 1 × 1 = 1, 1 × 2 = 2, 1 × 3 = 3, 1 × 4 = 4, 1 × 5 = 5, 1 × 6 = 6, 1 × 7 = 7, 1 × 8 = 8, 1 × 9 = 9
+2 × 0 = 0, 2 × 1 = 2, 2 × 2 = 4, 2 × 3 = 6, 2 × 4 = 8, 2 × 5 = 10, 2 × 6 = 12, 2 × 7 = 14, 2 × 8 = 16, 2 × 9 = 18
+3 × 0 = 0, 3 × 1 = 3, 3 × 2 = 6, 3 × 3 = 9, 3 × 4 = 12, 3 × 5 = 15, 3 × 6 = 18, 3 × 7 = 21, 3 × 8 = 24, 3 × 9 = 27
+4 × 0 = 0, 4 × 1 = 4, 4 × 2 = 8, 4 × 3 = 12, 4 × 4 = 16, 4 × 5 = 20, 4 × 6 = 24, 4 × 7 = 28, 4 × 8 = 32, 4 × 9 = 36
+5 × 0 = 0, 5 × 1 = 5, 5 × 2 = 10, 5 × 3 = 15, 5 × 4 = 20, 5 × 5 = 25, 5 × 6 = 30, 5 × 7 = 35, 5 × 8 = 40, 5 × 9 = 45
+6 × 0 = 0, 6 × 1 = 6, 6 × 2 = 12, 6 × 3 = 18, 6 × 4 = 24, 6 × 5 = 30, 6 × 6 = 36, 6 × 7 = 42, 6 × 8 = 48, 6 × 9 = 54
+7 × 0 = 0, 7 × 1 = 7, 7 × 2 = 14, 7 × 3 = 21, 7 × 4 = 28, 7 × 5 = 35, 7 × 6 = 42, 7 × 7 = 49, 7 × 8 = 56, 7 × 9 = 63
+8 × 0 = 0, 8 × 1 = 8, 8 × 2 = 16, 8 × 3 = 24, 8 × 4 = 32, 8 × 5 = 40, 8 × 6 = 48, 8 × 7 = 56, 8 × 8 = 64, 8 × 9 = 72
+9 × 0 = 0, 9 × 1 = 9, 9 × 2 = 18, 9 × 3 = 27, 9 × 4 = 36, 9 × 5 = 45, 9 × 6 = 54, 9 × 7 = 63, 9 × 8 = 72, 9 × 9 = 81
+
+Image/Diagram Description:
+A single-digit multiplication table displaying the products of numbers 0 through 9 in a grid format.
+}
+
+Brief Explanation:
+This slide presents the single-digit multiplication table, which is a fundamental tool in arithmetic. It systematically shows the product of every pair of digits from 0 to 9, reinforcing the concept of multiplication as repeated addition. Understanding this table is essential for mastering more complex mathematical operations.
+
+---
+
+Slide 49:
+{
+Title:
+Decimal Multiplication
+
+Content:
+*Example:*
+Multiply the decimal numbers below.
+
+72 × 23
+
+72 ← Multiplicand
+× 23 ← Multiplier
+216 ← Partial Products
+1440
+1656 ← Product
+
+Image/Diagram Description:
+A step-by-step vertical multiplication layout showing the multiplicand (72), multiplier (23), partial products (216 and 1440), and the final product (1656) with labels for each component.
+}
+
+Brief Explanation:
+This slide demonstrates the process of multiplying two whole numbers using the standard vertical multiplication method. The multiplicand (72) is multiplied by each digit of the multiplier (23), producing partial products (216 and 1440) that are then summed to yield the final product (1656). The labels clarify each step in the multiplication process.
+
+---
+
+Slide 50:
+{
+Title:
+Decimal Division
+
+Content:
+*Example:*
+Divide the decimal numbers below.
+
+Step-by-step division:
+Divisor: 3
+Dividend: 23
+Quotient: 07
+Remainder: 2
+
+Calculation:
+- 3 goes into 23 seven times (3 × 7 = 21).
+- Subtract 21 from 23 to get a remainder of 2.
+
+Image/Diagram Description:
+A long division layout showing the division of 23 by 3, including labels for divisor, dividend, quotient, and remainder.
+}
+
+Brief Explanation:
+This slide demonstrates the process of dividing decimal numbers using long division. The example divides 23 by 3, showing how to determine the quotient and remainder step-by-step. Understanding this method is essential for solving division problems involving decimals accurately.
+
+---
+
+Slide 51:
+{
+Title:
+Binary Arithmetic
+
+Content:
+- Addition
+- Subtraction
+- Multiplication
+- Division
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces the four fundamental operations of binary arithmetic: addition, subtraction, multiplication, and division. These operations form the basis for performing calculations in binary number systems, which are essential in computer science and digital electronics. Understanding these operations is crucial for designing and analyzing digital circuits and algorithms.
+
+---
+
+Slide 52:
+{
+Title:
+Binary Addition
+
+Content:
+Single Bit Addition Table:
+
+0 + 0 = 0
+0 + 1 = 1
+1 + 0 = 1
+1 + 1 = 10 (Note: carry)
+
+Example:
+Add the following binary numbers:
+
+  1 1 0 1
++ 0 1 1 1
+
+  1 1
+  1 1 0 1
++ 0 1 1 1
+---------
+1 0 1 0 0
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains binary addition, starting with the fundamental single-bit addition rules. It demonstrates how each combination of 0 and 1 produces a sum and, in the case of 1 + 1, a carry to the next higher bit. The example illustrates step-by-step addition of two 4-bit binary numbers, showing the carry propagation and final result.
+
+---
+
+Slide 53:
+{
+Title:
+Binary Subtraction
+
+Content:
+Single Bit Subtraction Table:
+
+0 - 0 = 0
+0 - 1 = 1 with a “borrow”
+1 - 0 = 1
+1 - 1 = 0
+
+Example:
+Subtract binary numbers below.
+
+1 1 0 1
+- 0 1 1 1
+
+1 1 0 1 1 1
+-  0 1 1 1
+-----------
+  0 1 1 0
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains binary subtraction using a single-bit subtraction table, which defines the results of subtracting two binary digits (bits) including the concept of borrowing. The example demonstrates the subtraction of two multi-bit binary numbers, illustrating the step-by-step process and the final result after applying the subtraction rules.
+
+---
+
+Slide 54:
+{
+Title:
+Binary Multiplication
+
+Content:
+Single Bit Multiplication Table
+
+0 x 0 = 0
+0 x 1 = 0
+1 x 0 = 0
+1 x 1 = 1
+
+Table:
+  x | 0 | 1
+  0 | 0 | 0
+  1 | 0 | 1
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide presents the fundamental rules of binary multiplication for single bits. The multiplication table and corresponding equations demonstrate that multiplying any bit by 0 results in 0, while multiplying 1 by 1 results in 1. These rules form the basis for more complex binary arithmetic operations in digital systems.
+
+---
+
+Slide 55:
+{
+Title:
+Binary Multiplication
+
+Content:
+Example:
+Multiply the following binary numbers.
+
+1101 × 0111
+Partial products and final product:
+  1101
+×  0111
+-------
+  1101
+ 11010
+000000
+1101000
+-------
+1011011 (Final Product)
+
+Image/Diagram Description:
+A binary multiplication process showing partial products of 1101 multiplied by 0111, with the final product 1011011.
+}
+
+Brief Explanation:
+This slide demonstrates binary multiplication using the example of 1101 multiplied by 0111. The process involves generating partial products by multiplying the first binary number by each bit of the second number, shifting left appropriately, and then summing the partial products to obtain the final result, 1011011.
+
+---
+
+Slide 56:
+{
+Title:
+Binary Division
+
+Content:
+Single Bit Division Table
+
+- 0 / 0 = N/A
+- 0 / 1 = 0
+- 1 / 0 = N/A
+- 1 / 1 = 1
+
+Example:
+Divide binary numbers below.
+1101 / 111
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains the basic rules of binary division using a single-bit division table. It shows the possible outcomes when dividing 0 or 1 by 0 or 1, where division by zero is undefined (N/A). The example provided demonstrates how to divide two multi-bit binary numbers, 1101 by 111, to illustrate the application of these rules in a practical scenario.
+
+---
+
+Slide 57:
+{
+Title:
+Binary Division
+
+Content:
+Binary division process:
+- Divisor: 111
+- Dividend: 1101
+- Quotient: 0001
+- Remainder: 110
+
+Image/Diagram Description:
+A binary long division process showing a divisor of 111 dividing a dividend of 1101, resulting in a quotient of 0001 and a remainder of 110.
+}
+
+Brief Explanation:
+This slide illustrates the binary division method, analogous to long division in decimal systems. The divisor 111 (binary for 7) divides the dividend 1101 (binary for 13), producing a quotient of 0001 (binary for 1) and a remainder of 110 (binary for 6). The process demonstrates how binary arithmetic operations are performed step-by-step.
+
+---
+
+Slide 58:
+{
+Title:
+Octal Arithmetic
+
+Content:
+- Addition
+- Subtraction
+- Multiplication
+- Division
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces the fundamental operations of octal arithmetic, which is a base-8 number system. The listed operations—addition, subtraction, multiplication, and division—are essential for performing calculations in octal form. Understanding these operations is crucial for applications in computing and digital systems where octal representation is used.
+
+---
+
+Slide 59:
+{
+Title:
+Octal Addition
+
+Content:
+❖ Single Digit Addition Table
+
++ | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
+0 | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
+1 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 10
+2 | 2 | 3 | 4 | 5 | 6 | 7 | 10 | 11
+3 | 3 | 4 | 5 | 6 | 7 | 10 | 11 | 12
+4 | 4 | 5 | 6 | 7 | 10 | 11 | 12 | 13
+5 | 5 | 6 | 7 | 10 | 11 | 12 | 13 | 14
+6 | 6 | 7 | 10 | 11 | 12 | 13 | 14 | 15
+7 | 7 | 10 | 11 | 12 | 13 | 14 | 15 | 16
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide presents the single-digit addition table for the octal (base-8) number system. Each cell in the table shows the result of adding two octal digits, with sums exceeding 7 represented as two-digit octal values. Understanding this table is essential for performing arithmetic operations in octal, a key concept in computer science and digital electronics.
+
+---
+
+Slide 60:
+{
+Title:
+Octal Addition
+
+Content:
+Example:
+Add the octal numbers below.
+
+  75
++ 26
+
+Step-by-step addition:
+  1 1 (carry)
+  75
++ 26
+123
+
+Image/Diagram Description:
+The slide shows a worked example of octal addition. The numbers 75 and 26 (in octal) are aligned vertically, with carry digits (1 1) displayed above the sum. The final result, 123 (octal), is shown below the addition line.
+}
+
+Brief Explanation:
+This slide demonstrates how to perform addition in the octal (base-8) number system. The example adds 75 and 26, where each digit is summed individually, and carries are applied when the sum exceeds 7. The result, 123 in octal, illustrates the correct application of base-8 arithmetic rules.
+
+---
+
+Slide 61:
+{
+Title:
+Octal Subtraction
+
+Content:
+Example:
+Subtract the octal numbers below.
+
+  75
+- 26
+---
+  47
+
+Image/Diagram Description:
+A simple arithmetic table showing the subtraction of two octal numbers: 75 minus 26 equals 47. The numbers are aligned in columns with a horizontal line separating the operands from the result.
+}
+
+Brief Explanation:
+This slide demonstrates the process of subtracting two octal (base-8) numbers. The example subtracts 26 from 75 in the octal system, yielding the result 47. Octal subtraction follows rules similar to decimal subtraction but is constrained to digits 0 through 7.
+
+---
+
+Slide 62:
+{
+Title:
+Octal Multiplication
+
+Content:
+❖ Single Digit Multiplication Table
+
++ | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
+0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0
+1 | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
+2 | 0 | 2 | 4 | 6 | 10 | 12 | 14 | 16
+3 | 0 | 3 | 6 | 11 | 14 | 17 | 22 | 25
+4 | 0 | 4 | 10 | 14 | 20 | 24 | 30 | 34
+5 | 0 | 5 | 12 | 17 | 24 | 31 | 36 | 43
+6 | 0 | 6 | 14 | 22 | 30 | 36 | 44 | 52
+7 | 0 | 7 | 16 | 25 | 34 | 43 | 52 | 61
+
+Image/Diagram Description:
+A single-digit octal multiplication table showing the product of each pair of octal digits (0 through 7). The table is structured with rows and columns labeled by octal digits, and each cell contains the product in octal form.
+}
+
+Brief Explanation:
+This slide presents the single-digit multiplication table for the octal (base-8) number system. Each entry in the table represents the product of two octal digits, expressed in octal notation. Understanding this table is essential for performing manual multiplication in octal, as it provides the foundational results needed for more complex calculations.
+
+---
+
+Slide 63:
+{
+Title:
+Octal Multiplication
+
+Content:
+Example:
+Multiply the octal numbers below.
+
+   75
+x  26
+-----
+  556  (75 × 6)
+ 172   (75 × 2, shifted one place to the left)
+-----
+ 2476
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide demonstrates the process of multiplying two octal numbers, 75 and 26. First, multiply 75 by the least significant digit (6) of 26, yielding the partial result 556. Then, multiply 75 by the next digit (2) of 26, yielding 172, which is shifted one place to the left. Finally, add the partial results to obtain the final product, 2476 in octal.
+
+---
+
+Slide 64:
+{
+Title:
+Octal Division
+
+Content:
+Example:
+Divide the octal numbers below.
+
+Octal Division Calculation:
+  2 r. 23
+75 ÷ 25
+- 52
+-----
+  23
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide demonstrates the process of dividing octal (base-8) numbers. The example shows the division of 75 (octal) by 25 (octal), yielding a quotient of 2 with a remainder of 23 (octal). The calculation follows standard long-division steps, adapted for octal arithmetic.
+
+---
+
+Slide 65:
+{
+Title:
+Hexadecimal Arithmetic
+
+Content:
+- Addition
+- Subtraction
+- Multiplication
+- Division
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces the fundamental arithmetic operations performed in the hexadecimal (base-16) number system. Hexadecimal arithmetic is essential in computing and digital electronics, where operations such as addition, subtraction, multiplication, and division follow specific rules distinct from decimal arithmetic. Understanding these operations is crucial for tasks like memory addressing and low-level programming.
+
+---
+
+Slide 66:
+{
+Title:
+Hexadecimal Addition
+
+Content:
+❖ Single Digit Addition Table
+
++ | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | A
+0 | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | A
+1 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | A | B
+2 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | A | B | C
+3 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | A | B | C | D
+4 | 4 | 5 | 6 | 7 | 8 | 9 | A | B | C | D | E
+5 | 5 | 6 | 7 | 8 | 9 | A | B | C | D | E | F
+6 | 6 | 7 | 8 | 9 | A | B | C | D | E | F | 10
+7 | 7 | 8 | 9 | A | B | C | D | E | F | 10 | 11
+8 | 8 | 9 | A | B | C | D | E | F | 10 | 11 | 12
+9 | 9 | A | B | C | D | E | F | 10 | 11 | 12 | 13
+A | A | B | C | D | E | F | 10 | 11 | 12 | 13 | 14
+
+Image/Diagram Description:
+A table showing single-digit hexadecimal addition results. The table has rows and columns labeled from 0 to A (hexadecimal digits), with each cell containing the sum of the corresponding row and column digits.
+}
+
+Brief Explanation:
+This slide presents a single-digit hexadecimal addition table, which is essential for understanding how hexadecimal numbers are summed. Each cell in the table represents the result of adding the corresponding row and column hexadecimal digits, with values ranging from 0 to F. The table demonstrates how sums exceeding 15 (F in hexadecimal) carry over into the next digit, such as 6 + A = 10 in hexadecimal.
+
+---
+
+Slide 67:
+{
+Title:
+Hexadecimal Addition
+
+Content:
+Example:
+Add the following hexadecimal numbers.
+
+AF
++ 1B
+
+¹AF
++ 1B
+---
+CA
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide demonstrates the process of adding two hexadecimal numbers, AF and 1B. Hexadecimal addition follows base-16 arithmetic rules, where digits range from 0 to F (representing 0 to 15 in decimal). The example shows the step-by-step alignment and sum, resulting in CA.
+
+---
+
+Slide 68:
+{
+Title:
+Hexadecimal Subtraction
+
+Content:
+Example:
+Subtract the hexadecimal number below.
+
+AB
+- 1D
+
+Step-by-step subtraction:
+  AB (with a borrow indicated as ^9AB)
+-  1D
+-----
+   E
+
+Calculation:
+10 - D + B = 3 + B = E
+
+Image/Diagram Description:
+The slide contains a hexadecimal subtraction example presented in an equation format. It shows the minuend 'AB', the subtrahend '1D', and the result 'E' with an intermediate step involving a borrow.
+}
+
+Brief Explanation:
+This slide demonstrates the process of subtracting two hexadecimal numbers. Hexadecimal subtraction follows similar rules to decimal subtraction but uses base-16 values, where letters A-F represent decimal values 10-15. The example illustrates borrowing when the minuend digit is smaller than the subtrahend digit.
+
+---
+
+Slide 69:
+{
+Title:
+Hexadecimal Multiplication
+
+Content:
+Example:
+Multiply the hexadecimal number below.
+
+  AB
+x 1D
+-----
+  8AF
+ AB
+-----
+135F
+
+Image/Diagram Description:
+A step-by-step handwritten multiplication of two hexadecimal numbers (AB and 1D) showing partial products (8AF and AB) and the final result (135F).
+}
+
+Brief Explanation:
+This slide demonstrates the process of multiplying two hexadecimal numbers, AB and 1D. The multiplication follows the standard long multiplication method, adapted for base-16 arithmetic. Partial products are calculated and then summed to produce the final result, 135F, illustrating how hexadecimal operations differ from decimal multiplication.
+
+---
+
+Slide 70:
+{
+Title:
+Hexadecimal Division
+
+Content:
+*Example:*
+Divide the hexadecimal number below.
+AC53 ÷ 19
+
+Image/Diagram Description:
+A long division setup showing the divisor 19 (hexadecimal), dividend AC53 (hexadecimal), quotient 6E4 (hexadecimal), and remainder F (hexadecimal).
+}
+
+Brief Explanation:
+This slide demonstrates the process of dividing two hexadecimal numbers. The dividend AC53 is divided by the divisor 19, yielding a quotient of 6E4 and a remainder of F. Hexadecimal division follows the same principles as decimal division but uses base-16 arithmetic.
+
+---
+
+Slide 71:
+{
+Title:
+Digital Codes
+
+Content:
+## The 8421 Code
+
+- It is a type of binary coded decimal (BCD) code. Binary coded decimal means that each decimal digit, 0 to 9, is represented by the binary code of four bits.
+- The designation 8421 indicates the binary weights of the four bits (2³, 2², 2¹, 2⁰).
+- To express any decimal number in BCD, simply replace each decimal digit with the appropriate 4-bit code.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+The 8421 code is a fundamental binary-coded decimal (BCD) system used in digital electronics. Each decimal digit from 0 to 9 is represented by a unique 4-bit binary sequence, where the bits correspond to weights of 8, 4, 2, and 1, respectively. This coding scheme simplifies the conversion between decimal and binary representations, making it essential for numerical data processing in computing systems.
+
+---
+
+Slide 72:
+{
+Title:
+Digital Codes
+
+Content:
+## The 8421 Code
+
+- It is a type of binary coded decimal (BCD) code. Binary coded decimal means that each decimal digit, 0 to 9, is represented by the binary code of four bits.
+- The designation 8421 indicates the binary weights of the four bits (2³, 2², 2¹, 2⁰).
+- To express any decimal number in BCD, simply replace each decimal digit with the appropriate 4-bit code.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+The 8421 code is a Binary Coded Decimal (BCD) system where each decimal digit from 0 to 9 is represented using a 4-bit binary code. The name '8421' refers to the positional weights of the four bits, corresponding to powers of two (8, 4, 2, and 1). This coding scheme allows straightforward conversion between decimal and binary representations by replacing each decimal digit with its 4-bit equivalent.
+
+---
+
+Slide 73:
+{
+Title:
+Digital Codes
+
+Content:
+Example:
+Convert decimal numbers 35 and 170 to BCD.
+
+- Decimal 35 in BCD:
+  - 3 → 0011
+  - 5 → 0101
+
+- Decimal 170 in BCD:
+  - 1 → 0001
+  - 7 → 0111
+  - 0 → 0000
+
+Image/Diagram Description:
+A diagram showing the decimal number 35 split into its individual digits, with each digit converted to its 4-bit binary equivalent: 3 as 0011 and 5 as 0101.
+
+Image/Diagram Description:
+A flowchart illustrating the conversion of the decimal number 170 into BCD, where each digit (1, 7, 0) is represented by its 4-bit binary code (0001, 0111, 0000) and connected via arrows.
+}
+
+Brief Explanation:
+This slide demonstrates the conversion of decimal numbers to Binary-Coded Decimal (BCD). Each digit of the decimal number is individually converted into its 4-bit binary representation. For example, the decimal number 35 is split into 3 and 5, which are converted to 0011 and 0101, respectively. Similarly, 170 is converted digit by digit into BCD format.
+
+---
+
+Slide 74:
+{
+Title:
+Digital Codes
+
+Content:
+The 8421 Code (cont.)
+
+- With four bits, sixteen numbers (0000 through 1111) can be represented, but in the 8421 code, only ten of these are used. The six code combinations that are not used—1010, 1011, 1100, 1101, 1110, and 1111—are invalid in 8421 code.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains the 8421 binary-coded decimal (BCD) code, a common digital code used to represent decimal digits. It highlights that while four bits can represent sixteen possible combinations, only ten are valid in the 8421 code, corresponding to the digits 0 through 9. The remaining six combinations are considered invalid and unused in this coding scheme.
+
+---
+
+Slide 75:
+{
+Title:
+Digital Codes
+
+Content:
+## The Excess-3 Code
+- This is an unweighted code; its code assignment is obtained from the corresponding value of BCD after the addition of three.
+
+## The 84-2-1 and 2421 codes
+- These are weighted codes. The designation 8421 and 2421 indicates the binary weights of the four bits.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains two types of digital codes used in computing and digital systems. The Excess-3 code is an unweighted code derived by adding three to the corresponding Binary-Coded Decimal (BCD) value. The 84-2-1 and 2421 codes are weighted codes, where the numbers indicate the binary weights assigned to each of the four bits in the code.
+
+---
+
+Slide 76:
+{
+Title:
+Digital Codes
+
+Content:
+### The Biquinary Code
+- It is an example of a seven-bit code with error-detection properties. Each decimal digit consists of five 0s and two 1s placed in the corresponding weighted columns (5043210).
+- During transmission of signals from one location to another, an error may occur. One or more bits may change value. A circuit in the receiving side can detect the presence of more (or less) than two 1's and if the received combination of bits does not agree with the allowed combination, an error is detected.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+The Biquinary Code is a seven-bit digital code used to represent decimal digits while enabling error detection. It ensures each digit is encoded with exactly two 1s and five 0s in predefined weighted positions. If transmission errors alter the number of 1s, the receiving circuit identifies the discrepancy, allowing for error detection without correction.
+
+---
+
+Slide 77:
+{
+Title:
+Digital Codes
+
+Content:
+The following table compares different digital codes for decimal digits:
+
+Decimal | BCD     | Excess-3 | 8 4 -2 -1 | 2 4 2 1 | Biquinary
+0       | 0000    | 0011     | 0000     | 0000    | 01 00001
+1       | 0001    | 0100     | 0111     | 0001    | 01 00010
+2       | 0010    | 0101     | 0110     | 0010    | 01 00100
+3       | 0011    | 0110     | 0101     | 0011    | 01 01000
+4       | 0100    | 0111     | 0100     | 0100    | 01 10000
+5       | 0101    | 1000     | 1011     | 1011    | 10 00001
+6       | 0110    | 1001     | 1010     | 1100    | 10 00010
+7       | 0111    | 1010     | 1001     | 1101    | 10 00100
+8       | 1000    | 1011     | 1000     | 1110    | 10 01000
+9       | 1001    | 1100     | 1111     | 1111    | 10 10000
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide presents a comparison of various digital codes used to represent decimal digits in binary form. Each column shows how the decimal numbers 0 through 9 are encoded in different coding schemes, such as BCD, Excess-3, 8 4 -2 -1, 2 4 2 1, and Biquinary. Understanding these codes is essential for digital system design and data representation.
+
+---
+
+Slide 78:
+{
+Title:
+The Gray Code
+
+Content:
+The Gray Code is a type of digital code with the following characteristics:
+- It is unweighted and is not an arithmetic code: there are no specific weights assigned to the bit positions.
+- The important feature of the Gray Code is that it exhibits only a single bit change from one code to the next.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+The Gray Code is a binary numeral system where two successive values differ by only one bit. This property is particularly useful in digital communications and error correction, as it minimizes the chance of errors during transitions between values. Unlike weighted codes, the Gray Code does not assign specific weights to bit positions, making it non-arithmetic.
+
+---
+
+Slide 79:
+{
+Title:
+Digital Codes
+
+Content:
+**Binary-to-Gray Code Conversion**
+
+1. The most significant bit (left-most) in the Gray code is the same as the corresponding MSB in the binary number.
+2. Going from left to right, add each adjacent pair of binary code bits to get the next Gray code bit. Discard carries.
+
+**Example:**
+
+Image/Diagram Description:
+A diagram showing the conversion between binary and Gray code sequences for the numbers 0 and 1, with arrows indicating the transitions.
+}
+
+Brief Explanation:
+This slide explains the process of converting binary numbers to Gray code, a binary numeral system where two successive values differ by only one bit. The most significant bit remains the same, while subsequent bits are derived by adding adjacent binary bits without carrying over. The example visually demonstrates this conversion for clarity.
+
+---
+
+Slide 80:
+{
+Title:
+Digital Codes
+
+Content:
+The following table compares Decimal, Binary, and Gray Code representations:
+
+Decimal: 0, Binary: 0000, Gray Code: 0000
+Decimal: 1, Binary: 0001, Gray Code: 0001
+Decimal: 2, Binary: 0010, Gray Code: 0011
+Decimal: 3, Binary: 0011, Gray Code: 0010
+Decimal: 4, Binary: 0100, Gray Code: 0110
+Decimal: 5, Binary: 0101, Gray Code: 0111
+Decimal: 6, Binary: 0110, Gray Code: 0101
+Decimal: 7, Binary: 0111, Gray Code: 0100
+Decimal: 8, Binary: 1000, Gray Code: 1100
+Decimal: 9, Binary: 1001, Gray Code: 1101
+Decimal: 10, Binary: 1010, Gray Code: 1111
+Decimal: 11, Binary: 1011, Gray Code: 1110
+Decimal: 12, Binary: 1100, Gray Code: 1010
+Decimal: 13, Binary: 1101, Gray Code: 1011
+Decimal: 14, Binary: 1110, Gray Code: 1001
+Decimal: 15, Binary: 1111, Gray Code: 1000
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide presents a comparison of three digital coding schemes: Decimal, Binary, and Gray Code. Decimal values from 0 to 15 are shown alongside their equivalent Binary and Gray Code representations. Gray Code is particularly useful in digital systems because it ensures that only one bit changes between consecutive numbers, reducing errors in mechanical and electronic transitions.
+
+---
+
+Slide 81:
+{
+Title:
+Gray Code-to-Binary Conversion
+
+Content:
+Gray Code-to-Binary Conversion:
+
+1. The most significant bit (left-most) in the Gray code is the same as the corresponding MSB in the binary number.
+2. Add each binary code bit generated to the Gray code bit in the next adjacent position. Discard carries.
+
+Example:
+[Diagram illustrating the conversion process between Gray code and binary.]
+
+Image/Diagram Description:
+A diagram showing the conversion process between Gray code and binary, with two rows of numbers connected by arrows indicating the conversion steps.
+}
+
+Brief Explanation:
+This slide explains the method for converting Gray code to binary. The process begins by keeping the most significant bit (MSB) unchanged. Each subsequent binary bit is obtained by adding the previously generated binary bit to the next adjacent Gray code bit, ignoring any carry-over. The diagram visually demonstrates this step-by-step conversion.
+
+---
+
+Slide 82:
+{
+Title:
+Parity
+
+Content:
+- It is one of the most common ways to achieve error detection.
+- A *parity bit* is an extra bit included with a message to make the total number of 1s transmitted either odd or even.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide introduces parity as a fundamental error detection technique in digital communications. A parity bit is added to a data message to ensure the total count of 1s is either odd or even, allowing simple error checks during transmission. This method is widely used due to its simplicity and effectiveness in identifying single-bit errors.
+
+---
+
+Slide 83:
+{
+Title:
+Parity
+
+Content:
+**Odd Parity:** The parity bit is chosen so that the total number of 1s is odd.
+
+**Even Parity:** The parity bit is chosen so that the total number of 1s is even.
+
+- It can detect odd number of errors but not even number of errors.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains the concept of parity in error detection. Parity bits are used to ensure the total number of 1s in a data transmission is either odd (odd parity) or even (even parity). While parity checking can detect an odd number of bit errors, it fails to identify errors if an even number of bits are flipped.
+
+---
+
+Slide 84:
+{
+Title:
+Parity
+
+Content:
+**Odd Parity:** The parity bit is chosen so that the total number of 1s is odd.
+
+**Even Parity:** The parity bit is chosen so that the total number of 1s is even.
+
+- It can detect odd number of errors but not even number of errors.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains the concept of parity in error detection, specifically odd and even parity. Odd parity ensures the total number of 1s in a data set, including the parity bit, is odd, while even parity ensures it is even. Parity checks are useful for detecting single-bit errors but cannot identify errors if an even number of bits are flipped.
+
+---
+
+Slide 85:
+{
+Title:
+Parity
+
+Content:
+Examples:
+
+Data Bits | Odd Parity | Even Parity
+0000 | 1 | 0
+0001 | 0 | 1
+0010 | 0 | 1
+0011 | 1 | 0
+0100 | 0 | 1
+0101 | 1 | 0
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide illustrates the concept of parity in data transmission, specifically odd and even parity. The table shows how a parity bit is added to a 4-bit data word to ensure the total number of 1s is either odd or even, which helps detect errors during transmission. Each row represents a different 4-bit input and its corresponding parity bit for both odd and even parity schemes.
+
+---
+
+Slide 86:
+{
+Title:
+Parity
+
+Content:
+7 ASCII bits + 1 Parity bit = 8 bits = 1 byte.
+
+A p100 0001
+- p = 0 for even parity.
+- p = 1 for odd parity.
+
+B p100 0010
+- p = 0 for even parity.
+- p = 1 for odd parity.
+
+C p100 0011
+- p = 1 for even parity.
+- p = 0 for odd parity.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains the concept of parity in data transmission, where an extra bit (parity bit) is added to 7 ASCII bits to form a byte. The parity bit ensures error detection by making the total number of 1s either even or odd, depending on the chosen parity scheme. Examples for letters A, B, and C illustrate how the parity bit is set for both even and odd parity.
+
+---
+
+Slide 87:
+{
+Title:
+Parity
+
+Content:
+Error Detection Example
+
+Send:
+A (0100 0001) with even parity.
+
+Receive:
+Should receive (0100 0001)
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide demonstrates a basic error detection technique using parity bits. The example shows the transmission of the ASCII character 'A' (binary 0100 0001) with an even parity bit added. The receiver expects to receive the same binary sequence, allowing detection of single-bit errors during data transmission.
+
+---
+
+Slide 88:
+{
+Title:
+Parity
+
+Content:
+If an odd number of 1s is received, there is an error.
+
+- 0101 0001 - 1 error: Can be detected with parity.
+- 0111 0001 - 2 errors: Cannot be detected with parity.
+- 0111 0011 - 3 errors: Can be detected with parity.
+- 0111 0010 - 4 errors: Cannot be detected with parity.
+- 0101 1110 - 5 errors: Can be detected with parity.
+
+Image/Diagram Description:
+Not Specified
+}
+
+Brief Explanation:
+This slide explains the concept of parity in error detection for binary data transmission. Parity checking identifies errors by counting the number of 1s in a received binary sequence; an odd count signals an error. However, it can only detect an odd number of bit errors, failing to identify even-numbered errors.
+
+---

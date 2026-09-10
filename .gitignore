@@ -1,0 +1,22 @@
+__pycache__/
+.pytest_cache/
+.venv*/
+.worktrees/
+models/
+flashcards/
+pipeline_output/
+pipeline_uploads/
+pipeline_temporary/
+pipeline_logs/
+
+# Generated portable bundles are multi-gigabyte GitHub Release artifacts.
+dist/
+tesseract/
+data/
+build/
+packaging/assets/
+structured_text/
+progress.json
+progress.log
+*.tmp
+*.pyc

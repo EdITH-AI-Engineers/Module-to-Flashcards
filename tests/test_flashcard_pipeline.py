@@ -1,0 +1,270 @@
+from collections import deque
+import json
+
+import pytest
+
+from flashcard_pipeline import FlashcardPipeline, GenerationError, PipelineConfig
+from flashcard_types import FlashcardDraft, GraphFact, ModuleIdentity
+from tests.factories import cluster_json, graph_facts, plan_json
+
+
+class FakeBackend:
+    def __init__(self, responses):
+        self.responses = deque(responses)
+        self.calls = []
+
+    def complete(self, system, user, *, max_tokens):
+        self.calls.append((system, user, max_tokens))
+        response = self.responses.popleft()
+        if callable(response):
+            return response(system, user, max_tokens)
+        return response
+
+
+def empty_review():
+    return json.dumps({"issues": []})
+
+
+def flag_first_cluster(system, user, max_tokens):
+    payload = json.loads(user.split("INPUT JSON:\n", 1)[1])
+    first_uuid = payload["clusters"][0]["cluster"]
+    return json.dumps(
+        {
+            "issues": [
+                {
+                    "cluster": first_uuid,
+                    "reasons": ["semantic duplication"],
+                }
+            ]
+        }
+    )
+
+
+def test_pipeline_generates_twenty_valid_clusters_without_review():
+    backend = FakeBackend(
+        [plan_json()] + [cluster_json(index) for index in range(1, 21)]
+    )
+    pipeline = FlashcardPipeline(backend, PipelineConfig(final_review=False))
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert len(clusters) == 20
+    assert len({cluster.cluster for cluster in clusters}) == 20
+    assert all(len(cluster.cards) == 5 for cluster in clusters)
+    assert len(backend.calls) == 21
+
+
+def test_pipeline_defaults_use_practical_local_token_budgets():
+    config = PipelineConfig()
+
+    assert config.plan_max_tokens == 3072
+    assert config.cluster_max_tokens == 1536
+    assert config.review_max_tokens == 1024
+
+
+def test_pipeline_reports_major_generation_stages():
+    backend = FakeBackend(
+        [plan_json()] + [cluster_json(index) for index in range(1, 21)]
+    )
+    messages = []
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(final_review=False),
+        progress=messages.append,
+    )
+
+    pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert messages[0] == "Planning 20 concepts from 20 grounded lesson facts..."
+    assert "Generating cluster 1/20: Concept 1 topic1 alpha1 beta1" in messages
+    assert "Generating cluster 20/20: Concept 20 topic20 alpha20 beta20" in messages
+    assert messages[-1] == "100 flashcards generated (50 + 50)."
+
+
+def test_pipeline_balances_large_fact_set_across_slides_and_bounds_prompt():
+    facts = tuple(
+        GraphFact(
+            f"e{index}",
+            f"Grounded lesson fact {index} with enough detail.",
+            slides=((index - 1) % 3 + 1,),
+            topic=f"Topic {(index - 1) % 3 + 1}",
+        )
+        for index in range(1, 61)
+    )
+    backend = FakeBackend(
+        [plan_json()] + [cluster_json(index) for index in range(1, 21)]
+    )
+    messages = []
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(final_review=False),
+        progress=messages.append,
+    )
+
+    pipeline.run(ModuleIdentity("CPE0021", "1"), facts)
+
+    payload = json.loads(backend.calls[0][1].split("INPUT JSON:\n", 1)[1])
+    assert len(payload["graph_facts"]) == 50
+    assert {item["slides"][0] for item in payload["graph_facts"]} == {1, 2, 3}
+    assert messages[0] == "Planning 20 concepts from 50 grounded lesson facts..."
+
+
+def test_invalid_cluster_is_retried_with_validator_feedback():
+    responses = [plan_json(), '{"cards": []}', cluster_json(1)]
+    responses.extend(cluster_json(index) for index in range(2, 21))
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+    )
+
+    pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert "expected exactly 5 cards" in backend.calls[2][1]
+    assert "complete replacement" in backend.calls[2][1].lower()
+
+
+def test_overfull_cluster_is_retried_and_never_reaches_pipeline_result():
+    overfull = json.loads(cluster_json(1))
+    overfull["cards"].append(dict(overfull["cards"][0]))
+    responses = [plan_json(), json.dumps(overfull), cluster_json(1)]
+    responses.extend(cluster_json(index) for index in range(2, 21))
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert "expected exactly 5 cards, received 6" in backend.calls[2][1]
+    assert sum(len(cluster.cards) for cluster in clusters) == 100
+
+
+def test_invalid_plan_retry_omits_rejected_bulk_response():
+    invalid = json.dumps({"concepts": []})
+    backend = FakeBackend(
+        [invalid, plan_json()] + [cluster_json(index) for index in range(1, 21)]
+    )
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+    )
+
+    pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    retry_prompt = backend.calls[1][1]
+    assert "expected at least 20 concepts" in retry_prompt
+    assert '"rejected_candidate"' not in retry_prompt
+
+
+def test_exhausted_retries_do_not_return_partial_results():
+    backend = FakeBackend(
+        [plan_json(), '{"cards": []}', '{"cards": []}', '{"cards": []}']
+    )
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+    )
+
+    with pytest.raises(GenerationError, match="concept 1"):
+        pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert len(backend.calls) == 4
+
+
+def test_explicit_insufficient_content_stops_without_retries():
+    backend = FakeBackend(
+        [json.dumps({"insufficient_content": "only ten concepts are supported"})]
+    )
+    pipeline = FlashcardPipeline(backend, PipelineConfig(final_review=False))
+
+    with pytest.raises(GenerationError, match="more content is required"):
+        pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert len(backend.calls) == 1
+
+
+def test_prior_question_is_checked_without_current_module_clusters():
+    card = FlashcardDraft(
+        type="identification",
+        question="What term names the instruction cycle?",
+        correct_option="Instruction cycle",
+        wrong_option_1="",
+        wrong_option_2="",
+        wrong_option_3="",
+        is_true=None,
+        expalanation="The instruction cycle is the named process.",
+        hint="Think of the processor's repeated sequence.",
+        difficulty=1,
+        assessment_approach="recall",
+    )
+
+    errors = FlashcardPipeline._duplicate_errors(
+        (card,),
+        (),
+        ("What term names the instruction cycle?",),
+    )
+
+    assert errors == (
+        "card 1 duplicates a question from a previously generated module in this course",
+    )
+
+
+def test_pipeline_threads_prior_concepts_and_retries_prior_question_duplicate():
+    responses = [plan_json(), cluster_json(1), cluster_json(1, revision=1)]
+    responses.extend(cluster_json(index) for index in range(2, 21))
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+    )
+    duplicate_question = json.loads(cluster_json(1))["cards"][0]["question"]
+
+    pipeline.run(
+        ModuleIdentity("CPE0021", "2"),
+        graph_facts(),
+        prior_concept_names=("Earlier concept",),
+        prior_questions=(duplicate_question,),
+    )
+
+    plan_payload = json.loads(backend.calls[0][1].split("INPUT JSON:\n", 1)[1])
+    assert plan_payload["previously_covered_concepts"] == ["Earlier concept"]
+    assert "previously generated module" in backend.calls[2][1]
+
+
+def test_final_review_uses_five_groups_and_one_global_pass():
+    responses = [plan_json()]
+    responses.extend(cluster_json(index) for index in range(1, 21))
+    responses.extend(empty_review() for _ in range(6))
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(backend, PipelineConfig(final_review=True))
+
+    pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    review_calls = backend.calls[21:]
+    assert len(review_calls) == 6
+    for _, prompt, _ in review_calls[:5]:
+        payload = json.loads(prompt.split("INPUT JSON:\n", 1)[1])
+        assert len(payload["clusters"]) == 4
+        assert "cards" in payload["clusters"][0]
+    global_payload = json.loads(review_calls[-1][1].split("INPUT JSON:\n", 1)[1])
+    assert len(global_payload["clusters"]) == 20
+    assert "questions" in global_payload["clusters"][0]
+    assert "cards" not in global_payload["clusters"][0]
+
+
+def test_final_review_regenerates_flagged_cluster_and_preserves_uuid():
+    responses = [plan_json()]
+    responses.extend(cluster_json(index) for index in range(1, 21))
+    responses.extend(empty_review() for _ in range(5))
+    responses.append(flag_first_cluster)
+    responses.append(cluster_json(1, revision=1))
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(backend, PipelineConfig(final_review=True))
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert "revision1" in clusters[0].cards[0].question
+    assert clusters[0].cluster in backend.calls[-1][1]
+    assert "semantic duplication" in backend.calls[-1][1]

@@ -1,0 +1,248 @@
+name: Build portable Windows release (GPU-capable, EXPERIMENTAL)
+
+# ---------------------------------------------------------------------------
+# WHY THIS FILE IS SEPARATE FROM build-portable.yml:
+#
+# This build compiles llama-cpp-python from source with CUDA support for
+# several GPU generations at once (Turing/Ampere/Ada: sm_75, sm_80, sm_86,
+# sm_89 -- roughly RTX 20-series through RTX 40-series). torch also gets an
+# official CUDA wheel, which is well-tested and safe on GPU-less machines.
+#
+# The llama-cpp-python side is NOT well-tested here, for reasons worth
+# understanding before you rely on it:
+#   - This runner has no physical GPU, so nothing in this workflow can
+#     confirm the compiled binary actually offloads to a GPU correctly,
+#     or that it even *loads* without error on a machine with no NVIDIA
+#     driver installed at all. Community Windows CUDA wheels for this
+#     library have a documented history of crashing at runtime despite
+#     building successfully.
+#   - Multi-architecture builds are less common than single-architecture
+#     ones in the community wheels this was modeled on, so there's less
+#     of a track record to lean on.
+#
+# Treat the artifact from this workflow as a release candidate, not a
+# finished release. Validate it (see the checklist in the job summary
+# output) on at least one real GPU machine AND one real GPU-less machine
+# before rolling it out. If it fails on the GPU-less machine, fall back to
+# distributing build-portable.yml's CPU-only artifact to those devices and
+# keep this one only for machines you've confirmed a supported GPU on.
+#
+# NOTE on the DLL-loading steps below: a source build of llama-cpp-python
+# with CUDA does NOT reliably ship the CUDA runtime DLLs (cudart64_12.dll,
+# cublas64_12.dll, cublasLt64_12.dll) alongside the compiled llama.dll the
+# way a pre-built wheel does. Without them, `import llama_cpp` fails with
+# "Could not find module '...\llama.dll' (or one of its dependencies)" --
+# a DLL-dependency-resolution error, not a "no GPU present" error. This
+# happens at import time, before any GPU hardware is touched, so it is
+# NOT explained by this runner lacking a physical GPU. The steps below
+# diagnose the exact missing dependency and stage the CUDA runtime DLLs
+# next to llama.dll so both this verification step and (assuming
+# packaging/build_portable.ps1's PyInstaller collection already bundles
+# llama_cpp's lib/ directory, since it must already do so to ship
+# llama.dll itself) the final portable release have what they need.
+# CONFIRM the staged DLLs actually end up in dist/ -- this workflow does
+# not verify that on its own.
+# ---------------------------------------------------------------------------
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    # Pinned to windows-2022 (not windows-latest) on purpose: CUDA Toolkit
+    # 12.4's installer only registers its MSBuild/CMake toolset integration
+    # for Visual Studio versions that existed when it shipped. windows-latest
+    # can point at a newer VS release CUDA 12.4 doesn't know about yet, which
+    # surfaces as CMake's "No CUDA toolset found" even though the toolkit
+    # itself installed correctly. windows-2022 ships VS2022, the toolset this
+    # CUDA version was actually built and tested against.
+    runs-on: windows-2022
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Tesseract OCR
+        run: choco install tesseract --version=5.4.0.20240606 -y --no-progress
+
+      - name: Locate Tesseract install directory
+        id: tesseract
+        shell: pwsh
+        run: |
+          $candidates = @(
+            (Get-Command tesseract.exe -ErrorAction SilentlyContinue).Source,
+            "C:\Program Files\Tesseract-OCR\tesseract.exe"
+          ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+          if (-not $candidates) { throw "tesseract.exe not found after install" }
+          $exePath = $candidates[0]
+          $dir = Split-Path -Parent $exePath
+          echo "dir=$dir" >> $env:GITHUB_OUTPUT
+          Write-Host "Tesseract dir: $dir"
+
+      # Installs the CUDA Toolkit (nvcc + libraries) onto the runner so we can
+      # compile a CUDA-enabled extension, with no GPU hardware required for
+      # compilation itself -- only for actually running the result later.
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.19
+        id: cuda-toolkit
+        with:
+          cuda: "12.4.0"
+          method: "network"
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "visual_studio_integration"]'
+
+      - name: Create virtual environment and install base dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Install CUDA-enabled torch
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe -m pip install torch --index-url https://download.pytorch.org/whl/cu124
+
+      - name: Compile llama-cpp-python with multi-architecture CUDA support
+        shell: pwsh
+        env:
+          CMAKE_ARGS: "-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=75;80;86;89"
+          FORCE_CMAKE: "1"
+        run: |
+          .\.venv\Scripts\python.exe -m pip install llama-cpp-python --no-binary llama-cpp-python --force-reinstall --no-cache-dir
+
+      # NEW: make sure the CUDA Toolkit's bin directory (which holds the
+      # cudart/cublas runtime DLLs, not just the dev-time nvcc/headers) is
+      # genuinely on PATH for this job. Jimver/cuda-toolkit is expected to
+      # do this itself, but making it explicit here removes ambiguity and
+      # gives us a clear log line to check if the later steps still fail.
+      - name: Confirm CUDA runtime directory is on PATH
+        shell: pwsh
+        run: |
+          $cudaPath = "${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+          if (-not $cudaPath) { $cudaPath = $env:CUDA_PATH }
+          if (-not $cudaPath) { throw "CUDA_PATH was not set by the CUDA Toolkit install step" }
+          $cudaBin = Join-Path $cudaPath "bin"
+          if (-not (Test-Path -LiteralPath $cudaBin)) {
+            throw "Expected CUDA bin directory not found: $cudaBin"
+          }
+          echo "$cudaBin" >> $env:GITHUB_PATH
+          Write-Host "CUDA bin directory: $cudaBin"
+          Write-Host "Runtime DLLs present there:"
+          Get-ChildItem -LiteralPath $cudaBin -Filter "cu*.dll" | Format-Table Name, Length
+
+      # NEW: reveal exactly what got installed and what llama.dll actually
+      # declares as dependencies, instead of guessing at the missing DLL.
+      - name: Inspect llama.dll and its declared dependencies
+        shell: pwsh
+        run: |
+          $libDir = ".venv\Lib\site-packages\llama_cpp\lib"
+          if (-not (Test-Path -LiteralPath $libDir)) {
+            throw "llama_cpp lib directory not found at $libDir -- build may not have installed correctly"
+          }
+          Write-Host "Contents of ${libDir}:"
+          Get-ChildItem -LiteralPath $libDir | Format-Table Name, Length
+
+          $llamaDll = Join-Path $libDir "llama.dll"
+          if (-not (Test-Path -LiteralPath $llamaDll)) {
+            throw "llama.dll not found in $libDir"
+          }
+
+          $dumpbin = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -products * -find "**\dumpbin.exe" | Select-Object -First 1
+          if ($dumpbin) {
+            Write-Host "Declared dependencies of llama.dll (via dumpbin):"
+            & $dumpbin /dependents $llamaDll
+          } else {
+            Write-Host "dumpbin.exe not found via vswhere; skipping dependency listing"
+          }
+
+      # NEW: stage the CUDA runtime DLLs next to llama.dll so it can resolve
+      # them regardless of PATH quirks in whatever process loads it later
+      # (this CI check, and -- pending confirmation against the packaged
+      # dist/ output -- the shipped portable release itself). The exact
+      # filenames below match CUDA 12.4; if the dumpbin output from the
+      # previous step names something different, update this list to match.
+      - name: Stage CUDA runtime DLLs alongside llama.dll
+        shell: pwsh
+        run: |
+          $cudaPath = "${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+          if (-not $cudaPath) { $cudaPath = $env:CUDA_PATH }
+          $cudaBin = Join-Path $cudaPath "bin"
+          $libDir = ".venv\Lib\site-packages\llama_cpp\lib"
+          $required = @(
+            "cudart64_12.dll",
+            "cublas64_12.dll",
+            "cublasLt64_12.dll"
+          )
+          foreach ($name in $required) {
+            $source = Join-Path $cudaBin $name
+            if (-not (Test-Path -LiteralPath $source)) {
+              throw "Required CUDA runtime DLL not found: $source -- check the dumpbin output from the previous step for the actual expected name"
+            }
+            Copy-Item -LiteralPath $source -Destination $libDir -Force
+            Write-Host "Copied $name into $libDir"
+          }
+
+      - name: Verify the compiled extension at least imports
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe -c "import llama_cpp; print('llama_cpp imported OK'); print('GPU offload compiled in:', llama_cpp.llama_supports_gpu_offload())"
+
+      - name: Build the portable bundle
+        shell: pwsh
+        env:
+          TESSERACT_DIR: ${{ steps.tesseract.outputs.dir }}
+        run: |
+          # SkipGpuPreflight is required here because this runner has no GPU to
+          # test against -- NOT because the build is confirmed CPU-only. See
+          # the warning banner at the top of this file.
+          powershell -ExecutionPolicy Bypass -File packaging/build_portable.ps1 `
+            -TesseractDir "$env:TESSERACT_DIR" `
+            -SkipGpuPreflight
+
+      # NEW: confirm the staged CUDA DLLs actually made it into the frozen
+      # dist output. If this fails, packaging/build_portable.ps1's
+      # PyInstaller collection is not sweeping up llama_cpp/lib the way the
+      # comment at the top of this file assumes, and that script needs a
+      # matching change to copy these DLLs into dist/ explicitly.
+      - name: Confirm CUDA runtime DLLs reached the packaged bundle
+        shell: pwsh
+        run: |
+          $distRoot = Get-ChildItem -Path "dist" -Directory | Select-Object -First 1
+          if (-not $distRoot) { throw "no dist/<AppDir> found after build" }
+          $required = @("cudart64_12.dll", "cublas64_12.dll", "cublasLt64_12.dll")
+          $missing = @()
+          foreach ($name in $required) {
+            $found = Get-ChildItem -Path $distRoot.FullName -Filter $name -Recurse -ErrorAction SilentlyContinue
+            if (-not $found) { $missing += $name }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Host "::warning::CUDA runtime DLLs missing from packaged bundle: $($missing -join ', ')"
+            Write-Host "packaging/build_portable.ps1 likely needs an explicit copy step for these -- do not treat this artifact as GPU-ready until fixed."
+          } else {
+            Write-Host "All required CUDA runtime DLLs found in the packaged bundle."
+          }
+
+      - name: Upload the release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModuleToFlashcards-portable-windows-x64-GPU-CANDIDATE
+          path: dist/ModuleToFlashcards-*-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Print validation checklist
+        shell: pwsh
+        run: |
+          echo "## Before trusting this build" >> $env:GITHUB_STEP_SUMMARY
+          echo "1. Extract it on one machine WITH a supported NVIDIA GPU (RTX 20/30/40-series or equivalent, current driver)." >> $env:GITHUB_STEP_SUMMARY
+          echo "   Run ModuleToFlashcards.exe --verify, then run it normally and confirm it prints 'GPU acceleration ready'." >> $env:GITHUB_STEP_SUMMARY
+          echo "2. Extract it separately on one machine with NO NVIDIA GPU at all." >> $env:GITHUB_STEP_SUMMARY
+          echo "   Confirm it still starts and prints 'CPU fallback active' -- it must not crash or fail a DLL load." >> $env:GITHUB_STEP_SUMMARY
+          echo "3. Check the 'Confirm CUDA runtime DLLs reached the packaged bundle' step above for warnings." >> $env:GITHUB_STEP_SUMMARY
+          echo "   If it warned about missing DLLs, this candidate is not GPU-ready on a machine without CUDA Toolkit installed system-wide." >> $env:GITHUB_STEP_SUMMARY
+          echo "4. Only after all checks pass, distribute this build to your GPU-equipped devices." >> $env:GITHUB_STEP_SUMMARY
+          echo "   Keep using the plain build-portable.yml artifact for anything unconfirmed or GPU-less." >> $env:GITHUB_STEP_SUMMARY

@@ -51,7 +51,7 @@ True-false rules:
 - False items must state a plausible misconception or incorrect relationship that the supplied facts resolve.
 
 DIRECT STEMS
-For multiple-choice and identification, use a natural direct form beginning with What, Which, Who, Where, When, Why, How, or What term. Do not use wrappers such as According to, Based on, The material states, The following claim, Consider this statement, Evaluate this statement, Identify the concept associated with, or equivalents. Do not use vague subjective-comparison framings such as Which best describes, Which most accurately, Which is the best, or similar wording. Ask a direct single-fact question instead, such as What does Article 2 Section 13 promote regarding the youth?
+For multiple-choice and identification, use a natural direct form beginning with What, Which, Who, Where, When, Why, How, or What term. Do not use wrappers such as According to, Based on, The material states, The following claim, Consider this statement, Evaluate this statement, Identify the concept associated with, or equivalents. The framings "Which of the following", "Which best describes", and "Which most accurately" are allowed when they produce a clear, answerable question. Avoid only vague or subjective wording that cannot be resolved from the supplied facts.
 
 DIFFICULTY
 Use integer 1 only for recall or straightforward understanding. Use integer 2 for interpretation, comparison, classification, application, or distinction. Use integer 3 for analysis, complex application, multi-step reasoning, competing explanations, or an unfamiliar but fully supported scenario.

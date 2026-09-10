@@ -45,8 +45,6 @@ BANNED_FRAMING = (
     "consider this statement",
     "evaluate this statement",
     "identify the concept associated with",
-    "which best describes",
-    "which most accurately",
     "which is the best",
     "which best explains",
 )
@@ -286,6 +284,12 @@ def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
         card_type = item.get("type")
         if not isinstance(card_type, str):
             raise ValidationError(f"card {position} field 'type' must be a string")
+        allowed_fields = CARD_FIELDS | {"explanation"}
+        unknown_fields = sorted(set(item) - allowed_fields)
+        if unknown_fields:
+            raise ValidationError(
+                f"card {position} contains unknown fields: {', '.join(unknown_fields)}"
+            )
         required = COMMON_CARD_FIELDS | TYPE_SPECIFIC_FIELDS.get(card_type, set())
         missing = sorted(required - set(item))
         if "expalanation" not in item and "explanation" not in item:
@@ -393,10 +397,19 @@ def validate_cluster(
         errors.append(
             f"cluster must use {CARDS_PER_CLUSTER} distinct assessment approaches"
         )
-    if tuple(approaches) != tuple(concept.assessment_approaches):
+    expected_approaches = tuple(concept.assessment_approaches)
+    if tuple(approaches) != expected_approaches:
         errors.append(
             "cluster approaches must match the planned assessment approaches in order"
         )
+        for position, (actual, expected) in enumerate(
+            zip(approaches, expected_approaches), start=1
+        ):
+            if actual != expected:
+                errors.append(
+                    f"card {position} assessment_approach must be {expected!r}, "
+                    f"received {actual!r}"
+                )
 
     if source_facts:
         grounded_terms = {

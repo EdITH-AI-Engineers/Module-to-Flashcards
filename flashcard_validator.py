@@ -186,8 +186,8 @@ def parse_concept_plan(
         seen_names.add(normalized_name)
 
         try:
-            fact_ids = _string_list(item.get("fact_ids"), f"{prefix} fact_ids")
-            approaches = _string_list(
+            fact_ids = _tolerant_string_list(item.get("fact_ids"), f"{prefix} fact_ids")
+            approaches = _tolerant_string_list(
                 item.get("assessment_approaches"),
                 f"{prefix} assessment_approaches",
             )

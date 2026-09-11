@@ -25,18 +25,6 @@ from flashcard_types import (
 
 
 ALLOWED_TYPES = {"multiple-choice", "identification", "true-false"}
-ALLOWED_APPROACHES = {
-    "recall",
-    "comparison",
-    "classification",
-    "application",
-    "scenario analysis",
-    "cause/effect",
-    "misconception detection",
-    "conditions",
-    "consequences",
-    "reversed reasoning",
-}
 BANNED_FRAMING = (
     "according to",
     "based on",
@@ -232,20 +220,6 @@ def parse_concept_plan(
                 errors.append(f"{prefix} uses unknown fact id {fact_id!r}")
             else:
                 resolved_facts.append(known[fact_id])
-        if (
-            len(approaches) != CARDS_PER_CLUSTER
-            or len(set(approaches)) != CARDS_PER_CLUSTER
-        ):
-            errors.append(
-                f"{prefix} must contain exactly {CARDS_PER_CLUSTER} "
-                "distinct assessment approaches"
-            )
-        invalid_approaches = sorted(set(approaches) - ALLOWED_APPROACHES)
-        if invalid_approaches:
-            errors.append(
-                f"{prefix} contains unsupported assessment approaches: {', '.join(invalid_approaches)}"
-            )
-
         results.append(
             ConceptPlan(
                 name=name,
@@ -407,19 +381,6 @@ def validate_cluster(
             "cluster must contain at least one multiple-choice, identification, and true-false card"
         )
 
-    approaches = [card.assessment_approach for card in cards]
-    if (
-        len(approaches) != CARDS_PER_CLUSTER
-        or len(set(approaches)) != CARDS_PER_CLUSTER
-    ):
-        errors.append(
-            f"cluster must use {CARDS_PER_CLUSTER} distinct assessment approaches"
-        )
-    if set(approaches) != set(concept.assessment_approaches):
-        errors.append(
-            "cluster approaches must exactly match the planned assessment approaches"
-        )
-
     if source_facts:
         grounded_terms = {
             token
@@ -457,8 +418,11 @@ def validate_cluster(
             errors.append(f"{prefix} hint must not be empty")
         if type(card.difficulty) is not int or card.difficulty not in (1, 2, 3):
             errors.append(f"{prefix} difficulty must be 1, 2, or 3")
-        if card.assessment_approach not in ALLOWED_APPROACHES:
-            errors.append(f"{prefix} assessment approach is not allowed")
+        if (
+            not isinstance(card.assessment_approach, str)
+            or not card.assessment_approach.strip()
+        ):
+            errors.append(f"{prefix} assessment approach must not be empty")
         if any("\n" in value or "\r" in value for value in _text_fields(card)):
             errors.append(f"{prefix} fields must not contain line breaks")
         if any(phrase in card.question.casefold() for phrase in BANNED_FRAMING):

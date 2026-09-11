@@ -63,7 +63,7 @@ def test_system_prompt_defines_internal_json_contract_and_all_types():
     assert "return json only" in lowered
     assert all(name in SYSTEM_PROMPT for name in ("multiple-choice", "identification", "true-false"))
     assert "expalanation" in SYSTEM_PROMPT
-    assert "use 5 meaningfully different assessment approaches" in lowered
+    assert "assessment approach labels may repeat" in lowered
 
 
 def test_plan_prompt_serializes_relationships_without_provenance():
@@ -85,6 +85,7 @@ def test_plan_prompt_serializes_relationships_without_provenance():
     assert "19, 20" in prompt
     assert 'key "fact_ids" literally' in prompt
     assert "concise reason" not in prompt.lower()
+    assert "labels may repeat" in prompt.lower()
 
 
 def test_plan_prompt_includes_prior_concepts_when_supplied():
@@ -107,6 +108,8 @@ def test_cluster_prompt_contains_only_the_selected_concept_evidence():
     assert payload["concept"]["assessment_approaches"] == list(concept().assessment_approaches)
     assert "exactly 5" in prompt
     assert '"cards"' in prompt
+    assert "may repeat" in prompt
+    assert "does not need to match" in prompt
 
 
 def test_retry_prompt_requests_complete_replacement_with_errors():
@@ -131,7 +134,7 @@ def test_grounding_review_includes_evidence_and_card_content():
     assert "binary | uses | base 2" in prompt
     assert "Binary uses base 2" in prompt
     assert '"issues"' in prompt
-    assert "among its 5 assessment approaches" in prompt
+    assert "insufficient variation" not in prompt
 
 
 def test_duplicate_review_excludes_answers_and_evidence():

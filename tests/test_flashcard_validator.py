@@ -228,6 +228,22 @@ def test_concept_plan_accepts_comma_separated_token_fields():
     )
 
 
+def test_concept_plan_allows_repeated_custom_assessment_approaches():
+    raw, known = plan_json()
+    payload = json.loads(raw)
+    payload["concepts"][0]["assessment_approaches"] = [
+        "guided review",
+        "guided review",
+    ]
+
+    concepts = parse_concept_plan(json.dumps(payload), known)
+
+    assert concepts[0].assessment_approaches == (
+        "guided review",
+        "guided review",
+    )
+
+
 @pytest.mark.parametrize("value", (123, None, ""))
 def test_concept_plan_rejects_malformed_fact_id_scalars(value):
     raw, known = plan_json()
@@ -308,13 +324,24 @@ def test_cluster_rejects_type_and_text_rule_violations(position, changes, messag
     assert any(message in error for error in errors)
 
 
-def test_cluster_requires_five_distinct_assessment_approaches():
+def test_cluster_allows_repeated_custom_assessment_approaches():
+    values = tuple(
+        replace(card, assessment_approach="guided review")
+        for card in valid_cards()
+    )
+
+    errors = validate_cluster(values, valid_concept())
+
+    assert errors == ()
+
+
+def test_cluster_rejects_blank_assessment_approach():
     values = list(valid_cards())
-    values[-1] = replace(values[-1], assessment_approach="recall")
+    values[-1] = replace(values[-1], assessment_approach="   ")
 
     errors = validate_cluster(tuple(values), valid_concept())
 
-    assert any("5 distinct assessment approaches" in error for error in errors)
+    assert any("assessment approach must not be empty" in error for error in errors)
 
 
 def test_cluster_requires_all_three_question_types():

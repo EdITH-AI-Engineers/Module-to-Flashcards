@@ -97,6 +97,60 @@ def _balanced_plan_facts(
     return tuple(selected)
 
 
+DISTRACTOR_FACT_LIMIT = 12
+
+
+def _select_distractor_facts(
+    facts: Sequence[GraphFact],
+    concept: ConceptPlan,
+    limit: int = DISTRACTOR_FACT_LIMIT,
+) -> tuple[GraphFact, ...]:
+    """Pick distractor material likely to actually support a groundable wrong option.
+
+    A blind positional slice of "the first N facts that are not this
+    concept's own" tends to hand the model facts from a completely
+    unrelated part of the module. With nothing usable to adapt, the model
+    tends to fall back on a generic, plausible-sounding but ungrounded
+    guess -- which is exactly the "not grounded in supplied module facts"
+    failure this produces. Preferring facts that share the concept's own
+    topic, then facts on nearby slides, gives the model distractor
+    material that is actually related to the question it is writing.
+    """
+    concept_fact_ids = set(concept.fact_ids)
+    candidates = [fact for fact in facts if fact.fact_id not in concept_fact_ids]
+    if len(candidates) <= limit:
+        return tuple(candidates)
+
+    concept_topics = {
+        fact.topic.casefold()
+        for fact in facts
+        if fact.fact_id in concept_fact_ids and fact.topic
+    }
+    concept_slides = {
+        slide
+        for fact in facts
+        if fact.fact_id in concept_fact_ids
+        for slide in fact.slides
+    }
+
+    def _slide_distance(fact: GraphFact) -> int:
+        if not fact.slides or not concept_slides:
+            return 10_000
+        return min(
+            abs(slide - target) for slide in fact.slides for target in concept_slides
+        )
+
+    same_topic = [
+        fact
+        for fact in candidates
+        if fact.topic and fact.topic.casefold() in concept_topics
+    ]
+    remaining = [fact for fact in candidates if fact not in same_topic]
+    remaining.sort(key=_slide_distance)
+
+    return tuple((same_topic + remaining)[:limit])
+
+
 class FlashcardPipeline:
     def __init__(
         self,
@@ -162,7 +216,9 @@ class FlashcardPipeline:
     ) -> tuple[str, ...]:
         errors: list[str] = []
         for left_index, left in enumerate(cards):
-            for right_index, right in enumerate(cards[left_index + 1 :], start=left_index + 1):
+            for right_index, right in enumerate(
+                cards[left_index + 1 :], start=left_index + 1
+            ):
                 if are_near_duplicates(left.question, right.question):
                     errors.append(
                         f"cards {left_index + 1} and {right_index + 1} are near duplicates"
@@ -197,9 +253,15 @@ class FlashcardPipeline:
         rejected_cards: Sequence[FlashcardDraft] = (),
         cluster_id: str | None = None,
         prior_questions: Sequence[str] = (),
-        source_facts: Sequence[GraphFact] = (),
+        concept_facts: Sequence[GraphFact] = (),
+        distractor_facts: Sequence[GraphFact] = (),
     ) -> tuple[FlashcardDraft, ...]:
-        base_prompt = build_cluster_prompt(identity, concept, source_facts)
+        base_prompt = build_cluster_prompt(
+            identity,
+            concept,
+            concept_facts,
+            distractor_facts,
+        )
         if review_feedback:
             rejected = json.dumps(
                 {"cards": [asdict(card) for card in rejected_cards]},
@@ -217,7 +279,8 @@ class FlashcardPipeline:
                     f"[{label}] card {card_position}/{len(cards)} generated: "
                     + json.dumps(asdict(card), ensure_ascii=False)
                 )
-            errors = list(validate_cluster(cards, concept, source_facts))
+            grounding_facts = tuple(concept_facts) + tuple(distractor_facts)
+            errors = list(validate_cluster(cards, concept, grounding_facts))
             errors.extend(self._duplicate_errors(cards, existing, prior_questions))
             if errors:
                 raise ValidationError(errors)
@@ -317,13 +380,20 @@ class FlashcardPipeline:
             self._progress(
                 f"Generating cluster {position}/{CLUSTERS_PER_MODULE}: {concept.name}"
             )
+            concept_fact_ids = set(concept.fact_ids)
+
+            concept_facts = tuple(
+                fact for fact in facts if fact.fact_id in concept_fact_ids
+            )
+            distractor_facts = _select_distractor_facts(facts, concept)
             cards = self._generate_cards(
                 identity,
                 concept,
                 clusters,
                 label=f"concept {position} ({concept.name})",
                 prior_questions=prior_questions,
-                source_facts=facts,
+                concept_facts=concept_facts,
+                distractor_facts=distractor_facts,
             )
             clusters.append(
                 FlashcardCluster(
@@ -342,7 +412,9 @@ class FlashcardPipeline:
         if self.config.final_review:
             issues = self._collect_review_issues(clusters)
             if issues:
-                by_id = {cluster.cluster: index for index, cluster in enumerate(clusters)}
+                by_id = {
+                    cluster.cluster: index for index, cluster in enumerate(clusters)
+                }
                 for cluster_id, reasons in issues.items():
                     index = by_id[cluster_id]
                     old = clusters[index]
@@ -355,6 +427,13 @@ class FlashcardPipeline:
                         for other_index, cluster in enumerate(clusters)
                         if other_index != index
                     )
+                    review_fact_ids = set(old.concept.fact_ids)
+                    review_concept_facts = tuple(
+                        fact for fact in facts if fact.fact_id in review_fact_ids
+                    )
+                    review_distractor_facts = _select_distractor_facts(
+                        facts, old.concept
+                    )
                     cards = self._generate_cards(
                         identity,
                         old.concept,
@@ -364,7 +443,8 @@ class FlashcardPipeline:
                         rejected_cards=old.cards,
                         cluster_id=old.cluster,
                         prior_questions=prior_questions,
-                        source_facts=facts,
+                        concept_facts=review_concept_facts,
+                        distractor_facts=review_distractor_facts,
                     )
                     clusters[index] = replace(old, cards=cards)
 

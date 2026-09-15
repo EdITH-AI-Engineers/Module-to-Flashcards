@@ -23,7 +23,6 @@ from flashcard_types import (
     ReviewIssue,
 )
 
-
 ALLOWED_TYPES = {"multiple-choice", "identification", "true-false"}
 ALLOWED_APPROACHES = {
     "recall",
@@ -40,18 +39,18 @@ ALLOWED_APPROACHES = {
 BANNED_FRAMING = (
     "This statement accurately describes",
     "The following claim",
-    "According to",
+    "According to the material",
     "Based on the material",
     "The material/module/lesson/document states",
     "Identify the concept associated with",
     "Consider the following statement",
-    "Evaluate this statement"
+    "Evaluate this statement",
 )
 PROVENANCE_PATTERNS = (
     r"\bknowledge graph\b",
     r"\bthe source\b",
     r"\bsource material\b",
-    r"\bmodule\b",
+    r"\bmodule(?:\s+content)?\b",
     r"\bdocument\b",
     r"\blesson\b",
     r"\bslide\b",
@@ -59,6 +58,8 @@ PROVENANCE_PATTERNS = (
     r"\bchunk\b",
     r"\bcitation\b",
     r"\burl\b",
+    r"\bprovided facts?\b",
+    r"\bsupplied facts?\b",
 )
 DIRECT_STEM = re.compile(r"^(what(?:\s+term)?|which|who|where|when|why|how)\b", re.I)
 CARD_FIELDS = {
@@ -82,7 +83,13 @@ COMMON_CARD_FIELDS = {
     "assessment_approach",
 }
 TYPE_SPECIFIC_FIELDS = {
-    "multiple-choice": {"correct_option", "wrong_option_1", "wrong_option_2", "wrong_option_3", "is_true"},
+    "multiple-choice": {
+        "correct_option",
+        "wrong_option_1",
+        "wrong_option_2",
+        "wrong_option_3",
+        "is_true",
+    },
     "identification": {"correct_option", "is_true"},
     "true-false": {"is_true"},
 }
@@ -130,6 +137,7 @@ def _string_list(value: Any, label: str) -> tuple[str, ...]:
     if any(not isinstance(item, str) or not item.strip() for item in value):
         raise ValidationError(f"{label} must contain only non-empty strings")
     return tuple(value)
+
 
 def _tolerant_string_list(value: Any, label: str) -> tuple[str, ...]:
     """Like _string_list, but also accepts a single comma-separated string
@@ -314,7 +322,9 @@ def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
         metadata_missing = set(missing) & {"difficulty", "assessment_approach"}
         missing = [field for field in missing if field not in metadata_missing]
         if missing:
-            raise ValidationError(f"card {position} is missing fields: {', '.join(missing)}")
+            raise ValidationError(
+                f"card {position} is missing fields: {', '.join(missing)}"
+            )
 
         if "difficulty" in metadata_missing:
             warnings.warn(
@@ -339,31 +349,35 @@ def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
             raise ValidationError(f"card {position} difficulty must be an integer")
         assessment_approach = item.get("assessment_approach")
         if assessment_approach is None:
-            assessment_approach = DEFAULT_ASSESSMENT_APPROACHES[(position - 1) % len(DEFAULT_ASSESSMENT_APPROACHES)]
+            assessment_approach = DEFAULT_ASSESSMENT_APPROACHES[
+                (position - 1) % len(DEFAULT_ASSESSMENT_APPROACHES)
+            ]
 
+        correct_option = _option_value(item, "correct_option", position, card_type)
+        wrong_option_1 = _option_value(item, "wrong_option_1", position, card_type)
+        wrong_option_2 = _option_value(item, "wrong_option_2", position, card_type)
+        wrong_option_3 = _option_value(item, "wrong_option_3", position, card_type)
+        raw_expalanation = _required_string(
+            item,
+            "expalanation" if "expalanation" in item else "explanation",
+            position,
+        )
+        raw_hint = _required_string(item, "hint", position)
+
+        raw_question = _required_string(item, "question", position)
         results.append(
             FlashcardDraft(
                 type=card_type,
-                question=_required_string(item, "question", position),
-                correct_option=_option_value(
-                    item, "correct_option", position, card_type
-                ),
-                wrong_option_1=_option_value(
-                    item, "wrong_option_1", position, card_type
-                ),
-                wrong_option_2=_option_value(
-                    item, "wrong_option_2", position, card_type
-                ),
-                wrong_option_3=_option_value(
-                    item, "wrong_option_3", position, card_type
-                ),
+                question=_sanitize_question(raw_question),
+                correct_option=correct_option,
+                wrong_option_1=wrong_option_1,
+                wrong_option_2=wrong_option_2,
+                wrong_option_3=wrong_option_3,
                 is_true=is_true,
-                expalanation=_required_string(
-                    item,
-                    "expalanation" if "expalanation" in item else "explanation",
-                    position,
+                expalanation=_sanitize_explanation(
+                    raw_expalanation, card_type, correct_option, is_true
                 ),
-                hint=_required_string(item, "hint", position),
+                hint=_sanitize_hint(raw_hint),
                 difficulty=difficulty,
                 assessment_approach=_required_string_value(
                     assessment_approach, "assessment_approach", position
@@ -387,6 +401,106 @@ def _text_fields(card: FlashcardDraft) -> tuple[str, ...]:
 
 def _contains_provenance(value: str) -> bool:
     return any(re.search(pattern, value, flags=re.I) for pattern in PROVENANCE_PATTERNS)
+
+
+_EXPLICIT_STATED_AS_RE = re.compile(
+    r"\bis\s+explicitly\s+stated\s+as\s+(.+?)\s+in\s+the\s+(?:provided|supplied)\s+facts?\b",
+    re.I,
+)
+_LEADING_FACTS_STATE_RE = re.compile(
+    r"^\s*the\s+(?:provided|supplied)\s+facts?\s+(?:explicitly\s+)?"
+    r"(?:state|states|stated|support|supports|supported|indicate|indicates|"
+    r"show|shows|confirm|confirms)\s+that\s+",
+    re.I,
+)
+_ACCORDING_TO_FACTS_RE = re.compile(
+    r",?\s*according\s+to\s+the\s+(?:provided|supplied)\s+facts?\b", re.I
+)
+_DANGLING_STATED_IN_RE = re.compile(
+    r"\bis\s+explicitly\s+stated\s+in\s+the\s+(?:provided|supplied)\s+facts?\b", re.I
+)
+_LEFTOVER_FACTS_RE = re.compile(
+    r"\b(?:in\s+)?(?:the\s+)?(?:provided|supplied)\s+facts?\b", re.I
+)
+
+
+def _strip_citation_phrasing(text: str) -> str:
+    """Remove formulaic "as stated in the provided/supplied fact(s)" citation
+    clauses from model-written prose, keeping any real content around them.
+
+    A small local model very often narrates where a claim came from instead
+    of just stating the claim -- e.g. "X is explicitly stated as Y in the
+    provided fact" instead of "X is Y". That trips the provenance-wording
+    rule even though the underlying claim is perfectly fine, and the model
+    frequently fails to stop doing it even after being told to in a retry.
+    This rewrites the common shapes in place of relying on further retries.
+    """
+    text = _EXPLICIT_STATED_AS_RE.sub(r"is \1", text)
+    text = _LEADING_FACTS_STATE_RE.sub("", text)
+    text = _ACCORDING_TO_FACTS_RE.sub("", text)
+    text = _DANGLING_STATED_IN_RE.sub("", text)
+    text = _LEFTOVER_FACTS_RE.sub("", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+([.,])", r"\1", text)
+    text = re.sub(r"\.\s*\.", ".", text)
+    text = text.strip(" ,")
+    if text and not text.endswith((".", "!", "?")):
+        text += "."
+    if text:
+        text = text[0].upper() + text[1:]
+    return text
+
+
+def _explanation_fallback(
+    card_type: str, correct_option: str, is_true: int | None
+) -> str:
+    if card_type == "true-false":
+        return f"This statement is {'true' if is_true == 1 else 'false'}."
+    option = correct_option.strip().rstrip(".")
+    if option:
+        return f"{option} is the correct answer here."
+    return "This is the correct answer for this question."
+
+
+def _sanitize_explanation(
+    text: str, card_type: str, correct_option: str, is_true: int | None
+) -> str:
+    cleaned = _strip_citation_phrasing(text)
+    words = re.findall(r"[A-Za-z0-9]+", cleaned)
+    # After stripping the citation clause there may be nothing substantive
+    # left (e.g. "X is explicitly stated in the provided fact." carried no
+    # real content beyond the citation) -- fall back rather than ship a
+    # near-empty or still-flagged explanation.
+    if len(words) < 6 or _contains_provenance(cleaned):
+        return _explanation_fallback(card_type, correct_option, is_true)
+    return cleaned
+
+
+def _sanitize_hint(text: str) -> str:
+    cleaned = _strip_citation_phrasing(text)
+    if not cleaned or _contains_provenance(cleaned):
+        return "Consider the key relationship or distinction central to this topic."
+    return cleaned
+
+
+def _sanitize_question(text: str) -> str:
+    """Strip the same citation clauses from the question stem itself.
+
+    Explanations and hints aren't the only place this leaks -- the model
+    just as often tacks the wrapper directly onto the question, e.g. "What
+    is the key aspect of HCI according to the provided facts?" The wrapper
+    carries no assessable content, so removing it only makes the stem
+    cleaner; it never changes what is actually being asked. If stripping
+    would remove more than the wrapper (leaving too little of the
+    question), the original text is kept so normal validation still
+    catches whatever is really wrong with it.
+    """
+    cleaned = _strip_citation_phrasing(text)
+    if not cleaned:
+        return text
+    if len(re.findall(r"[A-Za-z0-9]+", cleaned)) < 3:
+        return text
+    return cleaned
 
 
 def validate_cluster(
@@ -445,9 +559,7 @@ def validate_cluster(
             if card.type != "multiple-choice":
                 continue
             for option_name in ("wrong_option_1", "wrong_option_2", "wrong_option_3"):
-                option_terms = set(
-                    _grounding_tokens(getattr(card, option_name))
-                )
+                option_terms = set(_grounding_tokens(getattr(card, option_name)))
                 if option_terms and not option_terms & grounded_terms:
                     errors.append(
                         f"card {position} {option_name} is not grounded in supplied module facts"
@@ -473,8 +585,7 @@ def validate_cluster(
         if any("\n" in value or "\r" in value for value in _text_fields(card)):
             errors.append(f"{prefix} fields must not contain line breaks")
         if any(
-            phrase.casefold() in card.question.casefold()
-            for phrase in BANNED_FRAMING
+            phrase.casefold() in card.question.casefold() for phrase in BANNED_FRAMING
         ):
             errors.append(f"{prefix} question contains banned framing")
         if any(_contains_provenance(value) for value in _text_fields(card) if value):
@@ -487,8 +598,12 @@ def validate_cluster(
                 errors.append(f"{prefix} direct question must end with a question mark")
         if card.type == "true-false":
             lowered = card.question.strip().casefold()
-            if "?" in card.question or lowered.startswith(("true or false", "true/false")):
-                errors.append(f"{prefix} true-false question must be a declarative statement only")
+            if "?" in card.question or lowered.startswith(
+                ("true or false", "true/false")
+            ):
+                errors.append(
+                    f"{prefix} true-false question must be a declarative statement only"
+                )
 
         if card.type == "multiple-choice":
             options = (
@@ -510,7 +625,9 @@ def validate_cluster(
 
         elif card.type == "identification":
             if not card.correct_option.strip():
-                errors.append(f"{prefix} identification correct option must not be empty")
+                errors.append(
+                    f"{prefix} identification correct option must not be empty"
+                )
             if any(
                 option.strip()
                 for option in (
@@ -524,7 +641,9 @@ def validate_cluster(
                 errors.append(f"{prefix} identification is_true must be empty")
             answer = card.correct_option.strip()
             if len(answer.split()) > 12 or answer.endswith((".", "?", "!")):
-                errors.append(f"{prefix} identification answer must be a concise phrase")
+                errors.append(
+                    f"{prefix} identification answer must be a concise phrase"
+                )
             normalized_answer = _normalized(answer)
             if normalized_answer and normalized_answer in _normalized(card.question):
                 errors.append(f"{prefix} question reveals the identification answer")
@@ -571,9 +690,7 @@ def are_near_duplicates(left: str, right: str) -> bool:
     right_tokens = set(normalized_right.split())
     union = left_tokens | right_tokens
     jaccard = len(left_tokens & right_tokens) / len(union) if union else 1.0
-    sequence = difflib.SequenceMatcher(
-        None, normalized_left, normalized_right
-    ).ratio()
+    sequence = difflib.SequenceMatcher(None, normalized_left, normalized_right).ratio()
     return jaccard >= 0.85 and sequence >= 0.88
 
 
@@ -647,7 +764,9 @@ def parse_review_issues(
         if not isinstance(cluster, str) or not cluster:
             raise ValidationError(f"review issue {position} cluster must be a string")
         if cluster not in known_clusters:
-            raise ValidationError(f"review issue {position} references unknown cluster {cluster!r}")
+            raise ValidationError(
+                f"review issue {position} references unknown cluster {cluster!r}"
+            )
         reasons = _string_list(item.get("reasons"), f"review issue {position} reasons")
         target = merged.setdefault(cluster, [])
         for reason in reasons:

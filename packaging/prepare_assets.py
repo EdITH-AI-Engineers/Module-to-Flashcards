@@ -22,11 +22,11 @@ _REVISION_PATTERN = re.compile(r"[0-9a-f]{40}")
 _DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 _QWEN_LOCK = {
-    "repo_id": "Qwen/Qwen2.5-3B-Instruct-GGUF",
-    "revision": "7dabda4d13d513e3e842b20f0d435c732f172cbe",
-    "filename": "qwen2.5-3b-instruct-q5_k_m.gguf",
-    "size": 2438740384,
-    "sha256": "2c63dde5f2c9ab1fd64d47dee2d34dade6ba9ff62442d1d20b5342310c982081",
+    "repo_id": "Qwen/Qwen3-8B-GGUF",
+    "revision": "4f02e7c52b572082828edf5058a87e2e7dc3e4d5",
+    "filename": "Qwen3-8B-Q5_K_M.gguf",
+    "size": 5851112224,
+    "sha256": "068bae163faa96ad48032daf4e071a6a28fe67d8dcc95367609c2ff165e52738",
 }
 _REBEL_REQUIRED = {
     "config.json",

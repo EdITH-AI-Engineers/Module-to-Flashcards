@@ -6,8 +6,9 @@ from typing import Any
 from huggingface_hub import hf_hub_download
 
 
-MODEL_REPO = "Qwen/Qwen2.5-3B-Instruct-GGUF"
-MODEL_FILENAME = "qwen2.5-3b-instruct-q5_k_m.gguf"
+MODEL_REPO = "Qwen/Qwen3-8B-GGUF"
+MODEL_REVISION = "4f02e7c52b572082828edf5058a87e2e7dc3e4d5"
+MODEL_FILENAME = "Qwen3-8B-Q5_K_M.gguf"
 DEFAULT_N_CTX = 8192
 
 
@@ -24,6 +25,7 @@ def ensure_model(model_dir: Path, *, allow_download: bool = True) -> Path:
 
     downloaded = hf_hub_download(
         repo_id=MODEL_REPO,
+        revision=MODEL_REVISION,
         filename=MODEL_FILENAME,
         local_dir=str(model_dir),
     )
@@ -57,6 +59,7 @@ class LocalQwenBackend:
         )
         self._temperature = temperature
         self._seed = seed
+        self._completion_index = 0
 
     def close(self) -> None:
         close = getattr(self._llm, "close", None)
@@ -64,13 +67,15 @@ class LocalQwenBackend:
             close()
 
     def complete(self, system: str, user: str, *, max_tokens: int) -> str:
+        call_seed = self._seed + self._completion_index
+        self._completion_index += 1
         response: Any = self._llm.create_chat_completion(
             messages=[
                 {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {"role": "user", "content": f"{user}\n\n/no_think"},
             ],
             temperature=self._temperature,
-            seed=self._seed,
+            seed=call_seed,
             max_tokens=max_tokens,
             response_format={"type": "json_object"},
         )

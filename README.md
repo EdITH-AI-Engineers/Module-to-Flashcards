@@ -6,7 +6,7 @@ Current release: 1.1.0
 
 ## Portable Windows release
 
-The Windows release is a portable, fully offline, one-directory application for Windows 11 x64. It includes the Python runtime, Qwen Q5 model, REBEL model, Tesseract OCR, and required CUDA libraries. The complete extracted directory is approximately 8-14 GB; copying only `ModuleToFlashcards.exe` is not supported.
+The Windows release is a portable, fully offline, one-directory application for Windows 11 x64. It includes the Python runtime, Qwen3 8B Q5_K_M model, REBEL model, Tesseract OCR, and required CUDA libraries. The complete extracted directory is approximately 11-18 GB; copying only `ModuleToFlashcards.exe` is not supported.
 
 Quick start:
 
@@ -26,7 +26,7 @@ ModuleToFlashcards/
   ModuleToFlashcards.exe
   runtime/
   models/
-    qwen2.5-3b-instruct-q5_k_m.gguf
+    Qwen3-8B-Q5_K_M.gguf
     rebel-large/
     manifest.json
   tesseract/
@@ -82,7 +82,7 @@ Use `-SkipAssetPreparation` only when the locked assets are already staged. `-Sk
 
 ## Python source installation
 
-The flashcard generator uses the official Hugging Face repository `Qwen/Qwen2.5-3B-Instruct-GGUF` and the exact file `qwen2.5-3b-instruct-q5_k_m.gguf`. In source mode, the first run downloads it into `models/`; later runs reuse that local Q5_K_M model. Qwen uses an 8K-token context window by default.
+The application uses one generative model throughout: the official `Qwen/Qwen3-8B-GGUF` repository and exact `Qwen3-8B-Q5_K_M.gguf` file. In source mode, the first run downloads that immutable checkpoint into `models/`; later runs reuse it for both slide normalization and flashcard generation. Qwen uses non-thinking JSON mode with an 8K-token context window by default. REBEL remains a separate relationship extractor, not a second generative model.
 
 The complete local sequence is:
 

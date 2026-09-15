@@ -7,6 +7,7 @@ import pytest
 from local_qwen import (
     MODEL_FILENAME,
     MODEL_REPO,
+    MODEL_REVISION,
     LocalQwenBackend,
     ensure_model,
 )
@@ -25,14 +26,17 @@ def test_ensure_model_downloads_exact_checkpoint(tmp_path, monkeypatch):
 
     path = ensure_model(tmp_path)
 
-    assert path.name == "qwen2.5-3b-instruct-q5_k_m.gguf"
+    assert path.name == "Qwen3-8B-Q5_K_M.gguf"
     assert calls == [
         {
-            "repo_id": "Qwen/Qwen2.5-3B-Instruct-GGUF",
-            "filename": "qwen2.5-3b-instruct-q5_k_m.gguf",
+            "repo_id": "Qwen/Qwen3-8B-GGUF",
+            "revision": "4f02e7c52b572082828edf5058a87e2e7dc3e4d5",
+            "filename": "Qwen3-8B-Q5_K_M.gguf",
             "local_dir": str(tmp_path),
         }
     ]
+    assert MODEL_REPO == "Qwen/Qwen3-8B-GGUF"
+    assert MODEL_REVISION == "4f02e7c52b572082828edf5058a87e2e7dc3e4d5"
 
 
 def test_existing_model_is_reused(tmp_path, monkeypatch):
@@ -59,7 +63,7 @@ def test_missing_bundled_model_never_downloads_when_download_is_disabled(
         ensure_model(tmp_path, allow_download=False)
 
 
-def test_backend_passes_chat_messages_and_returns_content():
+def test_backend_disables_thinking_and_varies_deterministic_call_seeds():
     calls = []
 
     class FakeLlama:
@@ -71,21 +75,34 @@ def test_backend_passes_chat_messages_and_returns_content():
     backend._llm = FakeLlama()
     backend._temperature = 0.2
     backend._seed = 42
+    backend._completion_index = 0
 
-    result = backend.complete("SYSTEM", "USER", max_tokens=512)
+    first = backend.complete("SYSTEM", "USER", max_tokens=512)
+    second = backend.complete("SYSTEM", "RETRY", max_tokens=256)
 
-    assert result == '{"cards": []}'
+    assert first == '{"cards": []}'
+    assert second == '{"cards": []}'
     assert calls == [
         {
             "messages": [
                 {"role": "system", "content": "SYSTEM"},
-                {"role": "user", "content": "USER"},
+                {"role": "user", "content": "USER\n\n/no_think"},
             ],
             "temperature": 0.2,
             "seed": 42,
             "max_tokens": 512,
             "response_format": {"type": "json_object"},
-        }
+        },
+        {
+            "messages": [
+                {"role": "system", "content": "SYSTEM"},
+                {"role": "user", "content": "RETRY\n\n/no_think"},
+            ],
+            "temperature": 0.2,
+            "seed": 43,
+            "max_tokens": 256,
+            "response_format": {"type": "json_object"},
+        },
     ]
 
 
@@ -98,6 +115,7 @@ def test_backend_rejects_empty_assistant_content():
     backend._llm = FakeLlama()
     backend._temperature = 0.2
     backend._seed = 42
+    backend._completion_index = 0
 
     try:
         backend.complete("SYSTEM", "USER", max_tokens=32)

@@ -38,15 +38,14 @@ ALLOWED_APPROACHES = {
     "reversed reasoning",
 }
 BANNED_FRAMING = (
-    "according to",
-    "based on",
-    "the material states",
-    "the following claim",
-    "consider this statement",
-    "evaluate this statement",
-    "identify the concept associated with",
-    "which is the best",
-    "which best explains",
+    "This statement accurately describes",
+    "The following claim",
+    "According to the material",
+    "Based on the material",
+    "The material/module/lesson/document states",
+    "Identify the concept associated with",
+    "Consider the following statement",
+    "Evaluate this statement"
 )
 PROVENANCE_PATTERNS = (
     r"\bknowledge graph\b",

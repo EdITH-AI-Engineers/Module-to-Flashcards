@@ -27,6 +27,9 @@ Every card, with no exceptions, must include all eleven fields: type, question, 
 QUESTION QUALITY
 Write clear, authentic college-level assessment items. Assess terminology, distinctions, relationships, mechanisms, processes, causes, effects, classifications, applications, implications, conditions, limitations, or technical reasoning only when the supplied facts support them. Difficulty must come from the required thinking, never confusing wording. Do not mechanically convert a fact into a stem or reveal an answer through its full definition. Within a concept, use {CARDS_PER_CLUSTER} meaningfully different assessment approaches. Changes limited to wording, names, punctuation, order, or distractors are not distinct approaches.
 
+EQUATION-BASED PROBLEM SOLVING
+When the supplied facts contain an equation, formula, numerical relationship, or clearly defined quantities, include problem-solving questions when the selected assessment approach supports them. A problem-solving question may use a realistic, concrete scenario such as selecting a valid value, calculating an outcome, comparing results, or determining what changes when one supported quantity changes. Use only variables, units, relationships, and operations explicitly supplied by the facts; do not introduce outside constants, assumptions, or formulas. State every needed value in the question or supplied facts, use plain-text equation syntax, and ensure the answer follows deterministically from the available information. A scenario must test the equation or relationship, not add decorative context. Do not force a numerical problem when the source does not provide enough information.
+
 Never mention a knowledge graph, source, module, document, lesson, slide, file, chunk, citation, URL, header, footer, or source reference in a question, answer, explanation, or hint.
 
 ALLOWED TYPES
@@ -149,6 +152,7 @@ def build_cluster_prompt(
 This cluster must produce exactly {CARDS_PER_CLUSTER} cards using each of these assessment approaches exactly once:
 {approach_list}
 Include at least one multiple-choice, one identification, and one true-false card; vary the other two types naturally. Every claim, correct answer, distractor judgment, explanation, and hint must be resolvable using only the supplied facts. Every wrong_option must be a plausible-but-incorrect term drawn from elsewhere in the provided module content; never invent a topic, term, or fact absent from the supplied facts.
+If the supplied facts include an equation, formula, numerical relationship, or clearly defined quantities, use a realistic problem-solving scenario for an appropriate approach when the facts provide enough information. The scenario may ask the learner to calculate, select, compare, or reason about a supported result. Use only supplied variables, units, values, operations, and relationships; state any needed values explicitly; and do not invent constants, assumptions, formulas, or numerical data. Do not force a numerical problem when the facts are insufficient.
 
 Return this JSON shape with exactly {CARDS_PER_CLUSTER} objects in cards. Every object must contain exactly these eleven keys:
 type, question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, is_true, expalanation, hint, difficulty, assessment_approach

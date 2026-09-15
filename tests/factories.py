@@ -12,8 +12,8 @@ from flashcard_types import (
 APPROACHES = (
     "recall",
     "comparison",
-    "application",
     "misconception detection",
+    "application",
     "reversed reasoning",
 )
 

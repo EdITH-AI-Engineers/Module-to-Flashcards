@@ -58,6 +58,35 @@ def test_normalize_slide_accepts_fenced_json_and_builds_record():
     assert "Use only the supplied extracted page text" in backend.calls[0][0]
 
 
+def test_normalizer_instructs_title_only_pages_to_emit_no_facts():
+    backend = FakeBackend(
+        [
+            response(
+                title="Digital Reading Portfolio",
+                content=["Digital Reading Portfolio"],
+                definitions=[],
+                knowledge_statements=[],
+                brief_explanation="Not Specified",
+            )
+        ]
+    )
+
+    slide = normalize_slide(
+        backend,
+        number=1,
+        source_text="DIGITAL READING PORTFOLIO",
+        extraction_method="ocr",
+        attempts=1,
+    )
+
+    instructions = backend.calls[0][0].casefold()
+    assert "title-only" in instructions
+    assert "title of the slide" in instructions
+    assert "topic of this slide" in instructions
+    assert "empty knowledge_statements array" in instructions
+    assert slide.knowledge_statements == ()
+
+
 def test_normalize_slide_accepts_single_visual_text_string():
     backend = FakeBackend(
         [

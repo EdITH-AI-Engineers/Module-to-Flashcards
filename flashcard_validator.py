@@ -25,10 +25,22 @@ from flashcard_types import (
 
 
 ALLOWED_TYPES = {"multiple-choice", "identification", "true-false"}
+ALLOWED_APPROACHES = {
+    "recall",
+    "comparison",
+    "classification",
+    "application",
+    "scenario analysis",
+    "cause/effect",
+    "misconception detection",
+    "conditions",
+    "consequences",
+    "reversed reasoning",
+}
 BANNED_FRAMING = (
     "This statement accurately describes",
     "The following claim",
-    "According to the material",
+    "According to",
     "Based on the material",
     "The material/module/lesson/document states",
     "Identify the concept associated with",
@@ -219,6 +231,20 @@ def parse_concept_plan(
                 errors.append(f"{prefix} uses unknown fact id {fact_id!r}")
             else:
                 resolved_facts.append(known[fact_id])
+        if (
+            len(approaches) != CARDS_PER_CLUSTER
+            or len(set(approaches)) != CARDS_PER_CLUSTER
+        ):
+            errors.append(
+                f"{prefix} must contain exactly {CARDS_PER_CLUSTER} "
+                "distinct assessment approaches"
+            )
+        invalid_approaches = sorted(set(approaches) - ALLOWED_APPROACHES)
+        if invalid_approaches:
+            errors.append(
+                f"{prefix} contains unsupported assessment approaches: "
+                f"{', '.join(invalid_approaches)}"
+            )
         results.append(
             ConceptPlan(
                 name=name,
@@ -380,6 +406,28 @@ def validate_cluster(
             "cluster must contain at least one multiple-choice, identification, and true-false card"
         )
 
+    approaches = tuple(card.assessment_approach for card in cards)
+    if (
+        len(approaches) != CARDS_PER_CLUSTER
+        or len(set(approaches)) != CARDS_PER_CLUSTER
+    ):
+        errors.append(
+            f"cluster must use {CARDS_PER_CLUSTER} distinct assessment approaches"
+        )
+    expected_approaches = tuple(concept.assessment_approaches)
+    if approaches != expected_approaches:
+        errors.append(
+            "cluster approaches must match the planned assessment approaches in order"
+        )
+        for position, (actual, expected) in enumerate(
+            zip(approaches, expected_approaches), start=1
+        ):
+            if actual != expected:
+                errors.append(
+                    f"card {position} assessment_approach must be {expected!r}, "
+                    f"received {actual!r}"
+                )
+
     if source_facts:
         grounded_terms = {
             token
@@ -424,7 +472,10 @@ def validate_cluster(
             errors.append(f"{prefix} assessment approach must not be empty")
         if any("\n" in value or "\r" in value for value in _text_fields(card)):
             errors.append(f"{prefix} fields must not contain line breaks")
-        if any(phrase in card.question.casefold() for phrase in BANNED_FRAMING):
+        if any(
+            phrase.casefold() in card.question.casefold()
+            for phrase in BANNED_FRAMING
+        ):
             errors.append(f"{prefix} question contains banned framing")
         if any(_contains_provenance(value) for value in _text_fields(card) if value):
             errors.append(f"{prefix} exposes provenance metadata")

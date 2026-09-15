@@ -25,25 +25,26 @@ CARD FIELD CONTRACT
 Every card, with no exceptions, must include all eleven fields: type, question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, is_true, expalanation, hint, difficulty, assessment_approach. Before returning JSON, verify every card object has exactly these eleven keys. If any card is missing a key, add it before responding.
 
 QUESTION QUALITY
-Write clear, authentic college-level assessment items. Assess terminology, distinctions, relationships, mechanisms, processes, causes, effects, classifications, applications, implications, conditions, limitations, or technical reasoning only when the supplied facts support them. Difficulty must come from the required thinking, never confusing wording. Do not mechanically convert a fact into a stem or reveal an answer through its full definition. Use a short, non-empty assessment_approach label to describe each card. Assessment approach labels may repeat and are not limited to a predefined vocabulary.
+Write clear, authentic college-level assessment items. Assess terminology, distinctions, relationships, mechanisms, processes, causes, effects, classifications, applications, implications, conditions, limitations, or technical reasoning only when the supplied facts support them. Difficulty must come from the required thinking, never confusing wording. Do not mechanically convert a fact into a stem or reveal an answer through its full definition. Within a concept, use {CARDS_PER_CLUSTER} meaningfully different assessment approaches. Changes limited to wording, names, punctuation, order, or distractors are not distinct approaches.
 
 EQUATION-BASED PROBLEM SOLVING
 When the supplied facts contain an equation, formula, numerical relationship, or clearly defined quantities, include problem-solving questions when the selected assessment approach supports them. A problem-solving question may use a realistic, concrete scenario such as selecting a valid value, calculating an outcome, comparing results, or determining what changes when one supported quantity changes. Use only variables, units, relationships, and operations explicitly supplied by the facts; do not introduce outside constants, assumptions, or formulas. State every needed value in the question or supplied facts, use plain-text equation syntax, and ensure the answer follows deterministically from the available information. A scenario must test the equation or relationship, not add decorative context. Do not force a numerical problem when the source does not provide enough information.
 
-Never mention a knowledge graph, source, module, document, lesson, slide, file, chunk, citation, URL, header, footer, or source reference in a question, answer, explanation, or hint.
+Never mention a knowledge graph, source, module, document, lesson, slide, file, chunk, citation, URL, header, footer, or source reference in a question, answer, explanation, or hint. This applies to every field: question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, expalanation, and hint. Refer to the topic itself, never to where it appeared. Bad: "What is the title of the slide that discusses the reading portfolio overview?" Good: "What overview precedes the parts and contents of the reading portfolio?" If a draft question would need the word slide, lesson, module, or document to make sense, rewrite it to name the topic directly instead.
 
 ALLOWED TYPES
-Use only multiple-choice, identification, and true-false.
+Use only multiple-choice, identification, and true-false. Vary the mix of these three types from cluster to cluster; do not repeat the same type distribution in every cluster.
 
 Multiple-choice rules:
 - Supply exactly one concise correct_option and three plausible, distinct, incorrect options.
+- correct_option, wrong_option_1, wrong_option_2, and wrong_option_3 must be four textually different strings. Never let a wrong_option repeat, restate, or closely paraphrase the correct_option or another wrong_option within the same card.
 - Set is_true to null.
 - Do not place choices, option labels, or the answer in the question.
 
 Identification rules:
 - Supply one concise identifiable term, name, concept, classification, principle, process, figure, or title as correct_option.
 - The answer must be a short phrase, not a sentence or explanation.
-- Set wrong_option_1, wrong_option_2, wrong_option_3 to empty strings and is_true to null.
+- Set wrong_option_1, wrong_option_2, wrong_option_3 to empty strings and is_true to null. These three fields must literally be "" — do not place any distractor words, related terms, or partial answers there, even though that pattern is normal for multiple-choice.
 - Ask directly without embedding the answer or its full definition in the stem.
 
 True-false rules:
@@ -114,11 +115,11 @@ def build_concept_plan_prompt(
             "differently. Prefer concepts distinctive to this module's own facts.\n"
         )
     return f"""Select exactly {CONCEPTS_PER_MODULE} distinct, explicitly supported concepts for this module.
-Each concept must support {CARDS_PER_CLUSTER} grounded assessment cards. Keep concepts semantically distinct and do not use presentation or provenance details as concepts.
+Each concept must be assessable in {CARDS_PER_CLUSTER} genuinely different ways. Keep concepts semantically distinct and do not use presentation or provenance details as concepts.
 
-For each concept, copy one or more fact_ids exactly from the input. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements.{context_guidance} Provide one or more short assessment approach labels. Labels may repeat and may use descriptions outside examples such as recall, comparison, classification, application, or scenario analysis.
+For each concept, copy one or more fact_ids exactly from the input. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements.{context_guidance} Choose exactly {CARDS_PER_CLUSTER} distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
 
-Return one JSON object whose top-level key is "concepts" and whose value is an array. The array must contain exactly {CONCEPTS_PER_MODULE} concept objects before its closing bracket. Every concept object has these keys: name (string), fact_ids (non-empty string array), and assessment_approaches (non-empty string array). Do not treat a one-object shape illustration as a complete answer.
+Return one JSON object whose top-level key is "concepts" and whose value is an array. The array must contain exactly {CONCEPTS_PER_MODULE} concept objects before its closing bracket. Every concept object has these keys: name (string), fact_ids (non-empty string array), and assessment_approaches (array of exactly {CARDS_PER_CLUSTER} distinct allowed approaches). Do not treat a one-object shape illustration as a complete answer.
 
 Fill all {CONCEPTS_PER_MODULE} positions in this checklist before closing the concepts array:
 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20.
@@ -145,12 +146,28 @@ def build_cluster_prompt(
             for fact in module_facts
         ],
     }
+    assignments = list(enumerate(concept.assessment_approaches, start=1))
+    approach_list = "\n".join(
+        f'- Card {index}: assessment_approach must be exactly "{approach}"'
+        for index, approach in assignments
+    )
+    approach_checklist = ", ".join(
+        f"card {index}={approach}" for index, approach in assignments
+    )
     return f"""Generate exactly {CARDS_PER_CLUSTER} assessment cards for the one supplied concept.
-Set assessment_approach to a short, non-empty descriptive label for each card. Labels may repeat. The assessment_approach does not need to match the planned suggestions or a predefined vocabulary.
-Include at least one multiple-choice, one identification, and one true-false card; vary the other two types naturally. Every claim, correct answer, distractor judgment, explanation, and hint must be resolvable using only the supplied facts. Every wrong_option must be a plausible-but-incorrect term drawn from elsewhere in the provided module content; never invent a topic, term, or fact absent from the supplied facts.
+Assign assessment approaches by position, one approach per card, with no repeats and no substitutions:
+{approach_list}
+Self-check mapping before you respond: {approach_checklist}. Every card's assessment_approach value must match its required entry above exactly; it must not duplicate another card's approach and must not use an approach absent from this list.
+
+Include at least one multiple-choice, one identification, and one true-false card among the {CARDS_PER_CLUSTER}; vary the other two types naturally. Every claim, correct answer, distractor judgment, explanation, and hint must be resolvable using only the supplied facts. Every wrong_option must be a plausible-but-incorrect term drawn from elsewhere in the provided module content; never invent a topic, term, or fact absent from the supplied facts.
 If the supplied facts include an equation, formula, numerical relationship, or clearly defined quantities, use a realistic problem-solving scenario for an appropriate approach when the facts provide enough information. The scenario may ask the learner to calculate, select, compare, or reason about a supported result. Use only supplied variables, units, values, operations, and relationships; state any needed values explicitly; and do not invent constants, assumptions, formulas, or numerical data. Do not force a numerical problem when the facts are insufficient.
 
-Return this JSON shape with exactly {CARDS_PER_CLUSTER} objects in cards. Every object must contain exactly these eleven keys:
+REPEATED CRITICAL RULES — re-verify each of these on every card before responding:
+- Multiple-choice: correct_option, wrong_option_1, wrong_option_2, and wrong_option_3 must be four textually different strings; no wrong_option may repeat or closely restate the correct_option or another wrong_option.
+- Identification: wrong_option_1, wrong_option_2, and wrong_option_3 must literally be "" — no words, no distractor terms.
+- Never write knowledge graph, source, source material, module, document, lesson, slide, slides, file, chunk, citation, or url in question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, expalanation, or hint. Name the topic itself instead of where it appeared.
+
+Return this JSON shape with exactly {CARDS_PER_CLUSTER} objects in cards, in card-position order matching the mapping above. Every object must contain exactly these eleven keys:
 type, question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, is_true, expalanation, hint, difficulty, assessment_approach
 
 Example of the required top-level shape (expand cards to exactly {CARDS_PER_CLUSTER} objects):
@@ -161,7 +178,7 @@ Example of a complete true-false card:
 
 For identification and true-false cards, keep all eleven keys and use empty strings for fields that do not apply.
 
-Use empty strings for fields that the selected type requires to be empty. Use JSON null only where the type rules require null. Before returning your answer, verify every card has all eleven keys and that difficulty and assessment_approach are present.
+Use empty strings for fields that the selected type requires to be empty. Use JSON null only where the type rules require null. Before returning your answer, verify every card has all eleven keys, that difficulty and assessment_approach are present, that the assessment_approach mapping above is followed exactly, and that both REPEATED CRITICAL RULES above hold for every card.
 
 INPUT JSON:
 """ + _json(payload)
@@ -172,12 +189,21 @@ def build_retry_prompt(
     candidate: str | None,
     errors: Iterable[str],
 ) -> str:
-    payload: dict[str, object] = {"validation_errors": list(errors)}
+    error_list = [str(error) for error in errors]
+    payload: dict[str, object] = {"validation_errors": error_list}
     if candidate is not None:
         payload["rejected_candidate"] = candidate
-    error_text = "; ".join(str(error) for error in errors)
-    return f"""The previous response was rejected: {error_text}
-Return a complete replacement for the full card set, not a patch, explanation, or commentary. Ensure every card includes all eleven required fields, especially difficulty and assessment_approach, and correct every listed error without relaxing any original rule.
+    error_bullets = "\n".join(f"- {error}" for error in error_list)
+    return f"""The previous response was rejected for these exact reasons:
+{error_bullets}
+
+Fix every one of these specific problems. If an error names a card number, correct that exact card; do not change cards that were not named unless a global rule (assessment approach mapping, duplicate options, provenance wording) also applies to them. Return a complete replacement for the full card set, not a patch, explanation, or commentary. Ensure every card includes all eleven required fields, especially difficulty and assessment_approach.
+
+Before responding again, re-check these common causes of the errors above:
+- Does every card's assessment_approach exactly match the required per-card mapping from the original request, with no repeats?
+- In every multiple-choice card, are correct_option, wrong_option_1, wrong_option_2, and wrong_option_3 four different strings?
+- In every identification card, are wrong_option_1, wrong_option_2, and wrong_option_3 all exactly ""?
+- Does any field mention module, document, lesson, slide, slides, file, chunk, citation, url, source, or knowledge graph? Rewrite it to name the topic instead.
 
 ORIGINAL REQUEST:
 {original_prompt}
@@ -200,7 +226,7 @@ def build_grounding_review_prompt(
             for cluster in clusters
         ]
     }
-    return f"""Review these generated clusters against only their supplied facts. Flag a cluster if any card contains an unsupported claim, answer leakage, an invalid distractor, or a misleading explanation. Assessment approach labels may repeat. Do not rewrite cards.
+    return f"""Review these generated clusters against only their supplied facts. Flag a cluster if any card contains an unsupported claim, answer leakage, an invalid distractor, a misleading explanation, or insufficient variation among its {CARDS_PER_CLUSTER} assessment approaches. Do not rewrite cards.
 
 Return only this JSON shape. Use an empty issues list when no defect exists:
 {{"issues":[{{"cluster":"valid UUID copied from input","reasons":["unsupported claim"]}}]}}

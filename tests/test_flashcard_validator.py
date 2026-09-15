@@ -17,8 +17,8 @@ from flashcard_validator import (
 APPROACHES = (
     "recall",
     "comparison",
-    "application",
     "misconception detection",
+    "application",
     "reversed reasoning",
 )
 
@@ -228,20 +228,32 @@ def test_concept_plan_accepts_comma_separated_token_fields():
     )
 
 
-def test_concept_plan_allows_repeated_custom_assessment_approaches():
+@pytest.mark.parametrize(
+    "approaches",
+    (
+        ["guided review", "guided review"],
+        list(APPROACHES[:-1]),
+        [*APPROACHES, "classification"],
+    ),
+)
+def test_concept_plan_requires_exactly_five_distinct_assessment_approaches(
+    approaches,
+):
     raw, known = plan_json()
     payload = json.loads(raw)
-    payload["concepts"][0]["assessment_approaches"] = [
-        "guided review",
-        "guided review",
-    ]
+    payload["concepts"][0]["assessment_approaches"] = approaches
 
-    concepts = parse_concept_plan(json.dumps(payload), known)
+    with pytest.raises(ValidationError, match="exactly 5 distinct"):
+        parse_concept_plan(json.dumps(payload), known)
 
-    assert concepts[0].assessment_approaches == (
-        "guided review",
-        "guided review",
-    )
+
+def test_concept_plan_rejects_unsupported_assessment_approach():
+    raw, known = plan_json()
+    payload = json.loads(raw)
+    payload["concepts"][0]["assessment_approaches"][-1] = "guided review"
+
+    with pytest.raises(ValidationError, match="unsupported assessment approaches"):
+        parse_concept_plan(json.dumps(payload), known)
 
 
 @pytest.mark.parametrize("value", (123, None, ""))
@@ -324,7 +336,7 @@ def test_cluster_rejects_type_and_text_rule_violations(position, changes, messag
     assert any(message in error for error in errors)
 
 
-def test_cluster_allows_repeated_custom_assessment_approaches():
+def test_cluster_requires_five_distinct_assessment_approaches():
     values = tuple(
         replace(card, assessment_approach="guided review")
         for card in valid_cards()
@@ -332,7 +344,18 @@ def test_cluster_allows_repeated_custom_assessment_approaches():
 
     errors = validate_cluster(values, valid_concept())
 
-    assert errors == ()
+    assert any("5 distinct assessment approaches" in error for error in errors)
+
+
+def test_cluster_requires_planned_assessment_approaches_in_order():
+    values = list(valid_cards())
+    values[0] = replace(values[0], assessment_approach="comparison")
+    values[1] = replace(values[1], assessment_approach="recall")
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert any("match the planned assessment approaches in order" in error for error in errors)
+    assert any("card 1 assessment_approach must be 'recall'" in error for error in errors)
 
 
 def test_cluster_rejects_blank_assessment_approach():

@@ -80,6 +80,45 @@ def test_extract_facts_prefers_normalized_lesson_facts_with_context():
     assert facts[0].topic == "Project Foundations"
 
 
+def test_extract_facts_drops_only_slide_self_referential_statements():
+    value = graph()
+    value["facts"] = [
+        {
+            "id": "f1",
+            "statement": "The title of the slide is DIGITAL READING PORTFOLIO.",
+            "slides": [1],
+        },
+        {
+            "id": "f2",
+            "statement": "Creating a Digital Reading Portfolio is the topic of this slide.",
+            "slides": [2],
+        },
+        {
+            "id": "f48",
+            "statement": "The topic of the slide is creating a digital reading portfolio.",
+            "slides": [12],
+        },
+        {
+            "id": "f3",
+            "statement": "A digital portfolio is a document containing selected work.",
+            "slides": [3],
+        },
+        {
+            "id": "f4",
+            "statement": "A portfolio page can present a learner's reflection.",
+            "slides": [4],
+        },
+    ]
+
+    facts = extract_graph_facts(value)
+
+    assert [fact.fact_id for fact in facts] == ["f3", "f4"]
+    assert [fact.statement for fact in facts] == [
+        "A digital portfolio is a document containing selected work.",
+        "A portfolio page can present a learner's reflection.",
+    ]
+
+
 def test_extract_facts_rejects_graph_without_usable_relationships():
     value = graph()
     value["edges"] = [{"id": "e1", "subject": "binary", "relation": "uses"}]

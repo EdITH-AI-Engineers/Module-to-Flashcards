@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 from typing import Any, Mapping
 
 from flashcard_types import GraphFact, ModuleIdentity
@@ -9,6 +10,12 @@ from flashcard_types import GraphFact, ModuleIdentity
 
 class GraphInputError(ValueError):
     """Raised when a knowledge graph cannot be used safely."""
+
+
+_SELF_REFERENTIAL_SLIDE_FACT = re.compile(
+    r"\b(?:the\s+title|the\s+topic)\s+of\s+(?:the|this)\s+slide\b",
+    re.IGNORECASE,
+)
 
 
 def load_graph(path: Path) -> dict[str, Any]:
@@ -79,7 +86,11 @@ def extract_graph_facts(graph: Mapping[str, Any]) -> tuple[GraphFact, ...]:
                 continue
             statement = str(item.get("statement", "")).strip()
             statement_key = " ".join(statement.casefold().split())
-            if not statement or statement_key in used_statements:
+            if (
+                not statement
+                or statement_key in used_statements
+                or _SELF_REFERENTIAL_SLIDE_FACT.search(statement)
+            ):
                 continue
             fact_id = str(item.get("id") or f"f{index}").strip()
             if not fact_id:

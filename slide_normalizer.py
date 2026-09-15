@@ -22,6 +22,10 @@ Do not add outside facts, infer missing facts, or claim to see an image. Correct
 error only when the intended wording is unambiguous. Preserve the source order and meaning.
 Use "Not Specified" when a requested field is not present and "[Unreadable Text]" for unreadable text.
 
+Never create a knowledge statement that describes presentation metadata. Do not write phrases
+such as "The title of the slide" or "is the topic of this slide." For a title-only page with
+no factual body content, preserve its visible title/content but return an empty knowledge_statements array.
+
 Return one JSON object only with this shape:
 {
   "title": "string",

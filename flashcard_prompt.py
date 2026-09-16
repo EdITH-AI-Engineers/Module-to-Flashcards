@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 from typing import Iterable, Sequence
 
@@ -218,16 +219,53 @@ def build_cluster_prompt(
     )
 
 
+MAX_RETRY_ERROR_COUNT = 12
+MAX_RETRY_ERROR_CHARS = 220
+MAX_RETRY_CANDIDATE_CHARS = 6000
+
+
+def _condensed_errors(errors: Sequence[str]) -> tuple[list[str], int]:
+    """Dedupe and cap a validation-error list before it goes back to the model.
+
+    A single bad generation can trigger the same kind of error many times
+    over (e.g. several concepts each reusing an already-assigned fact), and
+    some individual error messages embed a full source statement that can
+    run to 100+ words. Left unbounded, a retry prompt built from that list
+    -- plus the original prompt and the full rejected candidate -- can
+    exceed a local model's context window outright, turning a normal
+    validation retry into a hard backend crash instead of another attempt.
+    """
+    seen: list[str] = []
+    for error in errors:
+        text = re.sub(r"\s+", " ", str(error)).strip()
+        if len(text) > MAX_RETRY_ERROR_CHARS:
+            text = text[:MAX_RETRY_ERROR_CHARS].rstrip() + "..."
+        if text not in seen:
+            seen.append(text)
+    omitted = max(0, len(seen) - MAX_RETRY_ERROR_COUNT)
+    return seen[:MAX_RETRY_ERROR_COUNT], omitted
+
+
 def build_retry_prompt(
     original_prompt: str,
     candidate: str | None,
     errors: Iterable[str],
 ) -> str:
-    error_list = [str(error) for error in errors]
-    payload: dict[str, object] = {"validation_errors": error_list}
-    if candidate is not None:
-        payload["rejected_candidate"] = candidate
-    error_bullets = "\n".join(f"- {error}" for error in error_list)
+    condensed, omitted = _condensed_errors([str(error) for error in errors])
+    error_bullets = "\n".join(f"- {error}" for error in condensed)
+    if omitted:
+        error_bullets += (
+            f"\n- (+{omitted} more validation errors of a similar kind, "
+            "omitted here for brevity -- fixing the pattern above resolves them too)"
+        )
+
+    rejected_json = candidate or "{}"
+    if len(rejected_json) > MAX_RETRY_CANDIDATE_CHARS:
+        rejected_json = (
+            rejected_json[:MAX_RETRY_CANDIDATE_CHARS].rstrip()
+            + "\n... (truncated; regenerate the full JSON from the ORIGINAL REQUEST, not from this partial excerpt)"
+        )
+
     return f"""Correct the rejected JSON below.
 
 VALIDATION ERRORS:
@@ -245,36 +283,15 @@ MANDATORY CORRECTIONS:
 - If an error says "exposes provenance metadata", remove expressions such
   as "provided facts", "supplied facts", and "module content". Describe the
   topic directly without mentioning where the information came from.
-- If an error says "is not grounded in supplied module facts", that exact
-  wrong_option field is not acceptable — it is not present, even loosely, in
-  concept_facts or distractor_pool from the ORIGINAL REQUEST below. Do not
-  keep it, reorder it into a different option slot, or submit a rephrasing
-  of the same idea. Re-read distractor_pool in the ORIGINAL REQUEST and pick
-  a different, genuinely incorrect term or phrase that is copied or directly
-  adapted from one of those listed items instead. If nothing in
-  distractor_pool can support a fourth plausible wrong option for that
-  question, change the question itself to one this concept's facts and
-  distractor_pool can support.
-- If an error says "duplicates the earlier question", do not reword that
-  card — replace it entirely with a question about a different specific
-  detail in concept_facts (a distinguishing attribute, cause, condition,
-  exception, or example) using an assessment_approach not already used in
-  this cluster. If concept_facts contains nothing left to distinguish from
-  what was already asked, this concept has no remaining distinct learning
-  point to assess.
-- If an error says "are mirrored polarity variants", the two cards ask the
-  same thing with only a not/never/without flipped. Replace one of them
-  with a question about a different detail in concept_facts rather than
-  negating the same claim again.
+- If several errors say a fact or concept duplicates one already assigned
+  elsewhere, do not rename or reorder it -- pick a different concept
+  grounded in fact_ids that no other concept has used.
 
 ORIGINAL REQUEST:
 {original_prompt}
 
 REJECTED JSON:
-{candidate or "{}"}
-
-VALIDATION DETAILS:
-{_json(payload)}
+{rejected_json}
 """
 
 

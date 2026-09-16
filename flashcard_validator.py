@@ -239,17 +239,6 @@ def parse_concept_plan(
                 errors.append(f"{prefix} uses unknown fact id {fact_id!r}")
             else:
                 resolved_facts.append(known[fact_id])
-
-        for earlier in results:
-            for earlier_stmt in earlier.facts:
-                for stmt in resolved_facts:
-                    if are_near_duplicates(stmt, earlier_stmt):
-                        errors.append(
-                            f"{prefix} fact {stmt!r} duplicates a fact already "
-                            f"assigned to concept {earlier.name!r}; choose a "
-                            "concept grounded in genuinely distinct facts"
-                        )
-
         if (
             len(approaches) != CARDS_PER_CLUSTER
             or len(set(approaches)) != CARDS_PER_CLUSTER

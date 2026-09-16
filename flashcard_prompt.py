@@ -255,6 +255,17 @@ MANDATORY CORRECTIONS:
   distractor_pool can support a fourth plausible wrong option for that
   question, change the question itself to one this concept's facts and
   distractor_pool can support.
+- If an error says "duplicates the earlier question", do not reword that
+  card — replace it entirely with a question about a different specific
+  detail in concept_facts (a distinguishing attribute, cause, condition,
+  exception, or example) using an assessment_approach not already used in
+  this cluster. If concept_facts contains nothing left to distinguish from
+  what was already asked, this concept has no remaining distinct learning
+  point to assess.
+- If an error says "are mirrored polarity variants", the two cards ask the
+  same thing with only a not/never/without flipped. Replace one of them
+  with a question about a different detail in concept_facts rather than
+  negating the same claim again.
 
 ORIGINAL REQUEST:
 {original_prompt}

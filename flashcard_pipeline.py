@@ -221,24 +221,31 @@ class FlashcardPipeline:
             ):
                 if are_near_duplicates(left.question, right.question):
                     errors.append(
-                        f"cards {left_index + 1} and {right_index + 1} are near duplicates"
+                        f"cards {left_index + 1} and {right_index + 1} are near "
+                        f"duplicates; card {right_index + 1} must assess a different "
+                        f"learning point from {left.question!r}"
                     )
                 elif _polarity_variant(left.question, right.question):
                     errors.append(
-                        f"cards {left_index + 1} and {right_index + 1} are mirrored polarity variants"
+                        f"cards {left_index + 1} and {right_index + 1} are mirrored "
+                        f"polarity variants; card {right_index + 1} must assess a "
+                        f"different learning point from {left.question!r}"
                     )
             for cluster in existing:
                 for prior_index, prior in enumerate(cluster.cards, start=1):
                     if are_near_duplicates(left.question, prior.question):
                         errors.append(
-                            f"card {left_index + 1} duplicates card {prior_index} "
-                            f"from concept {cluster.concept.name!r}"
+                            f"card {left_index + 1} duplicates the earlier question "
+                            f"{prior.question!r} from concept "
+                            f"{cluster.concept.name!r}; replace it with a question "
+                            "that assesses only the current concept's learning point"
                         )
             for prior_question in prior_questions:
                 if are_near_duplicates(left.question, prior_question):
                     errors.append(
-                        f"card {left_index + 1} duplicates a question from a "
-                        "previously generated module in this course"
+                        f"card {left_index + 1} duplicates the earlier course "
+                        f"question {prior_question!r}; replace it with a different "
+                        "learning point"
                     )
         return tuple(errors)
 
@@ -262,6 +269,17 @@ class FlashcardPipeline:
             concept_facts,
             distractor_facts,
         )
+        covered_concepts = tuple(cluster.concept.name for cluster in existing)
+        if covered_concepts:
+            base_prompt += (
+                "\n\nALREADY COVERED CONCEPTS:\n"
+                + json.dumps(covered_concepts, ensure_ascii=False)
+                + "\nDo not assess the definition, history, rule, relationship, "
+                "or learning point of any concept above. They may appear only "
+                "inside wrong options when supplied in distractor_pool. Every "
+                "question and correct answer must assess only the current "
+                "concept and its concept_facts."
+            )
         if review_feedback:
             rejected = json.dumps(
                 {"cards": [asdict(card) for card in rejected_cards]},

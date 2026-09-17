@@ -309,6 +309,35 @@ def test_valid_cluster_has_no_errors():
     assert validate_cluster(valid_cards(), valid_concept()) == ()
 
 
+def test_cluster_rejects_scenario_analysis_as_a_card_type():
+    values = list(valid_cards())
+    values[0] = replace(
+        values[0],
+        type="scenario analysis",
+        question=(
+            "A learner classifies a numeral system by its base. "
+            "Which base identifies the binary relationship?"
+        ),
+    )
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert any("type must be one of" in error for error in errors)
+
+
+@pytest.mark.parametrize("position", (0, 1, 2))
+def test_each_card_type_accepts_scenario_analysis_as_its_approach(position):
+    values = list(valid_cards())
+    approaches = list(APPROACHES)
+    approaches[position] = "scenario analysis"
+    values[position] = replace(
+        values[position], assessment_approach="scenario analysis"
+    )
+    concept = replace(valid_concept(), assessment_approaches=tuple(approaches))
+
+    assert validate_cluster(tuple(values), concept) == ()
+
+
 @pytest.mark.parametrize(
     ("position", "changes", "message"),
     [

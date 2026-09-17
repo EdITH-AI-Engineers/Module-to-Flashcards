@@ -35,9 +35,9 @@ When the supplied facts contain an equation, formula, numerical relationship, or
 Never mention a knowledge graph, source, module, document, lesson, slide, file, chunk, citation, URL, header, footer, or source reference in a question, answer, explanation, or hint. This applies to every field: question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, expalanation, and hint. Refer to the topic itself, never to where it appeared. Bad: "What is the title of the slide that discusses the reading portfolio overview?" Good: "What overview precedes the parts and contents of the reading portfolio?" If a draft question would need the word slide, lesson, module, or document to make sense, rewrite it to name the topic directly instead.
 
 ALLOWED TYPES
-Use only multiple-choice, identification, true-false, and scenario analysis. Vary the mix of these types from cluster to cluster; do not repeat the same type distribution in every cluster. Every cluster still needs at least one multiple-choice, one identification, and one true-false card; scenario analysis is an additional option on top of those three, not a replacement for any of them.
+Use only multiple-choice, identification, and true-false. Vary the mix of these types from cluster to cluster; do not repeat the same type distribution in every cluster. Every cluster needs at least one multiple-choice, one identification, and one true-false card.
 
-type describes a card's structural format, not its reasoning style. Never copy an assessment_approach value (recall, comparison, classification, application, cause/effect, misconception detection, conditions, consequences, reversed reasoning) into the type field -- those are separate from type and go in assessment_approach only. The one exception is scenario analysis, which is both a listed type above and a listed assessment_approach: use it as the type only when the card is actually built as a scenario followed by a question, per the rules below.
+type describes a card's structural format, not its reasoning style. Never copy an assessment_approach value (recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning) into the type field -- those are separate from type and go in assessment_approach only. In particular, scenario analysis is an assessment_approach, never a type. A card assigned scenario analysis must still use multiple-choice, identification, or true-false as its type and follow that type's field rules.
 
 Multiple-choice rules:
 - Supply exactly one concise correct_option and three plausible, distinct, incorrect options.
@@ -59,13 +59,11 @@ True-false rules:
 - Do not add True or False, labels, or evaluation instructions.
 - False items must state a plausible misconception or incorrect relationship that the supplied facts resolve.
 
-Scenario analysis rules:
-- Open question with a short, concrete scenario (one or two sentences) built only from the supplied facts, then ask a direct question about what that scenario demonstrates, requires, or implies.
-- Supply exactly one concise correct_option and three plausible, distinct, incorrect options, exactly like multiple-choice.
-- correct_option, wrong_option_1, wrong_option_2, and wrong_option_3 must be four textually different strings. Never let a wrong_option repeat, restate, or closely paraphrase the correct_option or another wrong_option within the same card.
-- Set is_true to null.
-- Do not place choices, option labels, or the answer in the question.
-- Unlike multiple-choice, do not open with What/Which/Who/etc. -- the scenario sentence comes first, and the question follows it.
+Scenario analysis assessment approach rules:
+- Build a short, concrete situation only from the supplied facts and ask what it demonstrates, requires, or implies.
+- Use any one of the three allowed types. The type controls the structure and fields: multiple-choice uses four options, identification uses one concise answer and empty wrong options, and true-false uses a declarative scenario statement with is_true.
+- For multiple-choice or identification, keep the required direct stem by placing the situation after What, Which, Who, Where, When, Why, or How. For true-false, express the situation and conclusion as a declarative statement.
+- Set assessment_approach to "scenario analysis" and never set type to "scenario analysis".
 
 DIRECT STEMS
 For multiple-choice and identification, use a natural direct form beginning with What, Which, Who, Where, When, Why, How, or What term. Do not use wrappers such as According to, Based on, The material states, The following claim, Consider this statement, Evaluate this statement, Identify the concept associated with, or equivalents. The framings "Which of the following", "Which best describes", and "Which most accurately" are allowed when they produce a clear, answerable question. Avoid only vague or subjective wording that cannot be resolved from the supplied facts.
@@ -357,7 +355,7 @@ def build_cluster_prompt(
     {approach_list}
     Self-check mapping before you respond: {approach_checklist}. Every card's assessment_approach value must match its required entry above exactly; it must not duplicate another card's approach and must not use an approach absent from this list.
     {overlap_guidance}
-    Include at least one multiple-choice, one identification, and one true-false card among the {CARDS_PER_CLUSTER}; vary the other two cards naturally, using scenario analysis where it fits. Every claim, correct answer, distractor judgment, explanation, and hint must be resolvable using only the supplied facts. Every wrong_option must be a plausible-but-incorrect term drawn from elsewhere in the provided module content; never invent a topic, term, or fact absent from the supplied facts.
+    Include at least one multiple-choice, one identification, and one true-false card among the {CARDS_PER_CLUSTER}; vary the other two card types naturally. Scenario analysis is an assessment approach, not a type, and may be expressed using any of the three allowed types. Every claim, correct answer, distractor judgment, explanation, and hint must be resolvable using only the supplied facts. Every wrong_option must be a plausible-but-incorrect term drawn from elsewhere in the provided module content; never invent a topic, term, or fact absent from the supplied facts.
     If the supplied facts include an equation, formula, numerical relationship, or clearly defined quantities, use a realistic problem-solving scenario for an appropriate approach when the facts provide enough information. The scenario may ask the learner to calculate, select, compare, or reason about a supported result. Use only supplied variables, units, values, operations, and relationships; state any needed values explicitly; and do not invent constants, assumptions, formulas, or numerical data. Do not force a numerical problem when the facts are insufficient.
 
     Questions, correct answers, explanations, and hints must use only concept_facts.
@@ -392,7 +390,7 @@ def build_cluster_prompt(
     term that is absent from both concept_facts and distractor_pool.
 
     REPEATED CRITICAL RULES” re-verify each of these on every card before responding:
-    - Count the {CARDS_PER_CLUSTER} cards' types before finalizing: at least one must be multiple-choice, one identification, and one true-false. Scenario analysis fills an additional slot on top of those three -- it must never be the type for two or more cards in the same cluster, and it must never be used in place of the true-false card. If your draft has two scenario analysis cards and no true-false card, convert the one whose assessment_approach is NOT "scenario analysis" into a true-false card (a declarative statement using the same underlying claim), keeping its assigned assessment_approach unchanged.
+    - Count the {CARDS_PER_CLUSTER} cards' types before finalizing: every type must be multiple-choice, identification, or true-false, with at least one of each. Never put scenario analysis or any other assessment approach in type. A card whose assigned assessment_approach is "scenario analysis" may use any of the three allowed types, keeping that approach value unchanged.
     - Multiple-choice: correct_option, wrong_option_1, wrong_option_2, and wrong_option_3 must be four textually different strings; no wrong_option may repeat or closely restate the correct_option or another wrong_option.
     - Identification: wrong_option_1, wrong_option_2, and wrong_option_3 must literally be "" â€” no words, no distractor terms.
     - Never write knowledge graph, source, source material, module, document, lesson, slide, slides, file, chunk, citation, or url in question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, expalanation, or hint. Name the topic itself instead of where it appeared.
@@ -400,7 +398,7 @@ def build_cluster_prompt(
     - Never use phrases such as "provided fact", "supplied facts", "module content", "source material", "document", or "lesson".
     - Write hints about the topic itself.
     - Ensure all distractors and correct answers are directly from the supplied facts. Do not invent a term, process, or relationship absent from the supplied facts.
-    - For scenario analysis, application, or comparison cards, a wrong_option must still be adapted from an item in distractor_pool (or concept_facts), never a newly invented real-world example, technology, or activity. Wanting a concrete-sounding wrong option is not license to introduce content absent from the supplied facts.
+    - For multiple-choice cards using scenario analysis, application, or comparison, a wrong_option must still be adapted from an item in distractor_pool (or concept_facts), never a newly invented real-world example, technology, or activity. Wanting a concrete-sounding wrong option is not license to introduce content absent from the supplied facts.
     - Before finalizing each multiple-choice card, check every wrong_option word by word against grounded_vocabulary. If a wrong_option's content words are all absent from grounded_vocabulary, discard it and build a new one starting from an actual distractor_pool or concept_facts entry, per the GROUNDING WORD LIST steps above.
     - Do not put the answer, option labels, or choices in the question. Do not embed the answer in the question stem.
     - Identification: the question text must not contain correct_option's wording anywhere, even as part of a longer phrase (e.g. a question about "Human-Computer Interaction" must not itself contain the words "human-computer interaction"). Describe the concept by its function, purpose, defining trait, or relationships instead of naming it. If the concept's own defining fact restates its name, paraphrase around the name rather than quoting the fact.
@@ -418,14 +416,14 @@ def build_cluster_prompt(
     Valid (identification, correct_option "Human-Computer Interaction"):
     "What term describes the field concerned with designing computer systems people can use effectively, safely, and enjoyably?"
 
-    Invalid (scenario-analysis wrong_option, invented and not grounded):
+    Invalid (multiple-choice scenario-analysis wrong_option, invented and not grounded):
     "Developing a new programming language" / "Creating a database management system"
     (these share zero words with grounded_vocabulary -- "programming",
     "language", "database", and "management" appear nowhere in concept_facts
     or distractor_pool for this concept, however plausible they sound as
     generic computer-science distractors.)
 
-    Valid (scenario-analysis wrong_option, adapted from an actual distractor_pool item):
+    Valid (multiple-choice scenario-analysis wrong_option, adapted from an actual distractor_pool item):
     a paraphrase of a real entry from distractor_pool -- e.g. if distractor_pool
     describes HCI's history in the 1980s, a valid wrong option is a scenario
     built from that item ("Recounting how HCI methods developed in the 1980s"),
@@ -442,8 +440,14 @@ def build_cluster_prompt(
     Example of a complete true-false card:
     {{"type":"true-false","question":"The stated relationship is supported.","correct_option":"","wrong_option_1":"","wrong_option_2":"","wrong_option_3":"","is_true":1,"expalanation":"The supplied facts support the relationship.","hint":"Check the relationship itself.","difficulty":1,"assessment_approach":"recall"}}
 
-    Example of a complete scenario analysis card (scenario sentence first, then the question -- not a bare What/Which stem):
-    {{"type":"scenario analysis","question":"A team redesigns a workflow so users finish tasks with minimal training. Which measure would this primarily assess?","correct_option":"...","wrong_option_1":"...","wrong_option_2":"...","wrong_option_3":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":3,"assessment_approach":"scenario analysis"}}
+    Example of a multiple-choice card using the scenario analysis approach:
+    {{"type":"multiple-choice","question":"Which measure is primarily assessed when a team redesigns a workflow so users finish tasks with minimal training?","correct_option":"...","wrong_option_1":"...","wrong_option_2":"...","wrong_option_3":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":3,"assessment_approach":"scenario analysis"}}
+
+    Example of an identification card using the scenario analysis approach:
+    {{"type":"identification","question":"What measure is primarily assessed when users can complete tasks with minimal training?","correct_option":"...","wrong_option_1":"","wrong_option_2":"","wrong_option_3":"","is_true":null,"expalanation":"...","hint":"...","difficulty":3,"assessment_approach":"scenario analysis"}}
+
+    Example of a true-false card using the scenario analysis approach:
+    {{"type":"true-false","question":"A workflow that users can complete with minimal training primarily assesses the stated usability measure.","correct_option":"","wrong_option_1":"","wrong_option_2":"","wrong_option_3":"","is_true":1,"expalanation":"...","hint":"...","difficulty":3,"assessment_approach":"scenario analysis"}}
 
     For identification and true-false cards, keep all eleven keys and use empty strings for fields that do not apply.
 
@@ -538,6 +542,10 @@ VALIDATION ERRORS:
 {grounding_block}
 
 MANDATORY CORRECTIONS:
+- When a validation error names a card number, correct that exact card.
+- Keep every assessment_approach exactly matching its assigned card position.
+- For identification, wrong_option_1, wrong_option_2, and wrong_option_3 must be all exactly "".
+- For multiple-choice, the correct option and three wrong options must be four different strings.
 - Rewrite any multiple-choice or identification question that begins with
   "According to", "Based on", or another wrapper.
 - It must begin directly with What, Which, Who, Where, When, Why, or How.
@@ -545,7 +553,7 @@ MANDATORY CORRECTIONS:
   Invalid: "According to the design rules, which measure assesses effectiveness?"
   Valid: "Which measure assesses effectiveness?"
 - Preserve valid cards.
-- Return the complete cards JSON only.
+- Return a complete replacement as the full cards JSON only.
 - If an error says "exposes provenance metadata", remove expressions such
   as "provided facts", "supplied facts", and "module content". Describe the
   topic directly without mentioning where the information came from.

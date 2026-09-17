@@ -70,6 +70,41 @@ def test_system_prompt_requires_distinct_assessment_approaches():
     assert "assessment approach labels may repeat" not in lowered
 
 
+def test_prompts_treat_scenario_analysis_as_an_approach_not_a_card_type():
+    scenario_concept = ConceptPlan(
+        "Binary base",
+        ("e1",),
+        ("binary | uses | base 2",),
+        (
+            "scenario analysis",
+            "comparison",
+            "application",
+            "misconception detection",
+            "reversed reasoning",
+        ),
+    )
+
+    prompt = build_cluster_prompt(
+        ModuleIdentity("CPE0021", "1"),
+        scenario_concept,
+        (GraphFact("e1", "binary | uses | base 2"),),
+        (GraphFact("e2", "octal | uses | base 8"),),
+    )
+
+    assert "Use only multiple-choice, identification, and true-false." in SYSTEM_PROMPT
+    assert '"type":"scenario analysis"' not in prompt
+    scenario_examples = [
+        json.loads(line.strip())
+        for line in prompt.splitlines()
+        if '"assessment_approach":"scenario analysis"' in line
+    ]
+    assert {example["type"] for example in scenario_examples} == {
+        "multiple-choice",
+        "identification",
+        "true-false",
+    }
+
+
 def test_plan_prompt_serializes_relationships_without_provenance():
     prompt = build_concept_plan_prompt(
         ModuleIdentity("CPE0021", "1"),
@@ -103,7 +138,12 @@ def test_plan_prompt_includes_prior_concepts_when_supplied():
 
 
 def test_cluster_prompt_assigns_each_planned_approach_by_card_position():
-    prompt = build_cluster_prompt(ModuleIdentity("CPE0021", "1"), concept())
+    prompt = build_cluster_prompt(
+        ModuleIdentity("CPE0021", "1"),
+        concept(),
+        (GraphFact("e1", "binary | uses | base 2"),),
+        (GraphFact("e2", "octal | uses | base 8"),),
+    )
 
     payload = json.loads(prompt.split("INPUT JSON:\n", 1)[1])
     assert payload["concept"]["facts"] == ["binary | uses | base 2"]

@@ -23,13 +23,8 @@ from flashcard_types import (
     ReviewIssue,
 )
 
-ALLOWED_TYPES = {"multiple-choice", "identification", "true-false", "scenario analysis"}
-# The three types every cluster must still contain at least one of. Kept
-# separate from ALLOWED_TYPES so adding "scenario analysis" as a fourth
-# allowed type doesn't force it into every cluster -- it's an option, not
-# a new per-cluster requirement, and CARDS_PER_CLUSTER wasn't sized for a
-# fourth mandatory slot.
-REQUIRED_TYPES = {"multiple-choice", "identification", "true-false"}
+ALLOWED_TYPES = {"multiple-choice", "identification", "true-false"}
+REQUIRED_TYPES = ALLOWED_TYPES
 ALLOWED_APPROACHES = {
     "recall",
     "comparison",
@@ -45,6 +40,7 @@ ALLOWED_APPROACHES = {
 BANNED_FRAMING = (
     "This statement accurately describes",
     "The following claim",
+    "According to the graph",
     "According to the material",
     "Based on the material",
     "The material/module/lesson/document states",
@@ -98,13 +94,6 @@ TYPE_SPECIFIC_FIELDS = {
     },
     "identification": {"correct_option", "is_true"},
     "true-false": {"is_true"},
-    "scenario analysis": {
-        "correct_option",
-        "wrong_option_1",
-        "wrong_option_2",
-        "wrong_option_3",
-        "is_true",
-    },
 }
 DEFAULT_ASSESSMENT_APPROACHES = (
     "recall",
@@ -592,7 +581,7 @@ def validate_cluster(
             token for fact in concept.facts for token in _grounding_tokens(fact)
         )
         for position, card in enumerate(cards, start=1):
-            if card.type not in {"multiple-choice", "scenario analysis"}:
+            if card.type != "multiple-choice":
                 continue
             for option_name in ("wrong_option_1", "wrong_option_2", "wrong_option_3"):
                 option_terms = set(_grounding_tokens(getattr(card, option_name)))
@@ -627,7 +616,7 @@ def validate_cluster(
         if any(_contains_provenance(value) for value in _text_fields(card) if value):
             errors.append(f"{prefix} exposes provenance metadata")
 
-        if card.type in {"identification"}:
+        if card.type in {"multiple-choice", "identification"}:
             if not DIRECT_STEM.match(card.question.strip()):
                 errors.append(f"{prefix} must use a direct question stem")
             if not card.question.rstrip().endswith("?"):
@@ -641,7 +630,7 @@ def validate_cluster(
                     f"{prefix} true-false question must be a declarative statement only"
                 )
 
-        if card.type in {"multiple-choice", "scenario analysis"}:
+        if card.type == "multiple-choice":
             options = (
                 card.correct_option,
                 card.wrong_option_1,
@@ -658,20 +647,6 @@ def validate_cluster(
                 errors.append(f"{prefix} {card.type} options must be distinct")
             if card.is_true is not None:
                 errors.append(f"{prefix} {card.type} is_true must be empty")
-            if card.type == "scenario analysis":
-                stem = card.question.strip()
-                # A scenario-analysis card is structurally a short scenario
-                # (one or more sentences) followed by a question about it --
-                # not just a bare direct question like multiple-choice. This
-                # only checks for that shape mechanically (a sentence break
-                # before the final "?"); it can't judge whether the scenario
-                # is actually meaningful.
-                if not re.search(r"[.!]\s+\S", stem) or "?" not in stem:
-                    errors.append(
-                        f"{prefix} scenario analysis question must open with a "
-                        "scenario sentence before the question"
-                    )
-
         elif card.type == "identification":
             if not card.correct_option.strip():
                 errors.append(

@@ -65,6 +65,7 @@ PROVENANCE_PATTERNS = (
     r"\b(?:in|from)\s+the\s+(?:facts?|material|text|information|slides?)\b",
 )
 DIRECT_STEM = re.compile(r"^(what(?:\s+term)?|which|who|where|when|why|how)\b", re.I)
+LEADING_WRAPPER = re.compile(r"^(according to|based on)\b", re.I)
 CARD_FIELDS = {
     "type",
     "question",
@@ -618,16 +619,18 @@ def validate_cluster(
             errors.append(f"{prefix} assessment approach must not be empty")
         if any("\n" in value or "\r" in value for value in _text_fields(card)):
             errors.append(f"{prefix} fields must not contain line breaks")
-        if any(
+        if LEADING_WRAPPER.match(card.question.strip()) or any(
             phrase.casefold() in card.question.casefold() for phrase in BANNED_FRAMING
         ):
             errors.append(f"{prefix} question contains banned framing")
         if any(_contains_provenance(value) for value in _text_fields(card) if value):
             errors.append(f"{prefix} exposes provenance metadata")
 
+        if card.type == "identification" and not DIRECT_STEM.match(
+            card.question.strip()
+        ):
+            errors.append(f"{prefix} must use a direct question stem")
         if card.type in {"multiple-choice", "identification"}:
-            if not DIRECT_STEM.match(card.question.strip()):
-                errors.append(f"{prefix} must use a direct question stem")
             if not card.question.rstrip().endswith("?"):
                 errors.append(f"{prefix} direct question must end with a question mark")
         if card.type == "true-false":

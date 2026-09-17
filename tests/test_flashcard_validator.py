@@ -392,6 +392,63 @@ def test_valid_cluster_has_no_errors():
     assert validate_cluster(valid_cards(), valid_concept()) == ()
 
 
+def test_multiple_choice_accepts_a_context_first_question():
+    values = list(valid_cards())
+    values[0] = replace(
+        values[0],
+        question=(
+            "A learner groups a value by its numerical base. "
+            "This example demonstrates what classification?"
+        ),
+    )
+
+    assert validate_cluster(tuple(values), valid_concept()) == ()
+
+
+def test_multiple_choice_accepts_nonleading_according_to_wording():
+    values = list(valid_cards())
+    values[0] = replace(
+        values[0],
+        question=(
+            "A setting changes according to user preference. "
+            "This demonstrates what behavior?"
+        ),
+    )
+
+    assert validate_cluster(tuple(values), valid_concept()) == ()
+
+
+@pytest.mark.parametrize(
+    "question",
+    (
+        "According to the design rules, which measure applies?",
+        "Based on the design rules, which measure applies?",
+    ),
+)
+def test_multiple_choice_rejects_leading_wrapper_phrases(question):
+    values = list(valid_cards())
+    values[0] = replace(values[0], question=question)
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert "card 1 question contains banned framing" in errors
+
+
+def test_context_first_multiple_choice_requires_a_question_mark():
+    values = list(valid_cards())
+    values[0] = replace(
+        values[0],
+        question=(
+            "A learner groups a value by its numerical base. "
+            "This example demonstrates a classification"
+        ),
+    )
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert "card 1 direct question must end with a question mark" in errors
+
+
 def test_cluster_rejects_scenario_analysis_as_a_card_type():
     values = list(valid_cards())
     values[0] = replace(
@@ -434,7 +491,7 @@ def test_each_card_type_accepts_scenario_analysis_as_its_approach(position):
         (2, {"question": "True or False? The binary relationship uses base 2."}, "declarative statement only"),
         (3, {"difficulty": 4}, "difficulty must be 1, 2, or 3"),
         (3, {"question": "According to the graph, which base applies?"}, "banned framing"),
-        (3, {"question": "The binary value belongs where?"}, "direct question stem"),
+        (1, {"question": "The binary value belongs where?"}, "direct question stem"),
         (3, {"hint": "The answer is As base 2."}, "hint reveals the correct answer"),
         (4, {"question": "The source says base 10 replaces base 2."}, "provenance metadata"),
     ],

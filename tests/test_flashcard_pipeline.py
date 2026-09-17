@@ -1,11 +1,24 @@
 from collections import deque
+from dataclasses import replace
 import json
 
 import pytest
 
-from flashcard_pipeline import FlashcardPipeline, GenerationError, PipelineConfig
+from flashcard_pipeline import (
+    FlashcardPipeline,
+    GenerationError,
+    PipelineConfig,
+    _repair_grounding_errors,
+)
 from flashcard_types import FlashcardDraft, GraphFact, ModuleIdentity
-from tests.factories import cluster_json, graph_facts, plan_json
+from flashcard_validator import validate_cluster
+from tests.factories import (
+    cluster_json,
+    graph_facts,
+    make_cards,
+    make_concept,
+    plan_json,
+)
 
 
 class FakeBackend:
@@ -122,6 +135,30 @@ def test_invalid_cluster_is_retried_with_validator_feedback():
 
     assert "expected exactly 5 cards" in backend.calls[2][1]
     assert "complete replacement" in backend.calls[2][1].lower()
+
+
+def test_context_first_multiple_choice_allows_local_distractor_repair():
+    cards = list(make_cards(1))
+    cards[0] = replace(
+        cards[0],
+        question=(
+            "A learner groups a value by its numerical base. "
+            "This example demonstrates what classification?"
+        ),
+        wrong_option_3="Unrelated guess",
+    )
+    facts = graph_facts()
+
+    errors = validate_cluster(tuple(cards), make_concept(1), facts)
+    repaired = _repair_grounding_errors(
+        tuple(cards), errors, facts, phrase_facts=facts[1:]
+    )
+
+    assert errors == (
+        "card 1 wrong_option_3 is not grounded in supplied module facts",
+    )
+    assert repaired is not None
+    assert validate_cluster(repaired, make_concept(1), facts) == ()
 
 
 def test_overfull_cluster_is_retried_and_never_reaches_pipeline_result():

@@ -62,11 +62,11 @@ True-false rules:
 Scenario analysis assessment approach rules:
 - Build a short, concrete situation only from the supplied facts and ask what it demonstrates, requires, or implies.
 - Use any one of the three allowed types. The type controls the structure and fields: multiple-choice uses four options, identification uses one concise answer and empty wrong options, and true-false uses a declarative scenario statement with is_true.
-- For multiple-choice or identification, keep the required direct stem by placing the situation after What, Which, Who, Where, When, Why, or How. For true-false, express the situation and conclusion as a declarative statement.
+- For multiple-choice, the situation may come before the question, as in "A user completes the task with fewer steps. This demonstrates what quality?" For identification, keep the required direct stem by placing the situation after What, Which, Who, Where, When, Why, or How. For true-false, express the situation and conclusion as a declarative statement.
 - Set assessment_approach to "scenario analysis" and never set type to "scenario analysis".
 
 DIRECT STEMS
-For multiple-choice and identification, use a natural direct form beginning with What, Which, Who, Where, When, Why, How, or What term. Do not use wrappers such as According to, Based on, The material states, The following claim, Consider this statement, Evaluate this statement, Identify the concept associated with, or equivalents. The framings "Which of the following", "Which best describes", and "Which most accurately" are allowed when they produce a clear, answerable question. Avoid only vague or subjective wording that cannot be resolved from the supplied facts.
+For identification, use a natural direct form beginning with What, Which, Who, Where, When, Why, How, or What term. Multiple-choice may use the same direct form or put a concrete context or scenario before the question. Both types must ask a clear, answerable question ending in a question mark. Do not use wrappers such as According to, Based on, The material states, The following claim, Consider this statement, Evaluate this statement, Identify the concept associated with, or equivalents. The framings "Which of the following", "Which best describes", and "Which most accurately" are allowed when they produce a clear, answerable question. Avoid only vague or subjective wording that cannot be resolved from the supplied facts.
 
 DIFFICULTY
 Use integer 1 only for recall or straightforward understanding. Use integer 2 for interpretation, comparison, classification, application, or distinction. Use integer 3 for analysis, complex application, multi-step reasoning, competing explanations, or an unfamiliar but fully supported scenario.
@@ -548,7 +548,7 @@ MANDATORY CORRECTIONS:
 - For multiple-choice, the correct option and three wrong options must be four different strings.
 - Rewrite any multiple-choice or identification question that begins with
   "According to", "Based on", or another wrapper.
-- It must begin directly with What, Which, Who, Where, When, Why, or How.
+- Identification must begin directly with What, Which, Who, Where, When, Why, or How. Multiple-choice may instead begin with a concrete context or scenario and then ask the question.
 - Example:
   Invalid: "According to the design rules, which measure assesses effectiveness?"
   Valid: "Which measure assesses effectiveness?"

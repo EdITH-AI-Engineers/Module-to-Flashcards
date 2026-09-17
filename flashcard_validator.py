@@ -55,13 +55,14 @@ PROVENANCE_PATTERNS = (
     r"\bmodule(?:\s+content)?\b",
     r"\bdocument\b",
     r"\blesson\b",
-    r"\bslide\b",
+    r"\bslides?\b",
     r"\bfile\b",
     r"\bchunk\b",
     r"\bcitation\b",
     r"\burl\b",
-    r"\bprovided facts?\b",
-    r"\bsupplied facts?\b",
+    r"\b(?:provided|supplied|given)\s+"
+    r"(?:facts?|material|information|text|source(?:\s+material)?)\b",
+    r"\b(?:in|from)\s+the\s+(?:facts?|material|text|information|slides?)\b",
 )
 DIRECT_STEM = re.compile(r"^(what(?:\s+term)?|which|who|where|when|why|how)\b", re.I)
 CARD_FIELDS = {
@@ -428,6 +429,11 @@ def _contains_provenance(value: str) -> bool:
     return any(re.search(pattern, value, flags=re.I) for pattern in PROVENANCE_PATTERNS)
 
 
+_PROVENANCE_SOURCE = (
+    r"(?:(?:provided|supplied|given)\s+)?"
+    r"(?:facts?|material|module(?:\s+content)?|document|lesson|slides?|"
+    r"source(?:\s+material)?|knowledge\s+graph|file|text|information)"
+)
 _EXPLICIT_STATED_AS_RE = re.compile(
     r"\bis\s+explicitly\s+stated\s+as\s+(.+?)\s+in\s+the\s+(?:provided|supplied)\s+facts?\b",
     re.I,
@@ -438,8 +444,11 @@ _LEADING_FACTS_STATE_RE = re.compile(
     r"show|shows|confirm|confirms)\s+that\s+",
     re.I,
 )
-_ACCORDING_TO_FACTS_RE = re.compile(
-    r",?\s*according\s+to\s+the\s+(?:provided|supplied)\s+facts?\b", re.I
+_PROVENANCE_WRAPPER_RE = re.compile(
+    rf",?\s*(?:(?:according\s+to|based\s+on)\s+(?:the\s+)?"
+    rf"{_PROVENANCE_SOURCE}|as\s+(?:stated|described)\s+in\s+"
+    rf"(?:the\s+)?{_PROVENANCE_SOURCE})\b(?=\s*[,?.!]|$),?\s*",
+    re.I,
 )
 _DANGLING_STATED_IN_RE = re.compile(
     r"\bis\s+explicitly\s+stated\s+in\s+the\s+(?:provided|supplied)\s+facts?\b", re.I
@@ -462,11 +471,11 @@ def _strip_citation_phrasing(text: str) -> str:
     """
     text = _EXPLICIT_STATED_AS_RE.sub(r"is \1", text)
     text = _LEADING_FACTS_STATE_RE.sub("", text)
-    text = _ACCORDING_TO_FACTS_RE.sub("", text)
+    text = _PROVENANCE_WRAPPER_RE.sub(" ", text)
     text = _DANGLING_STATED_IN_RE.sub("", text)
     text = _LEFTOVER_FACTS_RE.sub("", text)
     text = re.sub(r"\s+", " ", text).strip()
-    text = re.sub(r"\s+([.,])", r"\1", text)
+    text = re.sub(r"\s+([.,?!])", r"\1", text)
     text = re.sub(r"\.\s*\.", ".", text)
     text = text.strip(" ,")
     if text and not text.endswith((".", "!", "?")):

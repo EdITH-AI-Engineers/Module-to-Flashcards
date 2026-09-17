@@ -70,6 +70,17 @@ def test_system_prompt_requires_distinct_assessment_approaches():
     assert "assessment approach labels may repeat" not in lowered
 
 
+def test_cluster_prompt_avoids_banned_provenance_language_for_distractors():
+    prompt = build_cluster_prompt(
+        ModuleIdentity("CPE0021", "1"),
+        concept(),
+        (GraphFact("e1", "binary | uses | base 2"),),
+        (GraphFact("e2", "octal | uses | base 8"),),
+    )
+
+    assert "provided module content" not in prompt.casefold()
+
+
 def test_prompts_treat_scenario_analysis_as_an_approach_not_a_card_type():
     scenario_concept = ConceptPlan(
         "Binary base",

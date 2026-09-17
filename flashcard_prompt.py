@@ -355,7 +355,7 @@ def build_cluster_prompt(
     {approach_list}
     Self-check mapping before you respond: {approach_checklist}. Every card's assessment_approach value must match its required entry above exactly; it must not duplicate another card's approach and must not use an approach absent from this list.
     {overlap_guidance}
-    Include at least one multiple-choice, one identification, and one true-false card among the {CARDS_PER_CLUSTER}; vary the other two card types naturally. Scenario analysis is an assessment approach, not a type, and may be expressed using any of the three allowed types. Every claim, correct answer, distractor judgment, explanation, and hint must be resolvable using only the supplied facts. Every wrong_option must be a plausible-but-incorrect term drawn from elsewhere in the provided module content; never invent a topic, term, or fact absent from the supplied facts.
+    Include at least one multiple-choice, one identification, and one true-false card among the {CARDS_PER_CLUSTER}; vary the other two card types naturally. Scenario analysis is an assessment approach, not a type, and may be expressed using any of the three allowed types. Every claim, correct answer, distractor judgment, explanation, and hint must be resolvable using only the supplied facts. Every wrong_option must be a plausible-but-incorrect term grounded in distractor_pool or concept_facts; never invent a topic, term, or fact absent from those fields.
     If the supplied facts include an equation, formula, numerical relationship, or clearly defined quantities, use a realistic problem-solving scenario for an appropriate approach when the facts provide enough information. The scenario may ask the learner to calculate, select, compare, or reason about a supported result. Use only supplied variables, units, values, operations, and relationships; state any needed values explicitly; and do not invent constants, assumptions, formulas, or numerical data. Do not force a numerical problem when the facts are insufficient.
 
     Questions, correct answers, explanations, and hints must use only concept_facts.
@@ -555,8 +555,9 @@ MANDATORY CORRECTIONS:
 - Preserve valid cards.
 - Return a complete replacement as the full cards JSON only.
 - If an error says "exposes provenance metadata", remove expressions such
-  as "provided facts", "supplied facts", and "module content". Describe the
-  topic directly without mentioning where the information came from.
+  as "according to the module", "based on the supplied material", and
+  "as described in the lesson". Describe the topic directly without
+  mentioning where the information came from.
 - If an error says a wrong_option "is not grounded in supplied module facts",
   that option was invented rather than adapted from distractor_pool. Rewrite
   only that wrong_option, keeping it plausible but built from a term, event,

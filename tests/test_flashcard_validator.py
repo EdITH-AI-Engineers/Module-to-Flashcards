@@ -133,6 +133,89 @@ def test_cards_parser_creates_typed_records():
     assert parse_cards(cards_json()) == valid_cards()
 
 
+@pytest.mark.parametrize(
+    ("question", "expected"),
+    (
+        (
+            "Which measure applies according to the module?",
+            "Which measure applies?",
+        ),
+        (
+            "How do the methods differ based on the supplied material?",
+            "How do the methods differ?",
+        ),
+        (
+            "What principle follows as described in the lesson?",
+            "What principle follows?",
+        ),
+        (
+            "According to the document, which outcome is supported?",
+            "Which outcome is supported?",
+        ),
+        (
+            "Which outcome is supported according to the source material?",
+            "Which outcome is supported?",
+        ),
+        (
+            "Which property, according to the module, determines the outcome?",
+            "Which property determines the outcome?",
+        ),
+    ),
+)
+def test_cards_parser_removes_generic_provenance_wrappers(question, expected):
+    payload = json.loads(cards_json())
+    payload["cards"][0]["question"] = question
+
+    cards = parse_cards(json.dumps(payload))
+
+    assert cards[0].question == expected
+    assert "card 1 exposes provenance metadata" not in validate_cluster(
+        cards, valid_concept()
+    )
+
+
+def test_cards_parser_keeps_non_provenance_according_to_clause():
+    payload = json.loads(cards_json())
+    question = "Which setting changes according to user preference?"
+    payload["cards"][0]["question"] = question
+
+    cards = parse_cards(json.dumps(payload))
+
+    assert cards[0].question == question
+
+
+def test_cards_parser_keeps_compound_source_phrase_intact():
+    payload = json.loads(cards_json())
+    question = "Which value is explicitly stated in the information table?"
+    payload["cards"][0]["question"] = question
+
+    cards = parse_cards(json.dumps(payload))
+
+    assert cards[0].question == question
+
+
+@pytest.mark.parametrize(
+    "question",
+    (
+        "Which outcome appears in the supplied material?",
+        "Which conclusion follows from the provided information?",
+        "Which concept is defined in the text?",
+        "Which conclusion follows from the given facts?",
+        "Which topic appears in the slides?",
+        "Which claim appears in the given source?",
+        "Which result follows from the facts?",
+    ),
+)
+def test_cluster_rejects_unwrapped_provenance_language(question):
+    payload = json.loads(cards_json())
+    payload["cards"][0]["question"] = question
+    cards = parse_cards(json.dumps(payload))
+
+    errors = validate_cluster(cards, valid_concept())
+
+    assert "card 1 exposes provenance metadata" in errors
+
+
 def test_cards_parser_rejects_boolean_true_false_value():
     values = list(valid_cards())
     values[2] = replace(values[2], is_true=True)

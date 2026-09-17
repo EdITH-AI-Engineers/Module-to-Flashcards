@@ -23,7 +23,13 @@ from flashcard_types import (
     ReviewIssue,
 )
 
-ALLOWED_TYPES = {"multiple-choice", "identification", "true-false"}
+ALLOWED_TYPES = {"multiple-choice", "identification", "true-false", "scenario analysis"}
+# The three types every cluster must still contain at least one of. Kept
+# separate from ALLOWED_TYPES so adding "scenario analysis" as a fourth
+# allowed type doesn't force it into every cluster -- it's an option, not
+# a new per-cluster requirement, and CARDS_PER_CLUSTER wasn't sized for a
+# fourth mandatory slot.
+REQUIRED_TYPES = {"multiple-choice", "identification", "true-false"}
 ALLOWED_APPROACHES = {
     "recall",
     "comparison",
@@ -92,6 +98,13 @@ TYPE_SPECIFIC_FIELDS = {
     },
     "identification": {"correct_option", "is_true"},
     "true-false": {"is_true"},
+    "scenario analysis": {
+        "correct_option",
+        "wrong_option_1",
+        "wrong_option_2",
+        "wrong_option_3",
+        "is_true",
+    },
 }
 DEFAULT_ASSESSMENT_APPROACHES = (
     "recall",
@@ -163,10 +176,33 @@ def normalize_stem(value: str) -> str:
     return " ".join(value.split())
 
 
+def _stem(token: str) -> str:
+    """Light, dependency-free suffix stripping so trivial inflections (the
+    module facts saying "systems" while a generated option says "system",
+    "designing" vs "design", etc.) don't fail grounding purely on plurals
+    or verb endings. This is intentionally crude -- it only exists to stop
+    the validator from rejecting options that a human would clearly
+    recognize as reusing the same word, not to do real linguistic
+    stemming."""
+    if token.isdigit():
+        return token
+    if len(token) > 4 and token.endswith("ies"):
+        return token[:-3] + "y"
+    if len(token) > 4 and token.endswith("es"):
+        return token[:-2]
+    if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
+    if len(token) > 5 and token.endswith("ing"):
+        return token[:-3]
+    if len(token) > 4 and token.endswith("ed"):
+        return token[:-2]
+    return token
+
+
 def _grounding_tokens(value: str) -> set[str]:
     stop_words = {"a", "an", "and", "or", "the", "of", "to", "in", "is", "are"}
     return {
-        token
+        _stem(token)
         for token in re.findall(r"[a-z]+|\d+", value.casefold())
         if token not in stop_words
     }
@@ -515,7 +551,7 @@ def validate_cluster(
         )
 
     counts = Counter(card.type for card in cards)
-    if any(counts.get(card_type, 0) == 0 for card_type in ALLOWED_TYPES):
+    if any(counts.get(card_type, 0) == 0 for card_type in REQUIRED_TYPES):
         errors.append(
             "cluster must contain at least one multiple-choice, identification, and true-false card"
         )
@@ -556,7 +592,7 @@ def validate_cluster(
             token for fact in concept.facts for token in _grounding_tokens(fact)
         )
         for position, card in enumerate(cards, start=1):
-            if card.type != "multiple-choice":
+            if card.type not in {"multiple-choice", "scenario analysis"}:
                 continue
             for option_name in ("wrong_option_1", "wrong_option_2", "wrong_option_3"):
                 option_terms = set(_grounding_tokens(getattr(card, option_name)))
@@ -591,7 +627,7 @@ def validate_cluster(
         if any(_contains_provenance(value) for value in _text_fields(card) if value):
             errors.append(f"{prefix} exposes provenance metadata")
 
-        if card.type in {"multiple-choice", "identification"}:
+        if card.type in {"identification"}:
             if not DIRECT_STEM.match(card.question.strip()):
                 errors.append(f"{prefix} must use a direct question stem")
             if not card.question.rstrip().endswith("?"):
@@ -605,7 +641,7 @@ def validate_cluster(
                     f"{prefix} true-false question must be a declarative statement only"
                 )
 
-        if card.type == "multiple-choice":
+        if card.type in {"multiple-choice", "scenario analysis"}:
             options = (
                 card.correct_option,
                 card.wrong_option_1,
@@ -616,12 +652,25 @@ def validate_cluster(
                 not option.strip() for option in options[1:]
             ):
                 errors.append(
-                    f"{prefix} multiple-choice requires one correct and three non-empty wrong options"
+                    f"{prefix} {card.type} requires one correct and three non-empty wrong options"
                 )
             if len({_normalized(option) for option in options}) != 4:
-                errors.append(f"{prefix} multiple-choice options must be distinct")
+                errors.append(f"{prefix} {card.type} options must be distinct")
             if card.is_true is not None:
-                errors.append(f"{prefix} multiple-choice is_true must be empty")
+                errors.append(f"{prefix} {card.type} is_true must be empty")
+            if card.type == "scenario analysis":
+                stem = card.question.strip()
+                # A scenario-analysis card is structurally a short scenario
+                # (one or more sentences) followed by a question about it --
+                # not just a bare direct question like multiple-choice. This
+                # only checks for that shape mechanically (a sentence break
+                # before the final "?"); it can't judge whether the scenario
+                # is actually meaningful.
+                if not re.search(r"[.!]\s+\S", stem) or "?" not in stem:
+                    errors.append(
+                        f"{prefix} scenario analysis question must open with a "
+                        "scenario sentence before the question"
+                    )
 
         elif card.type == "identification":
             if not card.correct_option.strip():

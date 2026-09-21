@@ -1,7 +1,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Mapping, Protocol
+
+
+class CompletionTruncatedError(RuntimeError):
+    """Raised when a backend stops because its output budget was exhausted."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        partial_content: str = "",
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.partial_content = partial_content
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+
+
+class ContextWindowExceededError(RuntimeError):
+    """Raised when a backend prompt cannot fit in its configured context."""
 
 
 @dataclass(frozen=True)
@@ -55,5 +76,12 @@ class ReviewIssue:
 
 
 class ChatBackend(Protocol):
-    def complete(self, system: str, user: str, *, max_tokens: int) -> str:
+    def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        max_tokens: int,
+        schema: Mapping[str, object] | None = None,
+    ) -> str:
         """Return only the assistant's textual content."""

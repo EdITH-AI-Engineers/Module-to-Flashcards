@@ -133,6 +133,20 @@ def test_cards_parser_creates_typed_records():
     assert parse_cards(cards_json()) == valid_cards()
 
 
+def test_cards_parser_rejects_using_distractor_pool_as_answer_authority():
+    values = list(valid_cards())
+    values[0] = replace(
+        values[0],
+        expalanation="This answer is stated in the distractor pool.",
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="treats internal distractor data as answer authority",
+    ):
+        parse_cards(cards_json(tuple(values)))
+
+
 @pytest.mark.parametrize(
     ("question", "expected"),
     (
@@ -468,14 +482,41 @@ def test_cluster_rejects_scenario_analysis_as_a_card_type():
 @pytest.mark.parametrize("position", (0, 1, 2))
 def test_each_card_type_accepts_scenario_analysis_as_its_approach(position):
     values = list(valid_cards())
+    scenario_questions = (
+        "A learner sees a numeral system using two symbols. Which base applies?",
+        "What term names the system when a learner sees that it uses base 2?",
+        "A learner observes base 2, so the numeral system has the binary relationship.",
+    )
     approaches = list(APPROACHES)
     approaches[position] = "scenario analysis"
     values[position] = replace(
-        values[position], assessment_approach="scenario analysis"
+        values[position],
+        question=scenario_questions[position],
+        assessment_approach="scenario analysis",
     )
     concept = replace(valid_concept(), assessment_approaches=tuple(approaches))
 
     assert validate_cluster(tuple(values), concept) == ()
+
+
+def test_scenario_analysis_rejects_a_definition_question_without_a_situation():
+    values = list(valid_cards())
+    approaches = list(APPROACHES)
+    approaches[1] = "scenario analysis"
+    values[1] = replace(
+        values[1],
+        question="What concept applies when designing an efficient interface?",
+        correct_option="Design Rules",
+        assessment_approach="scenario analysis",
+    )
+    concept = replace(valid_concept(), assessment_approaches=tuple(approaches))
+
+    errors = validate_cluster(tuple(values), concept)
+
+    assert any(
+        "scenario analysis must present a concrete situation" in error
+        for error in errors
+    )
 
 
 @pytest.mark.parametrize(
@@ -505,26 +546,67 @@ def test_cluster_rejects_type_and_text_rule_violations(position, changes, messag
     assert any(message in error for error in errors)
 
 
-def test_cluster_requires_five_distinct_assessment_approaches():
-    values = tuple(
-        replace(card, assessment_approach="guided review")
-        for card in valid_cards()
-    )
+def test_cluster_allows_planned_assessment_approaches_to_repeat():
+    values = tuple(replace(card, assessment_approach="recall") for card in valid_cards())
 
     errors = validate_cluster(values, valid_concept())
 
-    assert any("5 distinct assessment approaches" in error for error in errors)
+    assert not any("assessment_approach must be one of" in error for error in errors)
 
 
-def test_cluster_requires_planned_assessment_approaches_in_order():
+def test_cluster_accepts_planned_assessment_approaches_in_any_order():
     values = list(valid_cards())
     values[0] = replace(values[0], assessment_approach="comparison")
     values[1] = replace(values[1], assessment_approach="recall")
 
     errors = validate_cluster(tuple(values), valid_concept())
 
-    assert any("match the planned assessment approaches in order" in error for error in errors)
-    assert any("card 1 assessment_approach must be 'recall'" in error for error in errors)
+    assert not any("assessment approach" in error for error in errors)
+
+
+def test_cluster_rejects_an_unplanned_assessment_approach():
+    values = list(valid_cards())
+    values[-1] = replace(values[-1], assessment_approach="guided review")
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert any(
+        "card 5 assessment_approach must be one of the planned approaches" in error
+        for error in errors
+    )
+
+
+def test_grounding_accepts_common_derivational_word_forms():
+    values = list(valid_cards())
+    values[0] = replace(
+        values[0],
+        wrong_option_1="Safety",
+        wrong_option_2="Comfort",
+        wrong_option_3="Enjoyment",
+    )
+    facts = (
+        GraphFact(
+            "e1",
+            "binary uses base 2 and should be safe comfortable and enjoyable",
+        ),
+    )
+
+    errors = validate_cluster(tuple(values), valid_concept(), facts)
+
+    assert not any("not grounded" in error for error in errors)
+
+
+@pytest.mark.parametrize("phrase", ("concept fact", "distractor pool"))
+def test_cluster_rejects_internal_evidence_labels(phrase):
+    values = list(valid_cards())
+    values[0] = replace(
+        values[0],
+        expalanation=f"The answer is supported by the {phrase}.",
+    )
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert "card 1 exposes provenance metadata" in errors
 
 
 def test_cluster_rejects_blank_assessment_approach():

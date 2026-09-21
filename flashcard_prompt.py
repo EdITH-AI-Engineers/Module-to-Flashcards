@@ -27,12 +27,25 @@ CARD FIELD CONTRACT
 Every card, with no exceptions, must include all eleven fields: type, question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, is_true, expalanation, hint, difficulty, assessment_approach. Before returning JSON, verify every card object has exactly these eleven keys. If any card is missing a key, add it before responding.
 
 QUESTION QUALITY
-Write clear, authentic college-level assessment items. Assess terminology, distinctions, relationships, mechanisms, processes, causes, effects, classifications, applications, implications, conditions, limitations, or technical reasoning only when the supplied facts support them. Difficulty must come from the required thinking, never confusing wording. Do not mechanically convert a fact into a stem or reveal an answer through its full definition. Within a concept, use {CARDS_PER_CLUSTER} meaningfully different assessment approaches. Changes limited to wording, names, punctuation, order, or distractors are not distinct approaches.
+Write clear, authentic college-level assessment items. Assess terminology, distinctions, relationships, mechanisms, processes, causes, effects, classifications, applications, implications, conditions, limitations, or technical reasoning only when the supplied facts support them. Difficulty must come from the required thinking, never confusing wording. Do not mechanically convert a fact into a stem or reveal an answer through its full definition. Assign each card whichever planned assessment approach accurately describes the reasoning it requires. Approaches may repeat, and no planned approach is required to appear. Prefer useful variety when the facts support it, but never mislabel a question merely to cover every approach.
+
+ASSESSMENT APPROACH SEMANTICS
+- recall: directly retrieve an explicitly supported term, property, relationship, or fact.
+- comparison: reason about a supported similarity, difference, or contrast between at least two things.
+- classification: determine a supported category or group from defining characteristics.
+- application: use a supported rule, principle, process, or relationship to decide or solve something.
+- scenario analysis: interpret a short, concrete situation and determine what it demonstrates, requires, or implies. A definition question such as "What term refers to..." is recall or classification, never scenario analysis.
+- cause/effect: connect a supported cause with its effect or explain why a result follows.
+- misconception detection: identify or correct a plausible but unsupported belief or relationship.
+- conditions: determine the circumstances or requirements under which a supported claim holds.
+- consequences: determine a supported outcome or implication.
+- reversed reasoning: start from a supported result or property and infer the cause, rule, or concept behind it.
+The assessment_approach label must describe the reasoning actually required by the question. Never attach a planned label to a question that uses a different approach.
 
 EQUATION-BASED PROBLEM SOLVING
 When the supplied facts contain an equation, formula, numerical relationship, or clearly defined quantities, include problem-solving questions when the selected assessment approach supports them. A problem-solving question may use a realistic, concrete scenario such as selecting a valid value, calculating an outcome, comparing results, or determining what changes when one supported quantity changes. Use only variables, units, relationships, and operations explicitly supplied by the facts; do not introduce outside constants, assumptions, or formulas. State every needed value in the question or supplied facts, use plain-text equation syntax, and ensure the answer follows deterministically from the available information. A scenario must test the equation or relationship, not add decorative context. Do not force a numerical problem when the source does not provide enough information.
 
-Never mention a knowledge graph, source, module, document, lesson, slide, file, chunk, citation, URL, header, footer, or source reference in a question, answer, explanation, or hint. This applies to every field: question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, expalanation, and hint. Refer to the topic itself, never to where it appeared. Bad: "What is the title of the slide that discusses the reading portfolio overview?" Good: "What overview precedes the parts and contents of the reading portfolio?" If a draft question would need the word slide, lesson, module, or document to make sense, rewrite it to name the topic directly instead.
+Never mention a knowledge graph, concept fact, supplied fact, distractor pool, input field, source, module, document, lesson, slide, file, chunk, citation, URL, header, footer, or source reference in a question, answer, explanation, or hint. This applies to every field: question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, expalanation, and hint. The allowed wrong-option vocabulary is only for plausible wrong-option wording; never use it as authority for a correct answer, true-false decision, explanation, or hint. Refer to the topic itself, never to where it appeared. Bad: "What is the title of the slide that discusses the reading portfolio overview?" Good: "What overview precedes the parts and contents of the reading portfolio?" If a draft question would need the word slide, lesson, module, or document to make sense, rewrite it to name the topic directly instead.
 
 ALLOWED TYPES
 Use only multiple-choice, identification, and true-false. Vary the mix of these types from cluster to cluster; do not repeat the same type distribution in every cluster. Every cluster needs at least one multiple-choice, one identification, and one true-false card.
@@ -111,13 +124,11 @@ def grounded_vocabulary(
     substantive content from, using the identical tokenization the
     validator applies (flashcard_validator._grounding_tokens).
 
-    Handing the model a vague instruction like "adapt a term from
-    distractor_pool" is too abstract for a small local model to reliably
-    follow -- it tends to fall back on plausible-sounding but invented
-    content instead. Giving it the literal, mechanically-checkable word
-    list the validator will test against turns an abstract judgment call
-    into a concrete constraint: "every wrong_option must contain at least
-    one exact word from this list."
+    Handing the model full facts from other concepts makes a small local model
+    treat those facts as authority for the current question. Instead, give it
+    only the literal, mechanically-checkable words the validator will accept
+    in wrong options. This turns an abstract judgment call into a concrete
+    constraint without exposing another concept's complete learning point.
     """
     terms: set[str] = set()
     for fact in concept_facts:
@@ -309,154 +320,112 @@ def build_cluster_prompt(
     distractor_facts: Sequence[GraphFact],
     prior_signals: Sequence[str] = (),
 ) -> str:
-    vocabulary = grounded_vocabulary(concept, concept_facts, distractor_facts)
+    payload = _cluster_payload(
+        identity,
+        concept,
+        concept_facts,
+        distractor_facts,
+        prior_signals,
+    )
+    approach_list = "\n".join(
+        f'- "{approach}"' for approach in concept.assessment_approaches
+    )
+    prior_guidance = ""
+    if "already_covered_subjects" in payload:
+        prior_guidance = """
+    - already_covered_subjects contains compact subject/answer fingerprints from
+      earlier cards. Do not test the same subject expecting the same answer."""
+
+    return f"""Generate exactly {CARDS_PER_CLUSTER} cards for this concept.
+
+    PLANNED ASSESSMENT APPROACHES
+    {approach_list}
+    For each card, select whichever listed approach best describes the actual
+    reasoning required. Approaches may repeat, and a listed approach does not
+    have to appear. The list order is not the card order, and no approach is
+    tied to a numbered card position. Do not mislabel a recall or definition
+    question merely to force approach coverage.
+
+    EVIDENCE SCOPE
+    - Questions, correct answers, explanations, and hints must be supported by
+      concept_facts.
+    - Each multiple-choice wrong_option must be plausible but incorrect for its
+      question and must contain at least one exact substantive term from
+      allowed_wrong_option_terms. That list is for wrong-option wording only;
+      never use it as evidence for a correct answer, question, explanation, or
+      hint. Do not invent outside topics, examples, or technologies.
+    - When the evidence supplies an equation or numerical relationship, an
+      assigned application or scenario approach may test it using only supplied
+      variables, values, units, and operations.
+    {prior_guidance}
+
+    REPEATED CRITICAL RULES
+    - Use only multiple-choice, identification, and true-false as type values.
+      Include at least one of each. Scenario analysis is an assessment_approach,
+      never a type.
+    - Multiple-choice: correct_option and all three wrong_option values must be
+      four different strings; no wrong_option may repeat or closely restate
+      another option. Set is_true to null.
+    - Identification: wrong_option_1, wrong_option_2, and wrong_option_3
+      must literally be "". Set is_true to null. The question must not reveal the
+      answer or its abbreviation.
+    - True-false: use a declarative statement, keep all option fields "", and
+      set is_true to integer 0 or 1.
+    - Every question must be clear and end in ? except true-false statements.
+      Do not begin with provenance wrappers such as "According to" or "Based on".
+    - Never write knowledge graph, source, module, document, lesson, slide, file,
+      chunk, citation, or URL in any card field. Name the topic directly.
+    - Keep all eleven keys in every object and preserve the spelling expalanation.
+    - Return one complete JSON object only, with no Markdown or surrounding text.
+
+    Required top-level shape:
+    {{"cards":[...exactly {CARDS_PER_CLUSTER} complete card objects...]}}
+
+    Every card object must contain exactly:
+    type, question, correct_option, wrong_option_1, wrong_option_2,
+    wrong_option_3, is_true, expalanation, hint, difficulty,
+    assessment_approach
+
+    Scenario analysis may use any allowed structural type, for example:
+    {{"type":"multiple-choice","question":"A user encounters a supported condition. Which concept applies?","correct_option":"...","wrong_option_1":"...","wrong_option_2":"...","wrong_option_3":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":3,"assessment_approach":"scenario analysis"}}
+    {{"type":"identification","question":"What concept applies when a user encounters the supported condition?","correct_option":"...","wrong_option_1":"","wrong_option_2":"","wrong_option_3":"","is_true":null,"expalanation":"...","hint":"...","difficulty":3,"assessment_approach":"scenario analysis"}}
+    {{"type":"true-false","question":"A user encountering the supported condition demonstrates the stated relationship.","correct_option":"","wrong_option_1":"","wrong_option_2":"","wrong_option_3":"","is_true":1,"expalanation":"...","hint":"...","difficulty":3,"assessment_approach":"scenario analysis"}}
+
+    INPUT JSON:
+    """ + _json(payload)
+
+
+def _cluster_payload(
+    identity: ModuleIdentity,
+    concept: ConceptPlan,
+    concept_facts: Sequence[GraphFact],
+    distractor_facts: Sequence[GraphFact],
+    prior_signals: Sequence[str] = (),
+) -> dict[str, object]:
+    """Return bounded cluster input without duplicating resolved fact text."""
+
     payload = {
         "course_code": identity.course_code,
         "module_number": identity.module_number,
-        "concept": _concept_payload(concept),
+        "concept": {
+            "name": concept.name,
+            "fact_ids": list(concept.fact_ids),
+            "assessment_approaches": list(concept.assessment_approaches),
+        },
         "concept_facts": [
             {"fact_id": fact.fact_id, "statement": fact.statement}
             for fact in concept_facts
         ],
-        "distractor_pool": [
-            {"fact_id": fact.fact_id, "statement": fact.statement}
-            for fact in distractor_facts
-        ],
-        "grounded_vocabulary": list(vocabulary),
+        "allowed_wrong_option_terms": list(
+            grounded_vocabulary(concept, concept_facts, distractor_facts)[:60]
+        ),
     }
     condensed_prior, omitted_prior = _condensed_prior_signals(prior_signals)
-    overlap_guidance = ""
     if condensed_prior:
         payload["already_covered_subjects"] = condensed_prior
-        overlap_guidance = (
-            '\nalready_covered_subjects lists "subject -> answer" fingerprints '
-            "for cards already generated elsewhere in this module -- abbreviated "
-            "for brevity, not the literal wording used. Do not write a new card "
-            "whose question asks about the same subject expecting the same "
-            "answer as one of these, even if the wording, framing, or card type "
-            "is different.\n"
-        )
         if omitted_prior:
-            overlap_guidance += (
-                f"({omitted_prior} additional earlier fingerprint(s) omitted "
-                "here for brevity -- avoiding the pattern above avoids those "
-                "too.)\n"
-            )
-    assignments = list(enumerate(concept.assessment_approaches, start=1))
-    approach_list = "\n".join(
-        f'- Card {index}: assessment_approach must be exactly "{approach}"'
-        for index, approach in assignments
-    )
-    approach_checklist = ", ".join(
-        f"card {index}={approach}" for index, approach in assignments
-    )
-    return f"""Generate exactly {CARDS_PER_CLUSTER} assessment cards for the one supplied concept.
-    Assign assessment approaches by position, one approach per card, with no repeats and no substitutions:
-    {approach_list}
-    Self-check mapping before you respond: {approach_checklist}. Every card's assessment_approach value must match its required entry above exactly; it must not duplicate another card's approach and must not use an approach absent from this list.
-    {overlap_guidance}
-    Include at least one multiple-choice, one identification, and one true-false card among the {CARDS_PER_CLUSTER}; vary the other two card types naturally. Scenario analysis is an assessment approach, not a type, and may be expressed using any of the three allowed types. Every claim, correct answer, distractor judgment, explanation, and hint must be resolvable using only the supplied facts. Every wrong_option must be a plausible-but-incorrect term grounded in distractor_pool or concept_facts; never invent a topic, term, or fact absent from those fields.
-    If the supplied facts include an equation, formula, numerical relationship, or clearly defined quantities, use a realistic problem-solving scenario for an appropriate approach when the facts provide enough information. The scenario may ask the learner to calculate, select, compare, or reason about a supported result. Use only supplied variables, units, values, operations, and relationships; state any needed values explicitly; and do not invent constants, assumptions, formulas, or numerical data. Do not force a numerical problem when the facts are insufficient.
-
-    Questions, correct answers, explanations, and hints must use only concept_facts.
-
-    GROUNDING WORD LIST (mechanical rule, not a style suggestion)
-    grounded_vocabulary is the complete, exact list of substantive words this
-    concept's cards are allowed to draw wrong_option content from. It is
-    computed directly from concept_facts, distractor_pool, and the concept
-    name -- nothing else. For every multiple-choice wrong_option (including
-    scenario, application, and comparison cards), at least one content word
-    in that wrong_option (ignoring articles, prepositions, and connective
-    words) must appear, in some form, in grounded_vocabulary. Build each
-    wrong_option by starting from one specific item in distractor_pool or
-    concept_facts and lightly rephrasing it -- do not compose a wrong_option
-    out of words that all fall outside grounded_vocabulary, even if the
-    result sounds like a normal, plausible course topic. A plausible-sounding
-    wrong_option that reuses none of grounded_vocabulary's words WILL be
-    rejected regardless of how reasonable it sounds; there is no partial
-    credit for "sounds academically similar."
-
-    Concretely, before writing a wrong_option: (1) pick one entry from
-    distractor_pool (or, if the concept's own facts contain more than one
-    idea, concept_facts) that is a genuinely wrong answer to this specific
-    question; (2) reuse at least one exact word from that entry's statement;
-    (3) reshape the rest into a natural-sounding option. If nothing in
-    distractor_pool or concept_facts yields a workable wrong answer for the
-    approach you were assigned, write the card using a different but still
-    assigned-correct assessment_approach framing that a distractor_pool item
-    does support, rather than inventing unrelated content.
-
-    A distractor must be incorrect for the current question. Do not invent a
-    term that is absent from both concept_facts and distractor_pool.
-
-    REPEATED CRITICAL RULES” re-verify each of these on every card before responding:
-    - Count the {CARDS_PER_CLUSTER} cards' types before finalizing: every type must be multiple-choice, identification, or true-false, with at least one of each. Never put scenario analysis or any other assessment approach in type. A card whose assigned assessment_approach is "scenario analysis" may use any of the three allowed types, keeping that approach value unchanged.
-    - Multiple-choice: correct_option, wrong_option_1, wrong_option_2, and wrong_option_3 must be four textually different strings; no wrong_option may repeat or closely restate the correct_option or another wrong_option.
-    - Identification: wrong_option_1, wrong_option_2, and wrong_option_3 must literally be "" â€” no words, no distractor terms.
-    - Never write knowledge graph, source, source material, module, document, lesson, slide, slides, file, chunk, citation, or url in question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, expalanation, or hint. Name the topic itself instead of where it appeared.
-    - Never refer to where information came from.
-    - Never use phrases such as "provided fact", "supplied facts", "module content", "source material", "document", or "lesson".
-    - Write hints about the topic itself.
-    - Ensure all distractors and correct answers are directly from the supplied facts. Do not invent a term, process, or relationship absent from the supplied facts.
-    - For multiple-choice cards using scenario analysis, application, or comparison, a wrong_option must still be adapted from an item in distractor_pool (or concept_facts), never a newly invented real-world example, technology, or activity. Wanting a concrete-sounding wrong option is not license to introduce content absent from the supplied facts.
-    - Before finalizing each multiple-choice card, check every wrong_option word by word against grounded_vocabulary. If a wrong_option's content words are all absent from grounded_vocabulary, discard it and build a new one starting from an actual distractor_pool or concept_facts entry, per the GROUNDING WORD LIST steps above.
-    - Do not put the answer, option labels, or choices in the question. Do not embed the answer in the question stem.
-    - Identification: the question text must not contain correct_option's wording anywhere, even as part of a longer phrase (e.g. a question about "Human-Computer Interaction" must not itself contain the words "human-computer interaction"). Describe the concept by its function, purpose, defining trait, or relationships instead of naming it. If the concept's own defining fact restates its name, paraphrase around the name rather than quoting the fact.
-    - If already_covered_subjects is present, check every new card's subject and answer against it before responding; do not submit a card matching one of those fingerprints under different wording.
-
-    Invalid:
-    "Compare the fields mentioned in the module content."
-
-    Valid:
-    "Compare how each field approaches human interaction."
-
-    Invalid (identification, correct_option "Human-Computer Interaction"):
-    "What is the term for the field that focuses on the design of computer technology and human-computer interaction?"
-
-    Valid (identification, correct_option "Human-Computer Interaction"):
-    "What term describes the field concerned with designing computer systems people can use effectively, safely, and enjoyably?"
-
-    Invalid (multiple-choice scenario-analysis wrong_option, invented and not grounded):
-    "Developing a new programming language" / "Creating a database management system"
-    (these share zero words with grounded_vocabulary -- "programming",
-    "language", "database", and "management" appear nowhere in concept_facts
-    or distractor_pool for this concept, however plausible they sound as
-    generic computer-science distractors.)
-
-    Valid (multiple-choice scenario-analysis wrong_option, adapted from an actual distractor_pool item):
-    a paraphrase of a real entry from distractor_pool -- e.g. if distractor_pool
-    describes HCI's history in the 1980s, a valid wrong option is a scenario
-    built from that item ("Recounting how HCI methods developed in the 1980s"),
-    not an unrelated invented example. This works because "HCI", "1980s", and
-    "developed"/"emerged" trace back to words that actually appear in
-    grounded_vocabulary.
-
-    Return this JSON shape with exactly {CARDS_PER_CLUSTER} objects in cards, in card-position order matching the mapping above. Every object must contain exactly these eleven keys:
-    type, question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, is_true, expalanation, hint, difficulty, assessment_approach
-
-    Example of the required top-level shape (expand cards to exactly {CARDS_PER_CLUSTER} objects):
-    {{"cards":[{{"type":"multiple-choice","question":"...","correct_option":"...","wrong_option_1":"...","wrong_option_2":"...","wrong_option_3":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":2,"assessment_approach":"recall"}}]}}
-
-    Example of a complete true-false card:
-    {{"type":"true-false","question":"The stated relationship is supported.","correct_option":"","wrong_option_1":"","wrong_option_2":"","wrong_option_3":"","is_true":1,"expalanation":"The supplied facts support the relationship.","hint":"Check the relationship itself.","difficulty":1,"assessment_approach":"recall"}}
-
-    Example of a multiple-choice card using the scenario analysis approach:
-    {{"type":"multiple-choice","question":"Which measure is primarily assessed when a team redesigns a workflow so users finish tasks with minimal training?","correct_option":"...","wrong_option_1":"...","wrong_option_2":"...","wrong_option_3":"...","is_true":null,"expalanation":"...","hint":"...","difficulty":3,"assessment_approach":"scenario analysis"}}
-
-    Example of an identification card using the scenario analysis approach:
-    {{"type":"identification","question":"What measure is primarily assessed when users can complete tasks with minimal training?","correct_option":"...","wrong_option_1":"","wrong_option_2":"","wrong_option_3":"","is_true":null,"expalanation":"...","hint":"...","difficulty":3,"assessment_approach":"scenario analysis"}}
-
-    Example of a true-false card using the scenario analysis approach:
-    {{"type":"true-false","question":"A workflow that users can complete with minimal training primarily assesses the stated usability measure.","correct_option":"","wrong_option_1":"","wrong_option_2":"","wrong_option_3":"","is_true":1,"expalanation":"...","hint":"...","difficulty":3,"assessment_approach":"scenario analysis"}}
-
-    For identification and true-false cards, keep all eleven keys and use empty strings for fields that do not apply.
-
-    Use empty strings for fields that the selected type requires to be empty. Use JSON null only where the type rules require null. Before returning your answer, verify every card has all eleven keys, that difficulty and assessment_approach are present, that the assessment_approach mapping above is followed exactly, and that both REPEATED CRITICAL RULES above hold for every card.
-
-    INPUT JSON:
-    """ + _json(
-        payload
-    )
+            payload["omitted_prior_subject_count"] = omitted_prior
+    return payload
 
 
 MAX_RETRY_ERROR_COUNT = 12
@@ -524,8 +493,8 @@ list. This is not a matter of degree -- go through the flagged wrong_option
 word by word, and if not one of its content words (ignore "a", "the", "of",
 "and", etc.) appears in the list above, the option is invalid no matter how
 plausible or academically reasonable it sounds. Rewrite it so at least one
-of its words is copied exactly from this list, taken from a distractor_pool
-or concept_facts entry that is genuinely incorrect for the question. Do not
+of its words is copied exactly from this list and remains genuinely incorrect
+for the question. This vocabulary is for wrong-option wording only. Do not
 substitute a different but equally ungrounded invented term."""
 
     rejected_json = candidate or "{}"
@@ -543,7 +512,8 @@ VALIDATION ERRORS:
 
 MANDATORY CORRECTIONS:
 - When a validation error names a card number, correct that exact card.
-- Keep every assessment_approach exactly matching its assigned card position.
+- Set each assessment_approach to one of the planned values and make the label
+  match the question's actual reasoning. Approaches may repeat.
 - For identification, wrong_option_1, wrong_option_2, and wrong_option_3 must be all exactly "".
 - For multiple-choice, the correct option and three wrong options must be four different strings.
 - Rewrite any multiple-choice or identification question that begins with
@@ -559,12 +529,10 @@ MANDATORY CORRECTIONS:
   "as described in the lesson". Describe the topic directly without
   mentioning where the information came from.
 - If an error says a wrong_option "is not grounded in supplied module facts",
-  that option was invented rather than adapted from distractor_pool. Rewrite
-  only that wrong_option, keeping it plausible but built from a term, event,
-  principle, or example that literally appears in distractor_pool or
-  concept_facts for this concept -- even for a scenario-style question. Do
-  not introduce a real-world example, technology, or activity absent from
-  the supplied facts.
+  rewrite only that wrong_option using an exact substantive term from the
+  supplied grounded vocabulary while keeping the option plausible and
+  incorrect. The vocabulary is not evidence for the question, correct answer,
+  explanation, or hint. Do not introduce an outside example or technology.
 - If several errors say a fact or concept duplicates one already assigned
   elsewhere, do not rename or reorder it -- pick a different concept
   grounded in fact_ids that no other concept has used.
@@ -584,6 +552,87 @@ ORIGINAL REQUEST:
 REJECTED JSON:
 {rejected_json}
 """
+
+
+def build_cluster_retry_prompt(
+    identity: ModuleIdentity,
+    concept: ConceptPlan,
+    concept_facts: Sequence[GraphFact],
+    distractor_facts: Sequence[GraphFact],
+    prior_signals: Sequence[str],
+    candidate: str | None,
+    errors: Iterable[str],
+) -> str:
+    """Build a self-contained cluster retry without nesting the first prompt."""
+
+    error_list = [str(error) for error in errors]
+    condensed, omitted = _condensed_errors(error_list)
+    error_bullets = "\n".join(f"- {error}" for error in condensed)
+    if omitted:
+        error_bullets += f"\n- (+{omitted} similar errors omitted)"
+
+    payload = _cluster_payload(
+        identity,
+        concept,
+        concept_facts,
+        distractor_facts,
+        prior_signals,
+    )
+
+    grounding_block = ""
+    if any(
+        "not grounded in supplied module facts" in error for error in error_list
+    ):
+        vocabulary = grounded_vocabulary(concept, concept_facts, distractor_facts)
+        shown = list(vocabulary)[:MAX_RETRY_VOCAB_TERMS]
+        payload["grounded_vocabulary_for_retry"] = shown
+        overflow = len(vocabulary) - len(shown)
+        if overflow:
+            payload["omitted_grounded_vocabulary_count"] = overflow
+        grounding_block = """
+    - For each flagged ungrounded wrong_option, replace only that field with a
+      plausible incorrect option containing an exact substantive term from
+      grounded_vocabulary_for_retry. That vocabulary is for wrong options only,
+      not evidence for correct content."""
+
+    rejected_block = ""
+    if candidate is not None:
+        rejected_json = candidate
+        if len(rejected_json) > MAX_RETRY_CANDIDATE_CHARS:
+            rejected_json = rejected_json[:MAX_RETRY_CANDIDATE_CHARS].rstrip()
+        rejected_block = f"""
+
+    REJECTED JSON TO CORRECT:
+    {rejected_json}"""
+
+    return f"""Regenerate one complete replacement five-card JSON object for the supplied concept.
+
+    VALIDATION ERRORS
+    {error_bullets}
+
+    CORRECTIONS
+    - Return exactly {CARDS_PER_CLUSTER} complete cards. Set each
+      assessment_approach to a planned value that matches the question's actual
+      reasoning. Approaches may repeat; no planned value is required to appear.
+    - Use only multiple-choice, identification, and true-false types, including
+      at least one of each. Scenario analysis is an approach, never a type.
+    - Identification and true-false option fields must be "". Multiple-choice
+      must contain one correct option and three distinct incorrect options.
+    - Questions, answers, explanations, and hints must use concept_facts.
+      Multiple-choice distractors must use allowed_wrong_option_terms rather
+      than invented outside content; those terms are not answer authority.
+    - If scenario analysis is flagged, rewrite that card around a concrete
+      supported situation that requires interpretation. A direct definition
+      question is recall or classification, not scenario analysis. You may
+      change the approach label only when it then accurately describes the
+      question.
+    - Remove provenance wording and keep the answer out of identification stems.
+    - Include all eleven required fields and preserve expalanation spelling.
+    - Return JSON only with the shape {{"cards":[...]}}.{grounding_block}
+
+    INPUT JSON:
+    {_json(payload)}{rejected_block}
+    """
 
 
 def build_grounding_review_prompt(

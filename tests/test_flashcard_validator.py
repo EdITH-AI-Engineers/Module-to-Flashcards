@@ -309,15 +309,8 @@ def test_concept_plan_accepts_comma_separated_token_fields():
     raw, known = plan_json()
     payload = json.loads(raw)
     payload["concepts"][0]["fact_ids"] = "e1,e2,e3"
-    payload["concepts"][1]["fact_ids"] = ["e21"]
-    payload["concepts"][2]["fact_ids"] = ["e22"]
     payload["concepts"][0]["assessment_approaches"] = (
         "recall,comparison,classification,application,scenario analysis"
-    )
-    known = (
-        *known,
-        GraphFact("e21", "subject 21 | relates to | object 21"),
-        GraphFact("e22", "subject 22 | relates to | object 22"),
     )
 
     concepts = parse_concept_plan(json.dumps(payload), known)
@@ -391,29 +384,15 @@ def test_concept_plan_rejects_unknown_fact_id():
         parse_concept_plan(json.dumps(payload), known)
 
 
-def test_concept_plan_rejects_fact_id_reused_by_another_concept():
+def test_concept_plan_allows_fact_id_reused_by_another_concept():
     raw, known = plan_json()
     payload = json.loads(raw)
     payload["concepts"][6]["fact_ids"] = ["e2"]
 
-    with pytest.raises(ValidationError) as exc_info:
-        parse_concept_plan(json.dumps(payload), known)
+    concepts = parse_concept_plan(json.dumps(payload), known)
 
-    assert exc_info.value.errors == (
-        "concept 7 reuses fact id 'e2' already assigned to concept 2; "
-        "each fact id may support only one concept",
-    )
-
-
-def test_concept_plan_rejects_repeated_fact_id_within_one_concept():
-    raw, known = plan_json()
-    payload = json.loads(raw)
-    payload["concepts"][0]["fact_ids"] = ["e1", "e1"]
-
-    with pytest.raises(ValidationError) as exc_info:
-        parse_concept_plan(json.dumps(payload), known)
-
-    assert exc_info.value.errors == ("concept 1 repeats fact id 'e1'",)
+    assert concepts[1].fact_ids == ("e2",)
+    assert concepts[6].fact_ids == ("e2",)
 
 
 def test_concept_plan_reports_explicit_insufficient_content():

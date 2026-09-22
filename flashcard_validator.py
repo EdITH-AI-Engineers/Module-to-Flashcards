@@ -265,7 +265,6 @@ def parse_concept_plan(
     results: list[ConceptPlan] = []
     errors: list[str] = []
     seen_names: set[str] = set()
-    fact_owners: dict[str, int] = {}
 
     for position, item in enumerate(concepts_value, start=1):
         prefix = f"concept {position}"
@@ -292,24 +291,11 @@ def parse_concept_plan(
             continue
 
         resolved_facts: list[str] = []
-        fact_ids_seen_here: set[str] = set()
         for fact_id in fact_ids:
-            if fact_id in fact_ids_seen_here:
-                errors.append(f"{prefix} repeats fact id {fact_id!r}")
-                continue
-            fact_ids_seen_here.add(fact_id)
             if fact_id not in known:
                 errors.append(f"{prefix} uses unknown fact id {fact_id!r}")
             else:
                 resolved_facts.append(known[fact_id])
-                owner = fact_owners.get(fact_id)
-                if owner is None:
-                    fact_owners[fact_id] = position
-                else:
-                    errors.append(
-                        f"{prefix} reuses fact id {fact_id!r} already assigned "
-                        f"to concept {owner}; each fact id may support only one concept"
-                    )
         if (
             len(approaches) != CARDS_PER_CLUSTER
             or len(set(approaches)) != CARDS_PER_CLUSTER

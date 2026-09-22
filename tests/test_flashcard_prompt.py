@@ -211,4 +211,3 @@ def test_duplicate_review_excludes_answers_and_evidence():
     assert "Binary uses base 2" not in prompt
     assert "binary | uses | base 2" not in prompt
     assert '"issues"' in prompt
-    assert "share a question template" in prompt

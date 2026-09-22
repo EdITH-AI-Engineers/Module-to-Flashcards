@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from huggingface_hub import hf_hub_download
+
+from flashcard_types import CompletionTruncatedError, ContextWindowExceededError
 
 
 MODEL_REPO = "Qwen/Qwen3-8B-GGUF"
@@ -66,23 +68,56 @@ class LocalQwenBackend:
         if callable(close):
             close()
 
-    def complete(self, system: str, user: str, *, max_tokens: int) -> str:
+    def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        max_tokens: int,
+        schema: Mapping[str, object] | None = None,
+    ) -> str:
         call_seed = self._seed + self._completion_index
         self._completion_index += 1
-        response: Any = self._llm.create_chat_completion(
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": f"{user}\n\n/no_think"},
-            ],
-            temperature=self._temperature,
-            seed=call_seed,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
-        )
+        response_format: dict[str, object] = {"type": "json_object"}
+        if schema is not None:
+            response_format["schema"] = dict(schema)
         try:
-            content = response["choices"][0]["message"]["content"]
+            response: Any = self._llm.create_chat_completion(
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": f"{user}\n\n/no_think"},
+                ],
+                temperature=self._temperature,
+                seed=call_seed,
+                max_tokens=max_tokens,
+                response_format=response_format,
+            )
+        except ValueError as exc:
+            if "exceed context window" in str(exc):
+                raise ContextWindowExceededError(
+                    "Qwen prompt exceeded the configured context window; "
+                    "reduce the prompt or increase --n-ctx"
+                ) from exc
+            raise
+        try:
+            choice = response["choices"][0]
+            content = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise RuntimeError("Qwen returned an unexpected response shape") from exc
+        usage = response.get("usage", {}) if isinstance(response, dict) else {}
+        prompt_tokens = usage.get("prompt_tokens") if isinstance(usage, dict) else None
+        completion_tokens = (
+            usage.get("completion_tokens") if isinstance(usage, dict) else None
+        )
+        if choice.get("finish_reason") == "length":
+            raise CompletionTruncatedError(
+                "Qwen response was truncated before it completed the requested JSON",
+                partial_content=content if isinstance(content, str) else "",
+                prompt_tokens=(prompt_tokens if isinstance(prompt_tokens, int) else None),
+                completion_tokens=(
+                    completion_tokens if isinstance(completion_tokens, int) else None
+                ),
+            )
         if not isinstance(content, str) or not content.strip():
             raise RuntimeError("Qwen returned empty assistant content")
         return content.strip()

@@ -3,6 +3,7 @@ import json
 from flashcard_prompt import (
     SYSTEM_PROMPT,
     build_cluster_prompt,
+    build_cluster_retry_prompt,
     build_concept_plan_prompt,
     build_duplicate_review_prompt,
     build_grounding_review_prompt,
@@ -56,7 +57,7 @@ def cluster():
     )
 
 
-def test_system_prompt_requires_distinct_assessment_approaches():
+def test_system_prompt_requires_approach_labels_to_match_actual_reasoning():
     lowered = SYSTEM_PROMPT.casefold()
 
     assert "only the supplied graph facts" in lowered
@@ -66,8 +67,10 @@ def test_system_prompt_requires_distinct_assessment_approaches():
         for name in ("multiple-choice", "identification", "true-false")
     )
     assert "expalanation" in SYSTEM_PROMPT
-    assert "meaningfully different assessment approaches" in lowered
-    assert "assessment approach labels may repeat" not in lowered
+    assert "approaches may repeat" in lowered
+    assert "no planned approach is required to appear" in lowered
+    assert "the assessment_approach label must describe the reasoning" in lowered
+    assert '"what term refers to..." is recall or classification' in lowered
 
 
 def test_cluster_prompt_avoids_banned_provenance_language_for_distractors():
@@ -148,7 +151,7 @@ def test_plan_prompt_includes_prior_concepts_when_supplied():
     assert "same underlying learning point" in prompt
 
 
-def test_cluster_prompt_assigns_each_planned_approach_by_card_position():
+def test_cluster_prompt_allows_planned_approaches_in_any_card_order():
     prompt = build_cluster_prompt(
         ModuleIdentity("CPE0021", "1"),
         concept(),
@@ -157,15 +160,27 @@ def test_cluster_prompt_assigns_each_planned_approach_by_card_position():
     )
 
     payload = json.loads(prompt.split("INPUT JSON:\n", 1)[1])
-    assert payload["concept"]["facts"] == ["binary | uses | base 2"]
+    assert "facts" not in payload["concept"]
+    assert payload["concept_facts"] == [
+        {"fact_id": "e1", "statement": "binary | uses | base 2"}
+    ]
+    assert "distractor_pool" not in payload
+    assert "grounded_vocabulary" not in payload
+    assert "allowed_wrong_option_terms" in payload
+    assert "binary" in payload["allowed_wrong_option_terms"]
+    assert "octal" in payload["allowed_wrong_option_terms"]
+    assert "at least one exact" in prompt
     assert payload["concept"]["assessment_approaches"] == list(
         concept().assessment_approaches
     )
-    for position, approach in enumerate(concept().assessment_approaches, start=1):
-        assert (
-            f'Card {position}: assessment_approach must be exactly "{approach}"'
-            in prompt
-        )
+    for approach in concept().assessment_approaches:
+        assert f'- "{approach}"' in prompt
+    normalized_prompt = " ".join(prompt.split())
+    assert "Approaches may repeat" in prompt
+    assert "a listed approach does not have to appear" in normalized_prompt
+    assert "no approach is tied to a numbered card position" in normalized_prompt
+    assert "POSITIONAL ASSESSMENT APPROACHES" not in prompt
+    assert "Card 1: assessment_approach" not in prompt
     assert "REPEATED CRITICAL RULES" in prompt
     assert 'must literally be ""' in prompt
     assert "no wrong_option may repeat" in prompt
@@ -182,7 +197,8 @@ def test_retry_prompt_targets_named_cards_and_repeats_critical_checks():
     assert "complete replacement" in prompt.casefold()
     assert "correct that exact card" in prompt.casefold()
     assert "card 2 identification wrong options must be empty" in prompt
-    assert "assessment_approach exactly match" in prompt
+    assert "one of the planned values" in prompt
+    assert "Approaches may repeat" in prompt
     assert 'all exactly ""' in prompt
     assert "four different strings" in prompt
     assert "ORIGINAL" in prompt
@@ -194,6 +210,67 @@ def test_retry_prompt_can_omit_large_rejected_candidate():
     assert "ORIGINAL" in prompt
     assert "unknown fact id" in prompt
     assert "rejected_candidate" not in prompt
+
+
+def test_cluster_retry_is_compact_and_does_not_nest_original_prompt():
+    large_concept = ConceptPlan(
+        "Design Rules",
+        tuple(f"f{index}" for index in range(1, 20)),
+        tuple(f"Design rule fact {index} with supporting detail." for index in range(1, 20)),
+        ("recall", "comparison", "classification", "application", "scenario analysis"),
+    )
+    concept_facts = tuple(
+        GraphFact(
+            f"f{index}",
+            f"Design rule fact {index} with enough supporting detail for assessment.",
+        )
+        for index in range(1, 20)
+    )
+    distractor_facts = tuple(
+        GraphFact(
+            f"d{index}",
+            f"Related distractor fact {index} with grounded terminology.",
+        )
+        for index in range(1, 13)
+    )
+    prior = tuple(
+        f"Previously covered subject number {index} -> prior answer"
+        for index in range(1, 21)
+    )
+
+    prompt = build_cluster_retry_prompt(
+        ModuleIdentity("CCS0005", "1"),
+        large_concept,
+        concept_facts,
+        distractor_facts,
+        prior,
+        "PARTIAL_CANDIDATE",
+        ["response must contain a JSON object only"],
+    )
+
+    assert "ORIGINAL REQUEST" not in prompt
+    assert prompt.count("Design rule fact 1 with enough supporting detail") == 1
+    assert "PARTIAL_CANDIDATE" in prompt
+    assert "Approaches may repeat" in prompt
+    assert "positional assessment_approach order" not in prompt
+    assert "A direct definition" in prompt
+    assert "not scenario analysis" in prompt
+    assert len(SYSTEM_PROMPT) + len(prompt) < 30_000
+
+
+def test_cluster_retry_omits_unusable_partial_output_after_truncation():
+    prompt = build_cluster_retry_prompt(
+        ModuleIdentity("CPE0021", "1"),
+        concept(),
+        (GraphFact("e1", "binary | uses | base 2"),),
+        (GraphFact("e2", "octal | uses | base 8"),),
+        (),
+        None,
+        ["response was truncated before completing the JSON"],
+    )
+
+    assert "REJECTED JSON TO CORRECT" not in prompt
+    assert "truncated before completing" in prompt
 
 
 def test_grounding_review_includes_evidence_and_card_content():

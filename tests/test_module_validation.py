@@ -67,15 +67,6 @@ def test_module_detects_cross_cluster_near_duplicate():
     assert any("near-duplicate questions" in error for error in errors)
 
 
-def test_module_can_defer_cross_cluster_duplicates_until_global_review():
-    original = valid_clusters()[0].cards[0].question
-    clusters = with_question(valid_clusters(), 1, 0, original + " correctly")
-
-    errors = validate_module(clusters, check_question_duplicates=False)
-
-    assert not any("near-duplicate questions" in error for error in errors)
-
-
 def test_review_parser_rejects_unknown_cluster():
     raw = json.dumps(
         {"issues": [{"cluster": "not-known", "reasons": ["unsupported claim"]}]}

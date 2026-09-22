@@ -69,7 +69,9 @@ def _configure_tesseract(
         os.environ["TESSDATA_PREFIX"] = str(data_dir)
         return
 
-    if path_lookup("tesseract"):
+    resolved = path_lookup("tesseract")
+    if resolved:
+        pytesseract_module.pytesseract.tesseract_cmd = str(resolved)
         return
     if candidates is None:
         program_files = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))

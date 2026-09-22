@@ -10,7 +10,13 @@ from flashcard_pipeline import (
     PipelineConfig,
     _repair_grounding_errors,
 )
-from flashcard_types import FlashcardDraft, GraphFact, ModuleIdentity
+from flashcard_types import (
+    CompletionTruncatedError,
+    FlashcardCluster,
+    FlashcardDraft,
+    GraphFact,
+    ModuleIdentity,
+)
 from flashcard_validator import validate_cluster
 from tests.factories import (
     cluster_json,
@@ -25,9 +31,11 @@ class FakeBackend:
     def __init__(self, responses):
         self.responses = deque(responses)
         self.calls = []
+        self.schemas = []
 
-    def complete(self, system, user, *, max_tokens):
+    def complete(self, system, user, *, max_tokens, schema=None):
         self.calls.append((system, user, max_tokens))
+        self.schemas.append(schema)
         response = self.responses.popleft()
         if callable(response):
             return response(system, user, max_tokens)
@@ -65,6 +73,24 @@ def test_pipeline_generates_twenty_valid_clusters_without_review():
     assert len({cluster.cluster for cluster in clusters}) == 20
     assert all(len(cluster.cards) == 5 for cluster in clusters)
     assert len(backend.calls) == 21
+    assert backend.schemas[0]["oneOf"][0]["properties"]["concepts"]["minItems"] == 20
+    card_schema = backend.schemas[1]["properties"]["cards"]
+    assert card_schema["minItems"] == card_schema["maxItems"] == 5
+    card_item = card_schema["items"]
+    assert set(card_item["required"]) == {
+        "type",
+        "question",
+        "correct_option",
+        "wrong_option_1",
+        "wrong_option_2",
+        "wrong_option_3",
+        "is_true",
+        "expalanation",
+        "hint",
+        "difficulty",
+        "assessment_approach",
+    }
+    assert card_item["additionalProperties"] is False
 
 
 def test_pipeline_defaults_use_practical_local_token_budgets():
@@ -91,6 +117,7 @@ def test_pipeline_reports_major_generation_stages():
     assert messages[0] == "Planning 20 concepts from 20 grounded lesson facts..."
     assert "Generating cluster 1/20: Concept 1 topic1 alpha1 beta1" in messages
     assert "Generating cluster 20/20: Concept 20 topic20 alpha20 beta20" in messages
+    assert "Generation quality: 21 model responses, 0 rejected" in messages[-2]
     assert messages[-1] == "100 flashcards generated (50 + 50)."
 
 
@@ -135,6 +162,38 @@ def test_invalid_cluster_is_retried_with_validator_feedback():
 
     assert "expected exactly 5 cards" in backend.calls[2][1]
     assert "complete replacement" in backend.calls[2][1].lower()
+    assert "REJECTED JSON TO CORRECT" not in backend.calls[2][1]
+    stats = pipeline.rejection_stats
+    assert stats["attempts"] == 22
+    assert stats["rejected_attempts"] == 1
+    assert stats["rejection_rate"] == 1 / 22
+    assert stats["categories"]["schema/structure"] == 1
+
+
+def test_truncated_cluster_retries_without_embedding_partial_output():
+    def truncated(system, user, max_tokens):
+        raise CompletionTruncatedError(
+            "length limit",
+            partial_content="PARTIAL_SENTINEL",
+            prompt_tokens=6400,
+            completion_tokens=1792,
+        )
+
+    responses = [plan_json(), truncated, cluster_json(1)]
+    responses.extend(cluster_json(index) for index in range(2, 21))
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    retry_prompt = backend.calls[2][1]
+    assert len(clusters) == 20
+    assert "response was truncated before completing the JSON" in retry_prompt
+    assert "PARTIAL_SENTINEL" not in retry_prompt
+    assert "ORIGINAL REQUEST" not in retry_prompt
 
 
 def test_context_first_multiple_choice_allows_local_distractor_repair():
@@ -146,6 +205,7 @@ def test_context_first_multiple_choice_allows_local_distractor_repair():
             "This example demonstrates what classification?"
         ),
         wrong_option_3="Unrelated guess",
+        hint="Classification 1",
     )
     facts = graph_facts()
 
@@ -156,6 +216,7 @@ def test_context_first_multiple_choice_allows_local_distractor_repair():
 
     assert errors == (
         "card 1 wrong_option_3 is not grounded in supplied module facts",
+        "card 1 hint reveals the correct answer",
     )
     assert repaired is not None
     assert validate_cluster(repaired, make_concept(1), facts) == ()
@@ -248,6 +309,20 @@ def test_prior_question_is_checked_without_current_module_clusters():
     )
 
 
+def test_duplicate_question_against_an_earlier_cluster_is_deferred_to_review():
+    earlier = FlashcardCluster(
+        cluster="00000000-0000-4000-8000-000000000001",
+        concept=make_concept(1),
+        cards=make_cards(1),
+    )
+    candidate = list(make_cards(2))
+    candidate[0] = replace(candidate[0], question=earlier.cards[0].question)
+
+    errors = FlashcardPipeline._duplicate_errors(tuple(candidate), (earlier,))
+
+    assert not any("from concept" in error for error in errors)
+
+
 def test_pipeline_threads_prior_concepts_and_retries_prior_question_duplicate():
     responses = [plan_json(), cluster_json(1), cluster_json(1, revision=1)]
     responses.extend(cluster_json(index) for index in range(2, 21))
@@ -285,6 +360,10 @@ def test_final_review_uses_five_groups_and_one_global_pass():
         payload = json.loads(prompt.split("INPUT JSON:\n", 1)[1])
         assert len(payload["clusters"]) == 4
         assert "cards" in payload["clusters"][0]
+    assert all(
+        schema["properties"]["issues"]["type"] == "array"
+        for schema in backend.schemas[21:]
+    )
     global_payload = json.loads(review_calls[-1][1].split("INPUT JSON:\n", 1)[1])
     assert len(global_payload["clusters"]) == 20
     assert "questions" in global_payload["clusters"][0]
@@ -305,3 +384,33 @@ def test_final_review_regenerates_flagged_cluster_and_preserves_uuid():
     assert "revision1" in clusters[0].cards[0].question
     assert clusters[0].cluster in backend.calls[-1][1]
     assert "semantic duplication" in backend.calls[-1][1]
+
+
+def test_cluster_grounding_uses_the_full_module_not_only_the_prompt_subset():
+    cards = list(make_cards(1))
+    cards[0] = replace(cards[0], wrong_option_3="Distant grounded term")
+    response = json.dumps({"cards": [card.__dict__ for card in cards]})
+    backend = FakeBackend([response])
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(final_review=False),
+        progress=lambda message: None,
+    )
+    concept_fact = GraphFact("e1", "subject1 relates to object1")
+    distant_fact = GraphFact(
+        "e99",
+        "Alternative reverse discard replace distant grounded term",
+    )
+
+    generated = pipeline._generate_cards(
+        ModuleIdentity("CPE0021", "1"),
+        make_concept(1),
+        (),
+        label="full-module grounding",
+        concept_facts=(concept_fact,),
+        distractor_facts=(),
+        module_facts=(concept_fact, distant_fact),
+    )
+
+    assert generated[0].wrong_option_3 == "Distant grounded term"
+    assert pipeline.rejection_stats["rejected_attempts"] == 0

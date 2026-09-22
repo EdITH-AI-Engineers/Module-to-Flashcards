@@ -128,7 +128,7 @@ def test_exhausted_bad_card_counts_do_not_create_output(tmp_path):
         def __init__(self):
             self.responses = iter((plan_json(), '{"cards": []}', '{"cards": []}', '{"cards": []}'))
 
-        def complete(self, system, user, *, max_tokens):
+        def complete(self, system, user, *, max_tokens, schema=None):
             return next(self.responses)
 
     args = main.parse_args(

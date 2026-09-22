@@ -813,8 +813,6 @@ class FlashcardPipeline:
                 for field in (
                     "type",
                     "is_true",
-                    "expalanation",
-                    "hint",
                     "difficulty",
                     "assessment_approach",
                 ):
@@ -837,6 +835,11 @@ class FlashcardPipeline:
                 for field in locked_answer_fields:
                     if getattr(candidate, field) != getattr(original_card, field):
                         errors.append(f"replacement card must preserve {field}")
+                candidate = replace(
+                    candidate,
+                    expalanation=original_card.expalanation,
+                    hint=original_card.hint,
+                )
                 if are_near_duplicates(candidate.question, original_card.question):
                     errors.append(
                         "replacement question is still a near-duplicate of the "

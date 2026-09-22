@@ -112,7 +112,7 @@ def build_card_cluster_schema(
 def build_single_card_schema(
     original_card: FlashcardDraft,
 ) -> dict[str, object]:
-    """Require one repair card while locking every non-answer field."""
+    """Require one repair card while grammar-locking only controlled values."""
 
     schema = build_card_cluster_schema((original_card.assessment_approach,))
     cards = schema["properties"]["cards"]
@@ -122,8 +122,6 @@ def build_single_card_schema(
     for field in (
         "type",
         "is_true",
-        "expalanation",
-        "hint",
         "difficulty",
         "assessment_approach",
     ):

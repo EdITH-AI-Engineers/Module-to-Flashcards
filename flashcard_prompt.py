@@ -294,9 +294,9 @@ def build_concept_plan_prompt(
         f"""Select exactly {CONCEPTS_PER_MODULE} distinct, explicitly supported concepts for this module.
     Each concept must be assessable in {CARDS_PER_CLUSTER} genuinely different ways. Keep concepts semantically distinct and do not use presentation or provenance details as concepts.
 
-    For each concept, copy one or more fact_ids exactly from the input. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements.{context_guidance} Choose exactly {CARDS_PER_CLUSTER} distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
+    For each concept, copy one or more fact_ids exactly from the input. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements. A fact_id may belong to only one concept: once assigned, it must not appear in another concept's fact_ids. This prevents related concepts from regenerating the same core-definition card.{context_guidance} Choose exactly {CARDS_PER_CLUSTER} distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
 
-    Return one JSON object whose top-level key is "concepts" and whose value is an array. The array must contain exactly {CONCEPTS_PER_MODULE} concept objects before its closing bracket. Every concept object has these keys: name (string), fact_ids (non-empty string array), and assessment_approaches (array of exactly {CARDS_PER_CLUSTER} distinct allowed approaches). Do not treat a one-object shape illustration as a complete answer.
+    Return one JSON object whose top-level key is "concepts" and whose value is an array. The array must contain exactly {CONCEPTS_PER_MODULE} concept objects before its closing bracket. Every concept object has these keys: name (string), fact_ids (non-empty string array), and assessment_approaches (array of exactly {CARDS_PER_CLUSTER} distinct allowed approaches). Fact_ids must be exclusive across the full array. Do not treat a one-object shape illustration as a complete answer.
 
     Fill all {CONCEPTS_PER_MODULE} positions in this checklist before closing the concepts array:
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20.
@@ -672,7 +672,7 @@ def build_duplicate_review_prompt(
             for cluster in clusters
         ]
     }
-    return """Compare all question stems for semantic and near duplication. Flag only clusters containing questions that assess the same learning point in substantially the same way as another question. Do not judge factual correctness in this pass and do not rewrite questions.
+    return """Compare all question stems for actual semantic and near duplication. Flag only clusters containing questions that are substantively interchangeable: they must ask the same specific thing and expect the same response. Do not flag cards merely because they share a question template, assessment approach, broad topic, or related concepts. Do not judge factual correctness in this pass and do not rewrite questions.
 
     Return only this JSON shape. Use an empty issues list when no duplicate exists:
     {"issues":[{"cluster":"valid UUID copied from input","reasons":["semantic duplication with cluster <uuid>"]}]}

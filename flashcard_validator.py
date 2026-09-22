@@ -332,7 +332,30 @@ def _required_string(item: Mapping[str, Any], key: str, position: int) -> str:
 def _required_string_value(value: Any, key: str, position: int) -> str:
     if not isinstance(value, str):
         raise ValidationError(f"card {position} field {key!r} must be a string")
-    return value
+    return normalize_generated_text(value)
+
+
+def normalize_generated_text(value: str) -> str:
+    """Return model text with apostrophes in a portable ASCII form.
+
+    Local model output can contain either smart apostrophes or their common
+    UTF-8-as-Windows-1252 mojibake forms. Normalizing at the parser boundary
+    keeps every exported card field consistent regardless of which form the
+    backend returned.
+    """
+
+    normalized = unicodedata.normalize("NFC", value)
+    for broken in ("\u00e2\u20ac\u2122", "\u00e2\u20ac\u02dc"):
+        normalized = normalized.replace(broken, "'")
+    return normalized.translate(
+        str.maketrans(
+            {
+                "\u2018": "'",
+                "\u2019": "'",
+                "\u02bc": "'",
+            }
+        )
+    )
 
 
 def _option_value(
@@ -812,6 +835,7 @@ def validate_module(
     source_facts: Sequence[GraphFact] = (),
     *,
     check_question_duplicates: bool = True,
+    skip_grounding_cluster_ids: frozenset[str] = frozenset(),
 ) -> tuple[str, ...]:
     errors: list[str] = []
     if len(clusters) != CLUSTERS_PER_MODULE:
@@ -841,7 +865,14 @@ def validate_module(
 
     indexed_cards: list[tuple[int, int, FlashcardDraft]] = []
     for cluster_position, cluster in enumerate(clusters, start=1):
-        cluster_errors = validate_cluster(cluster.cards, cluster.concept, source_facts)
+        grounding_facts = (
+            () if cluster.cluster in skip_grounding_cluster_ids else source_facts
+        )
+        cluster_errors = validate_cluster(
+            cluster.cards,
+            cluster.concept,
+            grounding_facts,
+        )
         errors.extend(
             f"cluster {cluster_position}: {error}" for error in cluster_errors
         )

@@ -254,7 +254,7 @@ pipeline_output/
     knowledge_graph/
       knowledge_graph.json
       triples.csv
-    flashcards.txt
+    flashcards.csv
 ```
 
 If the command stops, run it again. Valid completed artifacts are reused. Use `--force` to recompute all stages:
@@ -311,7 +311,7 @@ Run stage 3 directly:
 The generated file defaults to:
 
 ```text
-flashcards/module_1.txt
+flashcards/module_1.csv
 ```
 
 It contains two labeled CSV blocks:
@@ -343,7 +343,7 @@ Qwen smoke test passed.
 Choose another output path:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --output flashcards\cpe0021-module-1.txt
+.\.venv\Scripts\python.exe main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --output flashcards\cpe0021-module-1.csv
 ```
 
 The CLI keeps its final model-assisted review enabled by default. To skip the

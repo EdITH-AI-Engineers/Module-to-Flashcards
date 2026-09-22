@@ -635,6 +635,47 @@ def build_cluster_retry_prompt(
     """
 
 
+def build_duplicate_repair_prompt(
+    identity: ModuleIdentity,
+    concept: ConceptPlan,
+    cards: Sequence[FlashcardDraft],
+    reasons: Sequence[str],
+    avoid_questions: Sequence[str],
+) -> str:
+    """Build a focused final-pass request that paraphrases duplicate cards."""
+
+    payload = {
+        "course_code": identity.course_code,
+        "module_number": identity.module_number,
+        "concept": concept.name,
+        "duplicate_findings": list(reasons),
+        "cards_to_repair": [asdict(card) for card in cards],
+        "questions_to_avoid": list(avoid_questions),
+    }
+    return f"""Paraphrase the duplicate card or cards in this five-card cluster.
+
+    REPAIR RULES
+    - When duplicate_findings names card numbers, rewrite those cards and copy
+      every unflagged card unchanged. If no card number is named, paraphrase all
+      five question stems.
+    - Preserve each card's learning point, factual meaning, correct-answer
+      meaning, incorrectness of wrong answers, type, is_true value, difficulty,
+      and assessment_approach.
+    - Natural paraphrases may use words that do not appear verbatim in any
+      corpus or fact text. Do not introduce a new claim or change which answer
+      is correct.
+    - Make every repaired question genuinely distinct from questions_to_avoid.
+      Changing only the opening question word or adding filler is insufficient.
+    - Keep the eleven required fields and return the complete five-card JSON
+      object only. Preserve the required key spelling expalanation.
+
+    Required shape: {{"cards":[...exactly {CARDS_PER_CLUSTER} cards...]}}
+
+    INPUT JSON:
+    {_json(payload)}
+    """
+
+
 def build_grounding_review_prompt(
     clusters: Sequence[FlashcardCluster],
 ) -> str:
@@ -672,10 +713,10 @@ def build_duplicate_review_prompt(
             for cluster in clusters
         ]
     }
-    return """Compare all question stems for semantic and near duplication. Flag only clusters containing questions that assess the same learning point in substantially the same way as another question. Do not judge factual correctness in this pass and do not rewrite questions.
+    return """Compare all question stems for semantic and near duplication. Flag only clusters containing questions that assess the same learning point in substantially the same way as another question. Every reason must identify both duplicate card numbers in the form "card <number> duplicates cluster <uuid> card <number>". Do not judge factual correctness in this pass and do not rewrite questions.
 
     Return only this JSON shape. Use an empty issues list when no duplicate exists:
-    {"issues":[{"cluster":"valid UUID copied from input","reasons":["semantic duplication with cluster <uuid>"]}]}
+    {"issues":[{"cluster":"valid UUID copied from input","reasons":["card 2 duplicates cluster <uuid> card 4"]}]}
 
     INPUT JSON:
     """ + _json(

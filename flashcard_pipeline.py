@@ -19,6 +19,7 @@ from flashcard_prompt import (
     build_cluster_prompt,
     build_cluster_retry_prompt,
     build_concept_plan_prompt,
+    build_duplicate_repair_prompt,
     build_duplicate_review_prompt,
     build_grounding_review_prompt,
     build_retry_prompt,
@@ -116,6 +117,10 @@ _GROUNDING_ERROR_RE = re.compile(
     r"^card (\d+) (wrong_option_[123]) is not grounded in supplied module facts$"
 )
 _HINT_LEAK_ERROR_RE = re.compile(r"^card (\d+) hint reveals the correct answer$")
+_MODULE_DUPLICATE_RE = re.compile(
+    r"^near-duplicate questions at cluster (\d+) card (\d+) "
+    r"and cluster (\d+) card (\d+)$"
+)
 
 
 def _phrase_from_fact(fact: GraphFact) -> str:
@@ -473,6 +478,32 @@ class FlashcardPipeline:
                     )
         return tuple(errors)
 
+    @staticmethod
+    def _cross_cluster_duplicate_errors(
+        cards: Sequence[FlashcardDraft],
+        existing: Sequence[FlashcardCluster],
+    ) -> tuple[str, ...]:
+        """Reject cross-cluster overlap only during the final repair pass."""
+
+        errors: list[str] = []
+        for card_position, card in enumerate(cards, start=1):
+            for cluster in existing:
+                match = next(
+                    (
+                        prior_position
+                        for prior_position, prior in enumerate(cluster.cards, start=1)
+                        if are_near_duplicates(card.question, prior.question)
+                    ),
+                    None,
+                )
+                if match is not None:
+                    errors.append(
+                        f"card {card_position} near-duplicates existing cluster "
+                        f"{cluster.cluster} card {match}"
+                    )
+                    break
+        return tuple(errors)
+
     def _generate_cards(
         self,
         identity: ModuleIdentity,
@@ -487,23 +518,44 @@ class FlashcardPipeline:
         concept_facts: Sequence[GraphFact] = (),
         distractor_facts: Sequence[GraphFact] = (),
         module_facts: Sequence[GraphFact] = (),
+        duplicate_repair: bool = False,
     ) -> tuple[FlashcardDraft, ...]:
         prior_signals = tuple(
             _dedup_fingerprint(card) for cluster in existing for card in cluster.cards
         ) + tuple(_card_subject(question) for question in prior_questions)
-        base_prompt = build_cluster_prompt(
-            identity,
-            concept,
-            concept_facts,
-            distractor_facts,
-            prior_signals=prior_signals,
-        )
+        if duplicate_repair:
+            duplicate_feedback = list(review_feedback)
+            if cluster_id:
+                duplicate_feedback.insert(
+                    0,
+                    f"cluster UUID {cluster_id} requires duplicate repair",
+                )
+            base_prompt = build_duplicate_repair_prompt(
+                identity,
+                concept,
+                rejected_cards,
+                duplicate_feedback,
+                tuple(
+                    card.question for cluster in existing for card in cluster.cards
+                )
+                + tuple(prior_questions),
+            )
+        else:
+            base_prompt = build_cluster_prompt(
+                identity,
+                concept,
+                concept_facts,
+                distractor_facts,
+                prior_signals=prior_signals,
+            )
 
         def build_cluster_retry(
             original_prompt: str,
             candidate: str | None,
             errors: Sequence[str],
         ) -> str:
+            if duplicate_repair:
+                return build_retry_prompt(original_prompt, candidate, errors)
             return build_cluster_retry_prompt(
                 identity,
                 concept,
@@ -514,7 +566,7 @@ class FlashcardPipeline:
                 errors,
             )
 
-        if review_feedback:
+        if review_feedback and not duplicate_repair:
             rejected = json.dumps(
                 {"cards": [asdict(card) for card in rejected_cards]},
                 ensure_ascii=False,
@@ -531,17 +583,21 @@ class FlashcardPipeline:
                     f"[{label}] card {card_position}/{len(cards)} generated: "
                     + json.dumps(asdict(card), ensure_ascii=False)
                 )
-            grounding_facts = (
+            grounding_facts = () if duplicate_repair else (
                 tuple(module_facts)
                 if module_facts
                 else tuple(concept_facts) + tuple(distractor_facts)
             )
             errors = list(validate_cluster(cards, concept, grounding_facts))
             errors.extend(self._duplicate_errors(cards, existing, prior_questions))
+            if duplicate_repair:
+                errors.extend(self._cross_cluster_duplicate_errors(cards, existing))
             if errors:
-                repaired = _repair_grounding_errors(
-                    cards, errors, grounding_facts, phrase_facts=distractor_facts
-                )
+                repaired = None
+                if not duplicate_repair:
+                    repaired = _repair_grounding_errors(
+                        cards, errors, grounding_facts, phrase_facts=distractor_facts
+                    )
                 if repaired is not None:
                     repair_errors = list(
                         validate_cluster(repaired, concept, grounding_facts)
@@ -589,8 +645,10 @@ class FlashcardPipeline:
     def _collect_review_issues(
         self,
         clusters: Sequence[FlashcardCluster],
-    ) -> dict[str, list[str]]:
+    ) -> tuple[dict[str, list[str]], frozenset[str], frozenset[str]]:
         merged: dict[str, list[str]] = {}
+        grounding_clusters: set[str] = set()
+        duplicate_clusters: set[str] = set()
         review_group_size = 4
         review_group_count = (
             CLUSTERS_PER_MODULE + review_group_size - 1
@@ -607,6 +665,7 @@ class FlashcardPipeline:
                 label=f"grounding review {group_number}",
             )
             self._merge_issues(merged, issues)
+            grounding_clusters.update(issue.cluster for issue in issues)
 
         self._progress("Global duplicate review...")
         global_issues = self._review(
@@ -615,7 +674,12 @@ class FlashcardPipeline:
             label="global duplicate review",
         )
         self._merge_issues(merged, global_issues)
-        return merged
+        duplicate_clusters.update(issue.cluster for issue in global_issues)
+        return (
+            merged,
+            frozenset(grounding_clusters),
+            frozenset(duplicate_clusters),
+        )
 
     @staticmethod
     def _merge_issues(
@@ -627,6 +691,50 @@ class FlashcardPipeline:
             for reason in issue.reasons:
                 if reason not in reasons:
                     reasons.append(reason)
+
+    def _repair_final_duplicate_errors(
+        self,
+        identity: ModuleIdentity,
+        clusters: list[FlashcardCluster],
+        errors: Sequence[str],
+        prior_questions: Sequence[str],
+    ) -> frozenset[str]:
+        """Paraphrase clusters named by deterministic final duplicate errors."""
+
+        by_cluster: dict[int, list[str]] = {}
+        for error in errors:
+            match = _MODULE_DUPLICATE_RE.match(error)
+            if match is None:
+                continue
+            later_cluster_index = int(match.group(3)) - 1
+            by_cluster.setdefault(later_cluster_index, []).append(error)
+
+        repaired_cluster_ids: set[str] = set()
+        for index, duplicate_errors in sorted(by_cluster.items()):
+            old = clusters[index]
+            self._progress(
+                "Paraphrasing final duplicate cards in cluster "
+                f"{index + 1}/{CLUSTERS_PER_MODULE}: {old.concept.name}"
+            )
+            others = tuple(
+                cluster
+                for other_index, cluster in enumerate(clusters)
+                if other_index != index
+            )
+            cards = self._generate_cards(
+                identity,
+                old.concept,
+                others,
+                label=f"duplicate repair {index + 1} ({old.concept.name})",
+                review_feedback=duplicate_errors,
+                rejected_cards=old.cards,
+                cluster_id=old.cluster,
+                prior_questions=prior_questions,
+                duplicate_repair=True,
+            )
+            clusters[index] = replace(old, cards=cards)
+            repaired_cluster_ids.add(old.cluster)
+        return frozenset(repaired_cluster_ids)
 
     def run(
         self,
@@ -702,8 +810,11 @@ class FlashcardPipeline:
                 "initial module validation failed: " + "; ".join(initial_errors)
             )
 
+        relaxed_grounding_cluster_ids: set[str] = set()
         if self.config.final_review:
-            issues = self._collect_review_issues(clusters)
+            issues, grounding_clusters, duplicate_clusters = (
+                self._collect_review_issues(clusters)
+            )
             if issues:
                 by_id = {
                     cluster.cluster: index for index, cluster in enumerate(clusters)
@@ -727,6 +838,10 @@ class FlashcardPipeline:
                     review_distractor_facts = _select_distractor_facts(
                         facts, old.concept
                     )
+                    duplicate_repair = (
+                        cluster_id in duplicate_clusters
+                        and cluster_id not in grounding_clusters
+                    )
                     cards = self._generate_cards(
                         identity,
                         old.concept,
@@ -739,10 +854,36 @@ class FlashcardPipeline:
                         concept_facts=review_concept_facts,
                         distractor_facts=review_distractor_facts,
                         module_facts=facts,
+                        duplicate_repair=duplicate_repair,
                     )
                     clusters[index] = replace(old, cards=cards)
+                    if duplicate_repair:
+                        relaxed_grounding_cluster_ids.add(cluster_id)
 
-        final_errors = validate_module(clusters, facts)
+        final_errors = validate_module(
+            clusters,
+            facts,
+            skip_grounding_cluster_ids=frozenset(relaxed_grounding_cluster_ids),
+        )
+        duplicate_errors = tuple(
+            error for error in final_errors if _MODULE_DUPLICATE_RE.match(error)
+        )
+        if duplicate_errors:
+            relaxed_grounding_cluster_ids.update(
+                self._repair_final_duplicate_errors(
+                    identity,
+                    clusters,
+                    duplicate_errors,
+                    prior_questions,
+                )
+            )
+            final_errors = validate_module(
+                clusters,
+                facts,
+                skip_grounding_cluster_ids=frozenset(
+                    relaxed_grounding_cluster_ids
+                ),
+            )
         if final_errors:
             raise GenerationError(
                 "final module validation failed: " + "; ".join(final_errors)

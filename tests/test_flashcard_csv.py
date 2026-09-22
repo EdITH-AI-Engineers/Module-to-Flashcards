@@ -152,11 +152,20 @@ def test_render_module_rejects_unvalidated_cluster_count():
 
 
 def test_write_module_output_replaces_target_without_temp_files(tmp_path: Path):
-    target = tmp_path / "nested" / "module.txt"
+    target = tmp_path / "nested" / "module.csv"
     target.parent.mkdir()
     target.write_text("old", encoding="utf-8")
 
     write_module_output(target, "new")
 
-    assert target.read_text(encoding="utf-8") == "new"
+    assert target.read_text(encoding="utf-8-sig") == "new"
     assert list(target.parent.glob("*.tmp")) == []
+
+
+def test_write_module_output_uses_utf8_bom_for_spreadsheet_compatibility(tmp_path):
+    target = tmp_path / "flashcards.csv"
+
+    write_module_output(target, "Norman's principles")
+
+    assert target.read_bytes().startswith(b"\xef\xbb\xbf")
+    assert target.read_text(encoding="utf-8-sig") == "Norman's principles"

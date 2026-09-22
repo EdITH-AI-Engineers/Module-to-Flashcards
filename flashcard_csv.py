@@ -183,7 +183,7 @@ def write_module_output(path: Path, content: str) -> None:
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",
-            encoding="utf-8",
+            encoding="utf-8-sig",
             newline="",
             delete=False,
             dir=path.parent,

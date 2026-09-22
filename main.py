@@ -168,7 +168,7 @@ def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path
             raise RuntimeError("Qwen smoke test returned an unexpected JSON value")
         return None
 
-    output = args.output or Path("flashcards") / f"module_{identity.module_number}.txt"
+    output = args.output or Path("flashcards") / f"module_{identity.module_number}.csv"
     course_dir = (
         Path(args.course_corpus).parent
         if getattr(args, "course_corpus", None)

@@ -133,6 +133,25 @@ def test_cards_parser_creates_typed_records():
     assert parse_cards(cards_json()) == valid_cards()
 
 
+def test_cards_parser_normalizes_smart_and_mojibake_apostrophes():
+    payload = json.loads(cards_json())
+    payload["cards"][0]["question"] = "Which of Norman\u2019s principles applies?"
+    payload["cards"][0]["correct_option"] = (
+        "Norman\u00e2\u20ac\u2122s visibility principle"
+    )
+    payload["cards"][0]["expalanation"] = (
+        "It clearly follows Norman\u2018s established visibility guidance here."
+    )
+
+    card = parse_cards(json.dumps(payload, ensure_ascii=False))[0]
+
+    assert card.question == "Which of Norman's principles applies?"
+    assert card.correct_option == "Norman's visibility principle"
+    assert card.expalanation == (
+        "It clearly follows Norman's established visibility guidance here."
+    )
+
+
 def test_cards_parser_rejects_using_distractor_pool_as_answer_authority():
     values = list(valid_cards())
     values[0] = replace(

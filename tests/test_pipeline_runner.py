@@ -102,7 +102,7 @@ def test_pipeline_paths_use_a_sanitized_per_pdf_workspace(tmp_path):
     assert paths.workspace == tmp_path / "outputs" / "Module_1"
     assert paths.structured_text == paths.workspace / "structured_module.txt"
     assert paths.graph_json == paths.workspace / "knowledge_graph" / "knowledge_graph.json"
-    assert paths.flashcards == paths.workspace / "flashcards.txt"
+    assert paths.flashcards == paths.workspace / "flashcards.csv"
 
 
 def test_build_stage_commands_use_current_python_and_absolute_artifacts(tmp_path):
@@ -397,6 +397,6 @@ def test_help_documents_artifacts_resume_and_force(capsys):
     assert "--module-number" in help_text
     assert "structured_module.txt" in help_text
     assert "knowledge_graph.json" in help_text
-    assert "flashcards.txt" in help_text
+    assert "flashcards.csv" in help_text
     assert "resume" in help_text.casefold()
     assert "--force" in help_text

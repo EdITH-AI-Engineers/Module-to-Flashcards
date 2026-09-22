@@ -99,7 +99,7 @@ def test_run_writes_pipeline_result(tmp_path, monkeypatch, valid_clusters):
     result = main.run(args)
 
     assert result == output_path
-    assert output_path.read_text(encoding="utf-8").startswith("Module 1.1\n")
+    assert output_path.read_text(encoding="utf-8-sig").startswith("Module 1.1\n")
 
 
 def test_exhausted_bad_card_counts_do_not_create_output(tmp_path):
@@ -308,7 +308,7 @@ def test_default_output_uses_resolved_graph_module(tmp_path, monkeypatch, valid_
 
     result = main.run(args)
 
-    assert result == Path("flashcards") / "module_01.txt"
+    assert result == Path("flashcards") / "module_01.csv"
     assert result.is_file()
 
 

@@ -401,6 +401,44 @@ def test_final_review_regenerates_flagged_cluster_and_preserves_uuid():
     assert "semantic duplication" in backend.calls[-1][1]
 
 
+def test_final_duplicate_validation_paraphrases_instead_of_failing():
+    first_cluster = json.loads(cluster_json(1))
+    duplicate_cluster = json.loads(cluster_json(2))
+    duplicate_cluster["cards"][0]["question"] = first_cluster["cards"][0]["question"]
+
+    repaired_cluster = json.loads(cluster_json(2, revision=1))
+    repaired_cluster["cards"][0].update(
+        {
+            "correct_option": "A semantically equivalent reworded answer",
+            "wrong_option_1": "Zephyr",
+            "wrong_option_2": "Quasar",
+            "wrong_option_3": "Nebula",
+        }
+    )
+    responses = [
+        plan_json(),
+        json.dumps(first_cluster),
+        json.dumps(duplicate_cluster),
+        *(cluster_json(index) for index in range(3, 21)),
+        json.dumps(repaired_cluster),
+    ]
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(final_review=False),
+        progress=lambda message: None,
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert "revision1" in clusters[1].cards[0].question
+    assert clusters[1].cards[0].correct_option == (
+        "A semantically equivalent reworded answer"
+    )
+    assert clusters[1].cards[0].wrong_option_1 == "Zephyr"
+    assert "near-duplicate questions at cluster 1 card 1" in backend.calls[-1][1]
+
+
 def test_cluster_grounding_uses_the_full_module_not_only_the_prompt_subset():
     cards = list(make_cards(1))
     cards[0] = replace(cards[0], wrong_option_3="Distant grounded term")

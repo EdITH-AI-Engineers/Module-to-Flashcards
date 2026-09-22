@@ -55,7 +55,7 @@ def pipeline_paths(pdf: Path, output_root: Path) -> PipelinePaths:
         graph_dir=graph_dir,
         graph_json=graph_dir / "knowledge_graph.json",
         triples_csv=graph_dir / "triples.csv",
-        flashcards=workspace / "flashcards.txt",
+        flashcards=workspace / "flashcards.csv",
     )
 
 
@@ -67,7 +67,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
         epilog=(
             "Each per-PDF workspace contains structured_module.txt, "
-            "knowledge_graph/knowledge_graph.json, and flashcards.txt. "
+            "knowledge_graph/knowledge_graph.json, and flashcards.csv. "
             "Valid completed stages are reused when the sequence resumes."
         ),
     )

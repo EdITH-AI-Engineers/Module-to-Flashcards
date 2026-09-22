@@ -23,6 +23,13 @@ def test_near_duplicate_threshold_requires_both_metrics():
     )
 
 
+def test_near_duplicate_ignores_shared_template_for_different_concepts():
+    assert not are_near_duplicates(
+        "Which method uses an algorithm to process input data for binary encoding?",
+        "Which method uses an algorithm to process input data for octal encoding?",
+    )
+
+
 def test_module_accepts_twenty_valid_clusters():
     assert validate_module(valid_clusters()) == ()
 

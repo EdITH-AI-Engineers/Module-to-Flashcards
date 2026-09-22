@@ -108,6 +108,18 @@ def build_card_cluster_schema(
     )
 
 
+def build_single_card_schema(
+    assessment_approaches: Sequence[str],
+) -> dict[str, object]:
+    """Require one complete card for a location-preserving repair."""
+
+    schema = build_card_cluster_schema(assessment_approaches)
+    cards = schema["properties"]["cards"]
+    cards["minItems"] = 1
+    cards["maxItems"] = 1
+    return schema
+
+
 def build_review_schema(known_clusters: Sequence[str]) -> dict[str, object]:
     issue = _strict_object(
         {

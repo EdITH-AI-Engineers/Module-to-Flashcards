@@ -635,45 +635,50 @@ def build_cluster_retry_prompt(
     """
 
 
-def build_duplicate_repair_prompt(
+def build_duplicate_card_repair_prompt(
     identity: ModuleIdentity,
     concept: ConceptPlan,
-    cards: Sequence[FlashcardDraft],
+    card: FlashcardDraft,
+    *,
+    cluster_number: int,
+    card_number: int,
+    cluster_id: str,
     reasons: Sequence[str],
-    avoid_questions: Sequence[str],
+    conflicting_questions: Sequence[dict[str, object]],
 ) -> str:
-    """Build a focused final-pass request that paraphrases duplicate cards."""
+    """Build a focused request for one flagged card at one JSON location."""
 
     payload = {
         "course_code": identity.course_code,
         "module_number": identity.module_number,
         "concept": concept.name,
+        "cluster_uuid": cluster_id,
+        "json_location": {"cluster": cluster_number, "card": card_number},
         "duplicate_findings": list(reasons),
-        "cards_to_repair": [asdict(card) for card in cards],
-        "questions_to_avoid": list(avoid_questions),
+        "card_to_repair": asdict(card),
+        "conflicting_questions": list(conflicting_questions),
     }
-    return f"""Paraphrase the duplicate card or cards in this five-card cluster.
+    return """Paraphrase exactly one flagged flashcard.
 
     REPAIR RULES
-    - When duplicate_findings names card numbers, rewrite those cards and copy
-      every unflagged card unchanged. If no card number is named, paraphrase all
-      five question stems.
-    - Preserve each card's learning point, factual meaning, correct-answer
+    - Rewrite only card_to_repair. Python will return it to json_location; do not
+      generate, copy, or discuss any other card.
+    - Preserve the card's learning point, factual meaning, correct-answer
       meaning, incorrectness of wrong answers, type, is_true value, difficulty,
       and assessment_approach.
     - Natural paraphrases may use words that do not appear verbatim in any
       corpus or fact text. Do not introduce a new claim or change which answer
       is correct.
-    - Make every repaired question genuinely distinct from questions_to_avoid.
+    - Make the repaired question genuinely distinct from conflicting_questions.
       Changing only the opening question word or adding filler is insufficient.
-    - Keep the eleven required fields and return the complete five-card JSON
-      object only. Preserve the required key spelling expalanation.
+    - You may paraphrase the question, answer options, explanation, and hint.
+      Keep the eleven required fields and preserve the key spelling expalanation.
+    - Return one card only, with no Markdown or surrounding text.
 
-    Required shape: {{"cards":[...exactly {CARDS_PER_CLUSTER} cards...]}}
+    Required shape: {"cards":[{...exactly one complete card...}]}
 
     INPUT JSON:
-    {_json(payload)}
-    """
+    """ + _json(payload)
 
 
 def build_grounding_review_prompt(
@@ -713,7 +718,7 @@ def build_duplicate_review_prompt(
             for cluster in clusters
         ]
     }
-    return """Compare all question stems for semantic and near duplication. Flag only clusters containing questions that assess the same learning point in substantially the same way as another question. Every reason must identify both duplicate card numbers in the form "card <number> duplicates cluster <uuid> card <number>". Do not judge factual correctness in this pass and do not rewrite questions.
+    return """Compare all question stems for semantic and near duplication. Flag only questions that assess the same learning point in substantially the same way as another question. Report each duplicate pair once: put the later cluster/card in the issue's cluster field and at the start of its reason, and identify the earlier card after the word cluster. Every reason must use exactly the form "card <number> duplicates cluster <uuid> card <number>". Do not judge factual correctness in this pass and do not rewrite questions.
 
     Return only this JSON shape. Use an empty issues list when no duplicate exists:
     {"issues":[{"cluster":"valid UUID copied from input","reasons":["card 2 duplicates cluster <uuid> card 4"]}]}

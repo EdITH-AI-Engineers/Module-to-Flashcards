@@ -1,5 +1,5 @@
 from collections import deque
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 
 import pytest
@@ -17,7 +17,7 @@ from flashcard_types import (
     GraphFact,
     ModuleIdentity,
 )
-from flashcard_validator import validate_cluster
+from flashcard_validator import parse_cards, validate_cluster
 from tests.factories import (
     cluster_json,
     graph_facts,
@@ -46,15 +46,28 @@ def empty_review():
     return json.dumps({"issues": []})
 
 
-def flag_first_cluster(system, user, max_tokens):
-    payload = json.loads(user.split("INPUT JSON:\n", 1)[1])
+def single_card_json(card: FlashcardDraft) -> str:
+    return json.dumps({"cards": [asdict(card)]})
+
+
+def review_payload(user: str) -> dict[str, object]:
+    payload_text = user.split("INPUT JSON:\n", 1)[1].lstrip()
+    payload, _ = json.JSONDecoder().raw_decode(payload_text)
+    return payload
+
+
+def flag_second_cluster_duplicate(system, user, max_tokens):
+    payload = review_payload(user)
     first_uuid = payload["clusters"][0]["cluster"]
+    second_uuid = payload["clusters"][1]["cluster"]
     return json.dumps(
         {
             "issues": [
                 {
-                    "cluster": first_uuid,
-                    "reasons": ["semantic duplication"],
+                    "cluster": second_uuid,
+                    "reasons": [
+                        f"card 1 duplicates cluster {first_uuid} card 1"
+                    ],
                 }
             ]
         }
@@ -287,6 +300,20 @@ def test_fewer_than_twenty_facts_still_asks_planner_for_insufficient_content():
     backend = FakeBackend(
         [json.dumps({"insufficient_content": "only nineteen concepts are supported"})]
     )
+
+
+def flag_duplicate_without_card_location(system, user, max_tokens):
+    payload = review_payload(user)
+    return json.dumps(
+        {
+            "issues": [
+                {
+                    "cluster": payload["clusters"][1]["cluster"],
+                    "reasons": ["semantic duplication"],
+                }
+            ]
+        }
+    )
     pipeline = FlashcardPipeline(backend, PipelineConfig(final_review=False))
     facts = graph_facts()[:19]
 
@@ -385,20 +412,47 @@ def test_final_review_uses_five_groups_and_one_global_pass():
     assert "cards" not in global_payload["clusters"][0]
 
 
-def test_final_review_regenerates_flagged_cluster_and_preserves_uuid():
+def test_final_review_repairs_only_flagged_card_and_preserves_uuid():
     responses = [plan_json()]
     responses.extend(cluster_json(index) for index in range(1, 21))
     responses.extend(empty_review() for _ in range(5))
-    responses.append(flag_first_cluster)
-    responses.append(cluster_json(1, revision=1))
+    responses.append(flag_second_cluster_duplicate)
+    responses.append(single_card_json(make_cards(2, revision=1)[0]))
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(backend, PipelineConfig(final_review=True))
 
     clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
 
-    assert "revision1" in clusters[0].cards[0].question
-    assert clusters[0].cluster in backend.calls[-1][1]
-    assert "semantic duplication" in backend.calls[-1][1]
+    assert "revision1" in clusters[1].cards[0].question
+    assert clusters[1].cards[1:] == parse_cards(cluster_json(2))[1:]
+    assert clusters[1].cluster in backend.calls[-1][1]
+    assert "card 1 duplicates cluster" in backend.calls[-1][1]
+    repair_schema = backend.schemas[-1]["properties"]["cards"]
+    assert repair_schema["minItems"] == repair_schema["maxItems"] == 1
+
+
+def test_global_duplicate_review_retries_when_card_location_is_missing():
+    responses = [plan_json()]
+    responses.extend(cluster_json(index) for index in range(1, 21))
+    responses.extend(empty_review() for _ in range(5))
+    responses.extend(
+        (
+            flag_duplicate_without_card_location,
+            flag_second_cluster_duplicate,
+            single_card_json(make_cards(2, revision=1)[0]),
+        )
+    )
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=2, final_review=True),
+        progress=lambda message: None,
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert "duplicate reason must use" in backend.calls[-2][1]
+    assert "revision1" in clusters[1].cards[0].question
 
 
 def test_final_duplicate_validation_paraphrases_instead_of_failing():
@@ -406,21 +460,19 @@ def test_final_duplicate_validation_paraphrases_instead_of_failing():
     duplicate_cluster = json.loads(cluster_json(2))
     duplicate_cluster["cards"][0]["question"] = first_cluster["cards"][0]["question"]
 
-    repaired_cluster = json.loads(cluster_json(2, revision=1))
-    repaired_cluster["cards"][0].update(
-        {
-            "correct_option": "A semantically equivalent reworded answer",
-            "wrong_option_1": "Zephyr",
-            "wrong_option_2": "Quasar",
-            "wrong_option_3": "Nebula",
-        }
+    repaired_card = replace(
+        make_cards(2, revision=1)[0],
+        correct_option="A semantically equivalent reworded answer",
+        wrong_option_1="Zephyr",
+        wrong_option_2="Quasar",
+        wrong_option_3="Nebula",
     )
     responses = [
         plan_json(),
         json.dumps(first_cluster),
         json.dumps(duplicate_cluster),
         *(cluster_json(index) for index in range(3, 21)),
-        json.dumps(repaired_cluster),
+        single_card_json(repaired_card),
     ]
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
@@ -436,7 +488,77 @@ def test_final_duplicate_validation_paraphrases_instead_of_failing():
         "A semantically equivalent reworded answer"
     )
     assert clusters[1].cards[0].wrong_option_1 == "Zephyr"
+    assert clusters[1].cards[1:] == parse_cards(cluster_json(2))[1:]
     assert "near-duplicate questions at cluster 1 card 1" in backend.calls[-1][1]
+
+
+def test_duplicate_stack_combines_conflicts_for_one_card_location():
+    first_cluster = json.loads(cluster_json(1))
+    second_cluster = json.loads(cluster_json(2))
+    third_cluster = json.loads(cluster_json(3))
+    duplicate_question = first_cluster["cards"][0]["question"]
+    second_cluster["cards"][0]["question"] = duplicate_question
+    third_cluster["cards"][0]["question"] = duplicate_question
+    responses = [
+        plan_json(),
+        json.dumps(first_cluster),
+        json.dumps(second_cluster),
+        json.dumps(third_cluster),
+        *(cluster_json(index) for index in range(4, 21)),
+        single_card_json(make_cards(3, revision=1)[0]),
+        single_card_json(make_cards(2, revision=1)[0]),
+    ]
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(final_review=False),
+        progress=lambda message: None,
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert len(backend.calls) == 23
+    first_repair_payload = json.loads(
+        backend.calls[21][1].split("INPUT JSON:\n", 1)[1]
+    )
+    assert first_repair_payload["json_location"] == {
+        "cluster": 3,
+        "card": 1,
+    }
+    assert len(first_repair_payload["conflicting_questions"]) == 2
+    assert clusters[1].cards[1:] == parse_cards(cluster_json(2))[1:]
+    assert clusters[2].cards[1:] == parse_cards(cluster_json(3))[1:]
+
+
+def test_duplicate_card_retry_includes_rejected_card_and_exact_conflict():
+    first_cluster = json.loads(cluster_json(1))
+    second_cluster = json.loads(cluster_json(2))
+    duplicate_question = first_cluster["cards"][0]["question"]
+    second_cluster["cards"][0]["question"] = duplicate_question
+    rejected_card = replace(make_cards(2)[0], question=duplicate_question)
+    accepted_card = make_cards(2, revision=1)[0]
+    responses = [
+        plan_json(),
+        json.dumps(first_cluster),
+        json.dumps(second_cluster),
+        *(cluster_json(index) for index in range(3, 21)),
+        single_card_json(rejected_card),
+        single_card_json(accepted_card),
+    ]
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=2, final_review=False),
+        progress=lambda message: None,
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    retry_prompt = backend.calls[-1][1]
+    assert "REJECTED JSON:" in retry_prompt
+    assert duplicate_question in retry_prompt
+    assert clusters[1].cards[0] == parse_cards(single_card_json(accepted_card))[0]
+    assert clusters[1].cards[1:] == parse_cards(cluster_json(2))[1:]
 
 
 def test_cluster_grounding_uses_the_full_module_not_only_the_prompt_subset():

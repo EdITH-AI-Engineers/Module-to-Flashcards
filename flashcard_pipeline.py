@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from flashcard_contract import (
     CARDS_PER_BLOCK,
+    CARDS_PER_CLUSTER,
     CARDS_PER_MODULE,
     CLUSTERS_PER_MODULE,
     CONCEPTS_PER_MODULE,
@@ -19,7 +20,7 @@ from flashcard_prompt import (
     build_cluster_prompt,
     build_cluster_retry_prompt,
     build_concept_plan_prompt,
-    build_duplicate_repair_prompt,
+    build_duplicate_card_repair_prompt,
     build_duplicate_review_prompt,
     build_grounding_review_prompt,
     build_retry_prompt,
@@ -30,6 +31,7 @@ from flashcard_schema import (
     build_card_cluster_schema,
     build_concept_plan_schema,
     build_review_schema,
+    build_single_card_schema,
 )
 from flashcard_types import (
     ChatBackend,
@@ -121,6 +123,19 @@ _MODULE_DUPLICATE_RE = re.compile(
     r"^near-duplicate questions at cluster (\d+) card (\d+) "
     r"and cluster (\d+) card (\d+)$"
 )
+_DUPLICATE_REVIEW_REASON_RE = re.compile(
+    r"^card (\d+) duplicates cluster (.+?) card (\d+)$",
+    re.I,
+)
+
+
+@dataclass(frozen=True)
+class _DuplicateRepairItem:
+    cluster_index: int
+    card_index: int
+    original_card: FlashcardDraft
+    conflicts: tuple[tuple[int, int], ...]
+    reasons: tuple[str, ...]
 
 
 def _phrase_from_fact(fact: GraphFact) -> str:
@@ -478,32 +493,6 @@ class FlashcardPipeline:
                     )
         return tuple(errors)
 
-    @staticmethod
-    def _cross_cluster_duplicate_errors(
-        cards: Sequence[FlashcardDraft],
-        existing: Sequence[FlashcardCluster],
-    ) -> tuple[str, ...]:
-        """Reject cross-cluster overlap only during the final repair pass."""
-
-        errors: list[str] = []
-        for card_position, card in enumerate(cards, start=1):
-            for cluster in existing:
-                match = next(
-                    (
-                        prior_position
-                        for prior_position, prior in enumerate(cluster.cards, start=1)
-                        if are_near_duplicates(card.question, prior.question)
-                    ),
-                    None,
-                )
-                if match is not None:
-                    errors.append(
-                        f"card {card_position} near-duplicates existing cluster "
-                        f"{cluster.cluster} card {match}"
-                    )
-                    break
-        return tuple(errors)
-
     def _generate_cards(
         self,
         identity: ModuleIdentity,
@@ -518,44 +507,23 @@ class FlashcardPipeline:
         concept_facts: Sequence[GraphFact] = (),
         distractor_facts: Sequence[GraphFact] = (),
         module_facts: Sequence[GraphFact] = (),
-        duplicate_repair: bool = False,
     ) -> tuple[FlashcardDraft, ...]:
         prior_signals = tuple(
             _dedup_fingerprint(card) for cluster in existing for card in cluster.cards
         ) + tuple(_card_subject(question) for question in prior_questions)
-        if duplicate_repair:
-            duplicate_feedback = list(review_feedback)
-            if cluster_id:
-                duplicate_feedback.insert(
-                    0,
-                    f"cluster UUID {cluster_id} requires duplicate repair",
-                )
-            base_prompt = build_duplicate_repair_prompt(
-                identity,
-                concept,
-                rejected_cards,
-                duplicate_feedback,
-                tuple(
-                    card.question for cluster in existing for card in cluster.cards
-                )
-                + tuple(prior_questions),
-            )
-        else:
-            base_prompt = build_cluster_prompt(
-                identity,
-                concept,
-                concept_facts,
-                distractor_facts,
-                prior_signals=prior_signals,
-            )
+        base_prompt = build_cluster_prompt(
+            identity,
+            concept,
+            concept_facts,
+            distractor_facts,
+            prior_signals=prior_signals,
+        )
 
         def build_cluster_retry(
             original_prompt: str,
             candidate: str | None,
             errors: Sequence[str],
         ) -> str:
-            if duplicate_repair:
-                return build_retry_prompt(original_prompt, candidate, errors)
             return build_cluster_retry_prompt(
                 identity,
                 concept,
@@ -566,7 +534,7 @@ class FlashcardPipeline:
                 errors,
             )
 
-        if review_feedback and not duplicate_repair:
+        if review_feedback:
             rejected = json.dumps(
                 {"cards": [asdict(card) for card in rejected_cards]},
                 ensure_ascii=False,
@@ -583,21 +551,17 @@ class FlashcardPipeline:
                     f"[{label}] card {card_position}/{len(cards)} generated: "
                     + json.dumps(asdict(card), ensure_ascii=False)
                 )
-            grounding_facts = () if duplicate_repair else (
+            grounding_facts = (
                 tuple(module_facts)
                 if module_facts
                 else tuple(concept_facts) + tuple(distractor_facts)
             )
             errors = list(validate_cluster(cards, concept, grounding_facts))
             errors.extend(self._duplicate_errors(cards, existing, prior_questions))
-            if duplicate_repair:
-                errors.extend(self._cross_cluster_duplicate_errors(cards, existing))
             if errors:
-                repaired = None
-                if not duplicate_repair:
-                    repaired = _repair_grounding_errors(
-                        cards, errors, grounding_facts, phrase_facts=distractor_facts
-                    )
+                repaired = _repair_grounding_errors(
+                    cards, errors, grounding_facts, phrase_facts=distractor_facts
+                )
                 if repaired is not None:
                     repair_errors = list(
                         validate_cluster(repaired, concept, grounding_facts)
@@ -633,10 +597,50 @@ class FlashcardPipeline:
         known_clusters: set[str],
         *,
         label: str,
+        require_duplicate_locations: bool = False,
     ) -> tuple[ReviewIssue, ...]:
+        def parse(raw: str) -> tuple[ReviewIssue, ...]:
+            issues = parse_review_issues(raw, known_clusters)
+            if not require_duplicate_locations:
+                return issues
+
+            errors: list[str] = []
+            for issue in issues:
+                for reason in issue.reasons:
+                    match = _DUPLICATE_REVIEW_REASON_RE.match(reason)
+                    if match is None:
+                        errors.append(
+                            "duplicate reason must use 'card <number> duplicates "
+                            "cluster <uuid> card <number>'"
+                        )
+                        continue
+                    source_card = int(match.group(1))
+                    target_cluster = match.group(2)
+                    target_card = int(match.group(3))
+                    if not 1 <= source_card <= CARDS_PER_CLUSTER:
+                        errors.append(
+                            f"duplicate reason source card {source_card} is out of range"
+                        )
+                    if target_cluster not in known_clusters:
+                        errors.append(
+                            f"duplicate reason references unknown cluster {target_cluster!r}"
+                        )
+                    elif (
+                        target_cluster == issue.cluster
+                        and target_card == source_card
+                    ):
+                        errors.append("duplicate reason cannot reference the same card")
+                    if not 1 <= target_card <= CARDS_PER_CLUSTER:
+                        errors.append(
+                            f"duplicate reason target card {target_card} is out of range"
+                        )
+            if errors:
+                raise ValidationError(errors)
+            return issues
+
         return self._complete_with_retries(
             prompt,
-            lambda raw: parse_review_issues(raw, known_clusters),
+            parse,
             max_tokens=self.config.review_max_tokens,
             label=label,
             response_schema=build_review_schema(tuple(known_clusters)),
@@ -645,10 +649,13 @@ class FlashcardPipeline:
     def _collect_review_issues(
         self,
         clusters: Sequence[FlashcardCluster],
-    ) -> tuple[dict[str, list[str]], frozenset[str], frozenset[str]]:
+    ) -> tuple[
+        dict[str, list[str]],
+        frozenset[str],
+        tuple[ReviewIssue, ...],
+    ]:
         merged: dict[str, list[str]] = {}
         grounding_clusters: set[str] = set()
-        duplicate_clusters: set[str] = set()
         review_group_size = 4
         review_group_count = (
             CLUSTERS_PER_MODULE + review_group_size - 1
@@ -672,13 +679,13 @@ class FlashcardPipeline:
             build_duplicate_review_prompt(clusters),
             {cluster.cluster for cluster in clusters},
             label="global duplicate review",
+            require_duplicate_locations=True,
         )
         self._merge_issues(merged, global_issues)
-        duplicate_clusters.update(issue.cluster for issue in global_issues)
         return (
             merged,
             frozenset(grounding_clusters),
-            frozenset(duplicate_clusters),
+            global_issues,
         )
 
     @staticmethod
@@ -692,47 +699,174 @@ class FlashcardPipeline:
                 if reason not in reasons:
                     reasons.append(reason)
 
-    def _repair_final_duplicate_errors(
-        self,
-        identity: ModuleIdentity,
-        clusters: list[FlashcardCluster],
-        errors: Sequence[str],
-        prior_questions: Sequence[str],
-    ) -> frozenset[str]:
-        """Paraphrase clusters named by deterministic final duplicate errors."""
+    @staticmethod
+    def _build_duplicate_repair_stack(
+        clusters: Sequence[FlashcardCluster],
+        *,
+        review_issues: Sequence[ReviewIssue] = (),
+        module_errors: Sequence[str] = (),
+    ) -> list[_DuplicateRepairItem]:
+        """Collect duplicate pairs into one LIFO item per card location."""
 
-        by_cluster: dict[int, list[str]] = {}
-        for error in errors:
+        cluster_by_id = {
+            cluster.cluster: index for index, cluster in enumerate(clusters)
+        }
+        conflicts_by_path: dict[
+            tuple[int, int],
+            list[tuple[int, int]],
+        ] = {}
+        reasons_by_path: dict[tuple[int, int], list[str]] = {}
+
+        def add_location(
+            repair_path: tuple[int, int],
+            conflict_path: tuple[int, int],
+            reason: str,
+        ) -> None:
+            conflicts = conflicts_by_path.setdefault(repair_path, [])
+            reasons = reasons_by_path.setdefault(repair_path, [])
+            if conflict_path not in conflicts:
+                conflicts.append(conflict_path)
+            if reason not in reasons:
+                reasons.append(reason)
+
+        for issue in review_issues:
+            source_cluster = cluster_by_id[issue.cluster]
+            for reason in issue.reasons:
+                match = _DUPLICATE_REVIEW_REASON_RE.match(reason)
+                if match is None:
+                    raise GenerationError(
+                        f"global duplicate review omitted an exact card location: {reason}"
+                    )
+                source = (source_cluster, int(match.group(1)) - 1)
+                target = (
+                    cluster_by_id[match.group(2)],
+                    int(match.group(3)) - 1,
+                )
+                add_location(source, target, reason)
+
+        for error in module_errors:
             match = _MODULE_DUPLICATE_RE.match(error)
             if match is None:
                 continue
-            later_cluster_index = int(match.group(3)) - 1
-            by_cluster.setdefault(later_cluster_index, []).append(error)
+            first = (int(match.group(1)) - 1, int(match.group(2)) - 1)
+            second = (int(match.group(3)) - 1, int(match.group(4)) - 1)
+            add_location(max(first, second), min(first, second), error)
+
+        return [
+            _DuplicateRepairItem(
+                cluster_index=cluster_index,
+                card_index=card_index,
+                original_card=clusters[cluster_index].cards[card_index],
+                conflicts=tuple(conflicts_by_path[(cluster_index, card_index)]),
+                reasons=tuple(reasons_by_path[(cluster_index, card_index)]),
+            )
+            for cluster_index, card_index in sorted(conflicts_by_path)
+        ]
+
+    def _repair_duplicate_stack(
+        self,
+        identity: ModuleIdentity,
+        clusters: list[FlashcardCluster],
+        stack: list[_DuplicateRepairItem],
+        prior_questions: Sequence[str],
+    ) -> frozenset[str]:
+        """Pop flagged cards, paraphrase one, and replace its exact JSON slot."""
 
         repaired_cluster_ids: set[str] = set()
-        for index, duplicate_errors in sorted(by_cluster.items()):
-            old = clusters[index]
+        while stack:
+            item = stack.pop()
+            old = clusters[item.cluster_index]
+            original_card = item.original_card
+            conflicting_questions = [
+                {
+                    "cluster": cluster_index + 1,
+                    "card": card_index + 1,
+                    "question": clusters[cluster_index].cards[card_index].question,
+                }
+                for cluster_index, card_index in item.conflicts
+            ]
             self._progress(
-                "Paraphrasing final duplicate cards in cluster "
-                f"{index + 1}/{CLUSTERS_PER_MODULE}: {old.concept.name}"
+                "Paraphrasing duplicate card at cluster "
+                f"{item.cluster_index + 1}/{CLUSTERS_PER_MODULE} card "
+                f"{item.card_index + 1}: {old.concept.name}"
             )
-            others = tuple(
-                cluster
-                for other_index, cluster in enumerate(clusters)
-                if other_index != index
-            )
-            cards = self._generate_cards(
+            prompt = build_duplicate_card_repair_prompt(
                 identity,
                 old.concept,
-                others,
-                label=f"duplicate repair {index + 1} ({old.concept.name})",
-                review_feedback=duplicate_errors,
-                rejected_cards=old.cards,
+                original_card,
+                cluster_number=item.cluster_index + 1,
+                card_number=item.card_index + 1,
                 cluster_id=old.cluster,
-                prior_questions=prior_questions,
-                duplicate_repair=True,
+                reasons=item.reasons,
+                conflicting_questions=conflicting_questions,
             )
-            clusters[index] = replace(old, cards=cards)
+
+            def parse_and_validate(raw: str) -> FlashcardDraft:
+                cards = parse_cards(raw)
+                if len(cards) != 1:
+                    raise ValidationError(
+                        f"expected exactly 1 replacement card, received {len(cards)}"
+                    )
+                candidate = cards[0]
+                errors: list[str] = []
+                for field in (
+                    "type",
+                    "is_true",
+                    "difficulty",
+                    "assessment_approach",
+                ):
+                    if getattr(candidate, field) != getattr(original_card, field):
+                        errors.append(f"replacement card must preserve {field}")
+                if are_near_duplicates(candidate.question, original_card.question):
+                    errors.append(
+                        "replacement question is still a near-duplicate of the "
+                        "original flagged question"
+                    )
+
+                replacement_cards = list(old.cards)
+                replacement_cards[item.card_index] = candidate
+                errors.extend(
+                    validate_cluster(tuple(replacement_cards), old.concept, ())
+                )
+
+                for cluster_index, cluster in enumerate(clusters):
+                    for card_index, card in enumerate(cluster.cards):
+                        if (
+                            cluster_index == item.cluster_index
+                            and card_index == item.card_index
+                        ):
+                            continue
+                        if are_near_duplicates(candidate.question, card.question):
+                            errors.append(
+                                "replacement question near-duplicates cluster "
+                                f"{cluster_index + 1} card {card_index + 1}: "
+                                f"{card.question!r}"
+                            )
+                for prior_question in prior_questions:
+                    if are_near_duplicates(candidate.question, prior_question):
+                        errors.append(
+                            "replacement question duplicates a previously generated "
+                            f"module question: {prior_question!r}"
+                        )
+                if errors:
+                    raise ValidationError(errors)
+                return candidate
+
+            repaired_card = self._complete_with_retries(
+                prompt,
+                parse_and_validate,
+                max_tokens=self.config.cluster_max_tokens,
+                label=(
+                    f"duplicate repair {item.cluster_index + 1} card "
+                    f"{item.card_index + 1} ({old.concept.name})"
+                ),
+                response_schema=build_single_card_schema(
+                    old.concept.assessment_approaches
+                ),
+            )
+            updated_cards = list(old.cards)
+            updated_cards[item.card_index] = repaired_card
+            clusters[item.cluster_index] = replace(old, cards=tuple(updated_cards))
             repaired_cluster_ids.add(old.cluster)
         return frozenset(repaired_cluster_ids)
 
@@ -811,15 +945,24 @@ class FlashcardPipeline:
             )
 
         relaxed_grounding_cluster_ids: set[str] = set()
+        duplicate_repairs = 0
         if self.config.final_review:
-            issues, grounding_clusters, duplicate_clusters = (
+            issues, grounding_clusters, duplicate_issues = (
                 self._collect_review_issues(clusters)
             )
+            duplicate_cluster_ids = {
+                issue.cluster for issue in duplicate_issues
+            }
             if issues:
                 by_id = {
                     cluster.cluster: index for index, cluster in enumerate(clusters)
                 }
                 for cluster_id, reasons in issues.items():
+                    if (
+                        cluster_id in duplicate_cluster_ids
+                        and cluster_id not in grounding_clusters
+                    ):
+                        continue
                     index = by_id[cluster_id]
                     old = clusters[index]
                     self._progress(
@@ -838,10 +981,6 @@ class FlashcardPipeline:
                     review_distractor_facts = _select_distractor_facts(
                         facts, old.concept
                     )
-                    duplicate_repair = (
-                        cluster_id in duplicate_clusters
-                        and cluster_id not in grounding_clusters
-                    )
                     cards = self._generate_cards(
                         identity,
                         old.concept,
@@ -854,26 +993,54 @@ class FlashcardPipeline:
                         concept_facts=review_concept_facts,
                         distractor_facts=review_distractor_facts,
                         module_facts=facts,
-                        duplicate_repair=duplicate_repair,
                     )
                     clusters[index] = replace(old, cards=cards)
-                    if duplicate_repair:
-                        relaxed_grounding_cluster_ids.add(cluster_id)
+
+            duplicate_only_issues = tuple(
+                issue
+                for issue in duplicate_issues
+                if issue.cluster not in grounding_clusters
+            )
+            review_stack = self._build_duplicate_repair_stack(
+                clusters,
+                review_issues=duplicate_only_issues,
+            )
+            duplicate_repairs += len(review_stack)
+            if review_stack:
+                relaxed_grounding_cluster_ids.update(
+                    self._repair_duplicate_stack(
+                        identity,
+                        clusters,
+                        review_stack,
+                        prior_questions,
+                    )
+                )
 
         final_errors = validate_module(
             clusters,
             facts,
             skip_grounding_cluster_ids=frozenset(relaxed_grounding_cluster_ids),
         )
-        duplicate_errors = tuple(
-            error for error in final_errors if _MODULE_DUPLICATE_RE.match(error)
-        )
-        if duplicate_errors:
+        while True:
+            duplicate_errors = tuple(
+                error for error in final_errors if _MODULE_DUPLICATE_RE.match(error)
+            )
+            if not duplicate_errors:
+                break
+            repair_stack = self._build_duplicate_repair_stack(
+                clusters,
+                module_errors=duplicate_errors,
+            )
+            duplicate_repairs += len(repair_stack)
+            if duplicate_repairs > CARDS_PER_MODULE:
+                raise GenerationError(
+                    "duplicate repair limit reached before the module became unique"
+                )
             relaxed_grounding_cluster_ids.update(
-                self._repair_final_duplicate_errors(
+                self._repair_duplicate_stack(
                     identity,
                     clusters,
-                    duplicate_errors,
+                    repair_stack,
                     prior_questions,
                 )
             )

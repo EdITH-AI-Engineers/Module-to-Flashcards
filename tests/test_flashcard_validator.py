@@ -295,10 +295,6 @@ def test_concept_plan_accepts_comma_separated_token_fields():
     raw, known = plan_json()
     payload = json.loads(raw)
     payload["concepts"][0]["fact_ids"] = "e1,e2,e3"
-    # Keep every selected fact exclusive to one concept.
-    for index, concept in enumerate(payload["concepts"][1:], start=4):
-        concept["fact_ids"] = [f"e{index}"]
-    known = (*known, GraphFact("e21", "subject 21 | relates to | object 21"), GraphFact("e22", "subject 22 | relates to | object 22"))
     payload["concepts"][0]["assessment_approaches"] = (
         "recall,comparison,classification,application,scenario analysis"
     )
@@ -313,15 +309,6 @@ def test_concept_plan_accepts_comma_separated_token_fields():
         "application",
         "scenario analysis",
     )
-
-
-def test_concept_plan_rejects_fact_id_reused_by_another_concept():
-    raw, known = plan_json()
-    payload = json.loads(raw)
-    payload["concepts"][1]["fact_ids"] = ["e1"]
-
-    with pytest.raises(ValidationError, match="reuses fact id 'e1' already assigned"):
-        parse_concept_plan(json.dumps(payload), known)
 
 
 @pytest.mark.parametrize(

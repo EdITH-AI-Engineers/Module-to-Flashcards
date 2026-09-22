@@ -235,7 +235,6 @@ def parse_concept_plan(
     results: list[ConceptPlan] = []
     errors: list[str] = []
     seen_names: set[str] = set()
-    fact_owners: dict[str, int] = {}
 
     for position, item in enumerate(concepts_value, start=1):
         prefix = f"concept {position}"
@@ -267,14 +266,6 @@ def parse_concept_plan(
                 errors.append(f"{prefix} uses unknown fact id {fact_id!r}")
             else:
                 resolved_facts.append(known[fact_id])
-                owner = fact_owners.get(fact_id)
-                if owner is not None:
-                    errors.append(
-                        f"{prefix} reuses fact id {fact_id!r} already assigned "
-                        f"to concept {owner}"
-                    )
-                else:
-                    fact_owners[fact_id] = position
         if (
             len(approaches) != CARDS_PER_CLUSTER
             or len(set(approaches)) != CARDS_PER_CLUSTER
@@ -736,32 +727,7 @@ def are_near_duplicates(left: str, right: str) -> bool:
     union = left_tokens | right_tokens
     jaccard = len(left_tokens & right_tokens) / len(union) if union else 1.0
     sequence = difflib.SequenceMatcher(None, normalized_left, normalized_right).ratio()
-    if jaccard < 0.85 or sequence < 0.88:
-        return False
-
-    # Surface similarity alone mistakes a repeated question template for a
-    # duplicate when the cards name different concepts (for example, binary
-    # versus octal encoding). The final deterministic guard is intentionally
-    # conservative: semantic paraphrases belong to the model review, while it
-    # rejects only stems whose content-bearing terms are also the same.
-    framing_tokens = {
-        "a", "an", "and", "are", "as", "at", "be", "by", "can", "correctly", "could",
-        "describe", "describes", "described", "did", "do", "does", "exactly",
-        "for", "from", "how", "in", "is", "it", "its", "may", "might",
-        "name", "names", "of", "on", "or", "process", "refers", "refer",
-        "should", "term", "that", "the", "these", "this", "those", "to",
-        "was", "what", "when", "where", "which", "who", "why", "will",
-        "with", "would",
-    }
-
-    def content_tokens(stem: str) -> set[str]:
-        return {
-            _stem(token)
-            for token in stem.split()
-            if token not in framing_tokens
-        }
-
-    return content_tokens(normalized_left) == content_tokens(normalized_right)
+    return jaccard >= 0.85 and sequence >= 0.88
 
 
 def validate_module(

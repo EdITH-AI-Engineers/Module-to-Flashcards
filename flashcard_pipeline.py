@@ -22,8 +22,6 @@ from flashcard_prompt import (
     build_duplicate_review_prompt,
     build_grounding_review_prompt,
     build_retry_prompt,
-    _card_subject,
-    _dedup_fingerprint,
 )
 from flashcard_schema import (
     build_card_cluster_schema,
@@ -457,14 +455,46 @@ class FlashcardPipeline:
                     errors.append(
                         f"cards {left_index + 1} and {right_index + 1} are mirrored polarity variants"
                     )
-            # Do not reject a whole cluster merely because an adjacent concept
-            # produced a similar question. Small local models commonly repeat
-            # shared terminology across related concepts, and retrying the
-            # cluster tends to reproduce the same wording until attempts are
-            # exhausted. Cross-cluster overlap is handled by the module-level
-            # review after all concepts have been generated. Keep the stricter
-            # checks above for duplicates inside this cluster and below for
-            # questions already used in an earlier module.
+            # Reject deterministic cross-cluster duplicates while the candidate
+            # can still be regenerated. Deferring these until final validation
+            # used to make --skip-final-review runs fail only after all 100 cards
+            # had been generated. It also made the optional semantic reviewer a
+            # single point of failure: an empty review response allowed a known
+            # duplicate to reach the final module check.
+            previous_match: tuple[int, int, FlashcardCluster, str] | None = None
+            for cluster_position, cluster in enumerate(existing, start=1):
+                for prior_card_position, prior_card in enumerate(
+                    cluster.cards, start=1
+                ):
+                    duplicate_kind = None
+                    if are_near_duplicates(left.question, prior_card.question):
+                        duplicate_kind = "near-duplicates"
+                    elif _polarity_variant(left.question, prior_card.question):
+                        duplicate_kind = "is a mirrored polarity variant of"
+                    if duplicate_kind is None:
+                        continue
+                    previous_match = (
+                        cluster_position,
+                        prior_card_position,
+                        cluster,
+                        duplicate_kind,
+                    )
+                    break
+                if previous_match is not None:
+                    break
+            if previous_match is not None:
+                (
+                    cluster_position,
+                    prior_card_position,
+                    cluster,
+                    duplicate_kind,
+                ) = previous_match
+                errors.append(
+                    f"card {left_index + 1} {duplicate_kind} earlier cluster "
+                    f"{cluster_position} card {prior_card_position} from concept "
+                    f"{cluster.concept.name!r}; rewrite the "
+                    "question to assess a genuinely different learning point"
+                )
             for prior_question in prior_questions:
                 if are_near_duplicates(left.question, prior_question):
                     errors.append(
@@ -488,9 +518,12 @@ class FlashcardPipeline:
         distractor_facts: Sequence[GraphFact] = (),
         module_facts: Sequence[GraphFact] = (),
     ) -> tuple[FlashcardDraft, ...]:
-        prior_signals = tuple(
-            _dedup_fingerprint(card) for cluster in existing for card in cluster.cards
-        ) + tuple(_card_subject(question) for question in prior_questions)
+        # Do not place earlier question/answer text in generation prompts. Some
+        # local models treat examples in an "avoid" list as patterns to copy,
+        # which can manufacture the exact duplicates the list was meant to
+        # prevent. The acceptance check below compares against every earlier
+        # card and sends only its location and concept name on a retry.
+        prior_signals: tuple[str, ...] = ()
         base_prompt = build_cluster_prompt(
             identity,
             concept,
@@ -640,6 +673,13 @@ class FlashcardPipeline:
         self._rejected_attempt_count = 0
         self._rejection_counts.clear()
         plan_facts = _balanced_plan_facts(facts)
+        if len(plan_facts) < CONCEPTS_PER_MODULE:
+            raise GenerationError(
+                "more content is required: "
+                f"{CONCEPTS_PER_MODULE} exclusive concepts require at least "
+                f"{CONCEPTS_PER_MODULE} usable facts, but only "
+                f"{len(plan_facts)} usable facts remain after cleanup"
+            )
         self._progress(
             f"Planning {CONCEPTS_PER_MODULE} concepts from "
             f"{len(plan_facts)} grounded lesson facts..."

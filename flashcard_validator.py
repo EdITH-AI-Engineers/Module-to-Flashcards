@@ -265,6 +265,7 @@ def parse_concept_plan(
     results: list[ConceptPlan] = []
     errors: list[str] = []
     seen_names: set[str] = set()
+    fact_owners: dict[str, int] = {}
 
     for position, item in enumerate(concepts_value, start=1):
         prefix = f"concept {position}"
@@ -291,11 +292,24 @@ def parse_concept_plan(
             continue
 
         resolved_facts: list[str] = []
+        fact_ids_seen_here: set[str] = set()
         for fact_id in fact_ids:
+            if fact_id in fact_ids_seen_here:
+                errors.append(f"{prefix} repeats fact id {fact_id!r}")
+                continue
+            fact_ids_seen_here.add(fact_id)
             if fact_id not in known:
                 errors.append(f"{prefix} uses unknown fact id {fact_id!r}")
             else:
                 resolved_facts.append(known[fact_id])
+                owner = fact_owners.get(fact_id)
+                if owner is None:
+                    fact_owners[fact_id] = position
+                else:
+                    errors.append(
+                        f"{prefix} reuses fact id {fact_id!r} already assigned "
+                        f"to concept {owner}; each fact id may support only one concept"
+                    )
         if (
             len(approaches) != CARDS_PER_CLUSTER
             or len(set(approaches)) != CARDS_PER_CLUSTER
@@ -756,17 +770,54 @@ def _polarity_variant(left: str, right: str) -> bool:
     )
 
 
+_QUESTION_FRAME_TOKENS = {
+    "how",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "whom",
+    "whose",
+    "why",
+}
+
+
+def _question_content_tokens(value: str) -> tuple[str, ...]:
+    return tuple(
+        _stem(token)
+        for token in normalize_stem(value).split()
+        if token not in _QUESTION_FRAME_TOKENS
+    )
+
+
 def are_near_duplicates(left: str, right: str) -> bool:
     normalized_left = normalize_stem(left)
     normalized_right = normalize_stem(right)
     if normalized_left == normalized_right:
         return True
 
-    left_tokens = set(normalized_left.split())
-    right_tokens = set(normalized_right.split())
+    left_sequence = _question_content_tokens(left)
+    right_sequence = _question_content_tokens(right)
+    left_tokens = set(left_sequence)
+    right_tokens = set(right_sequence)
+    if not left_tokens or not right_tokens:
+        return False
+
+    # A high surface score can come from a long shared template with one
+    # different learning point (for example, "binary" versus "octal").
+    # Deterministic rejection is safe only when the content difference is
+    # one-sided, such as an added filler word, or is only question framing.
+    if left_tokens - right_tokens and right_tokens - left_tokens:
+        return False
+
     union = left_tokens | right_tokens
     jaccard = len(left_tokens & right_tokens) / len(union) if union else 1.0
-    sequence = difflib.SequenceMatcher(None, normalized_left, normalized_right).ratio()
+    sequence = difflib.SequenceMatcher(
+        None,
+        " ".join(left_sequence),
+        " ".join(right_sequence),
+    ).ratio()
     return jaccard >= 0.85 and sequence >= 0.88
 
 

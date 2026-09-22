@@ -283,6 +283,20 @@ def test_explicit_insufficient_content_stops_without_retries():
     assert len(backend.calls) == 1
 
 
+def test_fewer_than_twenty_exclusive_facts_stops_before_model_generation():
+    backend = FakeBackend([])
+    pipeline = FlashcardPipeline(backend, PipelineConfig(final_review=False))
+    facts = graph_facts()[:19]
+
+    with pytest.raises(
+        GenerationError,
+        match="20 exclusive concepts.*19 usable facts",
+    ):
+        pipeline.run(ModuleIdentity("CPE0021", "1"), facts)
+
+    assert backend.calls == []
+
+
 def test_prior_question_is_checked_without_current_module_clusters():
     card = FlashcardDraft(
         type="identification",
@@ -309,7 +323,7 @@ def test_prior_question_is_checked_without_current_module_clusters():
     )
 
 
-def test_duplicate_question_against_an_earlier_cluster_is_deferred_to_review():
+def test_duplicate_question_against_an_earlier_cluster_is_rejected_immediately():
     earlier = FlashcardCluster(
         cluster="00000000-0000-4000-8000-000000000001",
         concept=make_concept(1),
@@ -320,7 +334,68 @@ def test_duplicate_question_against_an_earlier_cluster_is_deferred_to_review():
 
     errors = FlashcardPipeline._duplicate_errors(tuple(candidate), (earlier,))
 
-    assert not any("from concept" in error for error in errors)
+    assert any(
+        "card 1 near-duplicates earlier cluster 1 card 1" in error
+        and "Concept 1" in error
+        for error in errors
+    )
+
+
+def test_cross_cluster_duplicate_feedback_reports_only_first_match_per_card():
+    first = FlashcardCluster(
+        cluster="00000000-0000-4000-8000-000000000001",
+        concept=make_concept(1),
+        cards=make_cards(1),
+    )
+    second = replace(
+        first,
+        cluster="00000000-0000-4000-8000-000000000002",
+        concept=make_concept(2),
+    )
+    candidate = list(make_cards(3))
+    candidate[0] = replace(candidate[0], question=first.cards[0].question)
+
+    errors = FlashcardPipeline._duplicate_errors(
+        tuple(candidate),
+        (first, second),
+    )
+
+    matching_errors = [
+        error for error in errors if "card 1 near-duplicates earlier cluster" in error
+    ]
+    assert len(matching_errors) == 1
+
+
+def test_cross_cluster_duplicate_is_regenerated_when_final_review_is_disabled():
+    duplicate_cluster = json.loads(cluster_json(2))
+    earlier_question = json.loads(cluster_json(1))[
+        "cards"
+    ][0]["question"]
+    duplicate_cluster["cards"][0]["question"] = earlier_question
+    responses = [
+        plan_json(),
+        cluster_json(1),
+        json.dumps(duplicate_cluster),
+        cluster_json(2, revision=1),
+    ]
+    responses.extend(cluster_json(index) for index in range(3, 21))
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert len(backend.calls) == 22
+    assert earlier_question not in backend.calls[2][1]
+    assert "near-duplicates earlier cluster 1 card 1" in backend.calls[3][1]
+    assert "genuinely different learning point" in backend.calls[3][1]
+    assert earlier_question not in backend.calls[3][1]
+    assert "already_covered_subjects" not in backend.calls[2][1]
+    assert "already_covered_subjects" not in backend.calls[3][1]
+    assert "revision1" in clusters[1].cards[0].question
+    assert pipeline.rejection_stats["categories"]["duplication"] == 1
 
 
 def test_pipeline_threads_prior_concepts_and_retries_prior_question_duplicate():
@@ -342,7 +417,11 @@ def test_pipeline_threads_prior_concepts_and_retries_prior_question_duplicate():
 
     plan_payload = json.loads(backend.calls[0][1].split("INPUT JSON:\n", 1)[1])
     assert plan_payload["previously_covered_concepts"] == ["Earlier concept"]
+    assert duplicate_question not in backend.calls[1][1]
     assert "previously generated module" in backend.calls[2][1]
+    assert duplicate_question not in backend.calls[2][1]
+    assert "already_covered_subjects" not in backend.calls[1][1]
+    assert "already_covered_subjects" not in backend.calls[2][1]
 
 
 def test_final_review_uses_five_groups_and_one_global_pass():

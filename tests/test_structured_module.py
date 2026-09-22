@@ -6,6 +6,7 @@ from structured_module import (
     StructuredSlide,
     deduplicate_lesson_fact_records,
     extract_lesson_facts,
+    filter_lesson_fact_records,
     graph_ready_text,
     parse_module_metadata,
     render_structured_module,
@@ -94,6 +95,214 @@ def test_deduplicate_lesson_facts_keeps_parallel_concepts_distinct():
     facts = deduplicate_lesson_fact_records(records)
 
     assert [fact["id"] for fact in facts] == ["f40", "f41"]
+
+
+@pytest.mark.parametrize(
+    ("records", "canonical_id", "expected_slides"),
+    [
+        (
+            (
+                {
+                    "id": "f53",
+                    "statement": (
+                        "The ISO 9241 standard outlines traditional usability "
+                        "categories with specific measures such as effectiveness, "
+                        "efficiency, and satisfaction."
+                    ),
+                    "slides": [25],
+                },
+                {
+                    "id": "f59",
+                    "statement": (
+                        "The ISO 9241 standard addresses ergonomics in human-system "
+                        "interaction and outlines traditional usability categories "
+                        "with specific measures."
+                    ),
+                    "slides": [26, 27],
+                },
+            ),
+            "f53",
+            [25, 26, 27],
+        ),
+        (
+            (
+                {
+                    "id": "f60",
+                    "statement": (
+                        "Usability in HCI includes aspects such as effectiveness, "
+                        "efficiency, and satisfaction, which are evaluated through "
+                        "metrics like percentage of time to complete tasks and "
+                        "rating scales for user satisfaction."
+                    ),
+                    "slides": [26],
+                },
+                {
+                    "id": "f63",
+                    "statement": (
+                        "Usability is categorized into effectiveness, efficiency, "
+                        "and satisfaction, each with metrics such as percentage of "
+                        "time to complete tasks and rating scales for satisfaction."
+                    ),
+                    "slides": [27],
+                },
+            ),
+            "f60",
+            [26, 27],
+        ),
+        (
+            (
+                {
+                    "id": "f57",
+                    "statement": (
+                        "Learnability is determined by the percentage of time to "
+                        "learn functions."
+                    ),
+                    "slides": [25],
+                },
+                {
+                    "id": "f61",
+                    "statement": (
+                        "Learnability is assessed using metrics such as the "
+                        "percentage of time to learn functions and rating scales "
+                        "for ease of learning."
+                    ),
+                    "slides": [26],
+                },
+                {
+                    "id": "f64",
+                    "statement": (
+                        "Learnability is measured by the percentage of time to "
+                        "learn functions and the ease of learning for users."
+                    ),
+                    "slides": [27],
+                },
+            ),
+            "f61",
+            [25, 26, 27],
+        ),
+        (
+            (
+                {
+                    "id": "f58",
+                    "statement": (
+                        "Error tolerance is measured by the percentage of time "
+                        "spent on correcting errors."
+                    ),
+                    "slides": [25],
+                },
+                {
+                    "id": "f62",
+                    "statement": (
+                        "Error tolerance in HCI involves measuring the percentage "
+                        "of time spent on correcting errors and evaluating error "
+                        "handling effectiveness through rating scales."
+                    ),
+                    "slides": [26],
+                },
+                {
+                    "id": "f65",
+                    "statement": (
+                        "Error tolerance involves metrics like the percentage of "
+                        "time spent on correcting errors and successful error "
+                        "handling."
+                    ),
+                    "slides": [27],
+                },
+            ),
+            "f62",
+            [25, 26, 27],
+        ),
+    ],
+)
+def test_deduplicate_lesson_facts_collapses_same_subject_paraphrase_families(
+    records,
+    canonical_id,
+    expected_slides,
+):
+    facts = deduplicate_lesson_fact_records(records)
+
+    assert len(facts) == 1
+    assert facts[0]["id"] == canonical_id
+    assert facts[0]["slides"] == expected_slides
+
+
+def test_deduplicate_lesson_facts_keeps_same_subject_different_claims():
+    records = (
+        {
+            "id": "f1",
+            "statement": "Photosynthesis occurs in chloroplasts within plant cells.",
+            "slides": [1],
+        },
+        {
+            "id": "f2",
+            "statement": (
+                "Photosynthesis converts light energy into stored chemical energy."
+            ),
+            "slides": [2],
+        },
+    )
+
+    facts = deduplicate_lesson_fact_records(records)
+
+    assert [fact["id"] for fact in facts] == ["f1", "f2"]
+
+
+def test_filter_lesson_facts_removes_generic_presentation_artifacts():
+    records = (
+        {
+            "id": "f1",
+            "statement": "Cell Structure",
+            "kind": "content",
+            "topic": "Cell Structure",
+        },
+        {
+            "id": "f2",
+            "statement": "The learner should be able to identify cell organelles.",
+            "kind": "knowledge_statement",
+            "topic": "Objectives",
+        },
+        {
+            "id": "f3",
+            "statement": "https://example.edu/reference/cell-structure",
+            "kind": "content",
+            "topic": "References",
+        },
+        {
+            "id": "f4",
+            "statement": "that regulates entry into the cell",
+            "kind": "content",
+            "topic": "Cell Membrane",
+        },
+        {
+            "id": "f5",
+            "statement": "The cell membrane regulates entry into the cell.",
+            "kind": "knowledge_statement",
+            "topic": "Cell Membrane",
+        },
+    )
+
+    facts = filter_lesson_fact_records(records)
+
+    assert [fact["id"] for fact in facts] == ["f5"]
+
+
+def test_filter_lesson_facts_keeps_a_sparse_short_substantive_claim():
+    records = (
+        {
+            "id": "f1",
+            "statement": "Ice melts.",
+            "kind": "content",
+            "topic": "Phase Changes",
+        },
+        {
+            "id": "f2",
+            "statement": "IT systems improve communication.",
+            "kind": "content",
+            "topic": "Information Technology",
+        },
+    )
+
+    assert filter_lesson_fact_records(records) == records
 
 
 def make_module(*, content=("A processor executes instructions.",)):
@@ -228,6 +437,35 @@ def test_extract_lesson_facts_uses_content_when_slide_has_no_normalized_facts():
     assert extract_lesson_facts(render_structured_module(without_facts))[0][
         "statement"
     ] == "A processor executes instructions."
+
+
+def test_extract_lesson_facts_falls_back_when_normalized_items_are_only_noise():
+    module = StructuredModule(
+        course_code="BIO101",
+        module_number="01",
+        module_title="Cells",
+        source_file="cells.pdf",
+        slides=(
+            StructuredSlide(
+                number=1,
+                extraction_method="text",
+                title="Cell Membrane",
+                content=("The cell membrane regulates entry into the cell.",),
+                visual_text=("Not Specified",),
+                definitions=(),
+                knowledge_statements=(
+                    "The learner should be able to identify cell structures.",
+                ),
+                brief_explanation="The slide presents the cell membrane.",
+            ),
+        ),
+    )
+
+    facts = extract_lesson_facts(render_structured_module(module))
+
+    assert [fact["statement"] for fact in facts] == [
+        "The cell membrane regulates entry into the cell."
+    ]
 
 
 def test_module_requires_at_least_one_slide():

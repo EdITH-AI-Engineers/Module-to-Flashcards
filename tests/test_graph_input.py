@@ -151,6 +151,45 @@ def test_extract_facts_drops_only_slide_self_referential_statements():
     ]
 
 
+def test_extract_facts_filters_noise_from_existing_graph_without_a_minimum():
+    value = graph()
+    value["facts"] = [
+        {
+            "id": "f1",
+            "statement": "Energy Transformations",
+            "slides": [1],
+            "kind": "content",
+            "topic": "Energy Transformations",
+        },
+        {
+            "id": "f2",
+            "statement": "The student should be able to understand energy transfer.",
+            "slides": [2],
+            "kind": "knowledge_statement",
+            "topic": "Objectives",
+        },
+        {
+            "id": "f3",
+            "statement": "https://example.edu/energy-reference",
+            "slides": [3],
+            "kind": "content",
+            "topic": "References",
+        },
+        {
+            "id": "f4",
+            "statement": "Energy cannot be created or destroyed.",
+            "slides": [4],
+            "kind": "knowledge_statement",
+            "topic": "Conservation of Energy",
+        },
+    ]
+
+    facts = extract_graph_facts(value)
+
+    assert [fact.fact_id for fact in facts] == ["f4"]
+    assert facts[0].statement == "Energy cannot be created or destroyed."
+
+
 def test_extract_facts_rejects_graph_without_usable_relationships():
     value = graph()
     value["edges"] = [{"id": "e1", "subject": "binary", "relation": "uses"}]

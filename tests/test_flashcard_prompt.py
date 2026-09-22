@@ -137,6 +137,12 @@ def test_plan_prompt_serializes_relationships_without_provenance():
     assert "choose exactly 5 distinct approaches" in prompt.casefold()
     assert "array of exactly 5 distinct allowed approaches" in prompt.casefold()
     assert "labels may repeat" not in prompt.casefold()
+    assert "each fact_id may appear at most once" in prompt.casefold()
+    assert (
+        "paraphrases, partial versions, or cumulative versions"
+        in " ".join(prompt.split())
+    )
+    assert "never reuse a fact_id merely to reach 20 concepts" in prompt.casefold()
 
 
 def test_plan_prompt_includes_prior_concepts_when_supplied():
@@ -210,6 +216,31 @@ def test_retry_prompt_can_omit_large_rejected_candidate():
     assert "ORIGINAL" in prompt
     assert "unknown fact id" in prompt
     assert "rejected_candidate" not in prompt
+
+
+def test_concept_plan_retry_preserves_first_fact_owner_and_replaces_conflict():
+    original = build_concept_plan_prompt(
+        ModuleIdentity("CPE0021", "1"),
+        tuple(
+            GraphFact(f"e{index}", f"fact {index}")
+            for index in range(1, 21)
+        ),
+    )
+
+    prompt = build_retry_prompt(
+        original,
+        None,
+        [
+            "concept 7 reuses fact id 'e2' already assigned to concept 2; "
+            "each fact id may support only one concept"
+        ],
+    )
+
+    assert "Keep the earliest concept" in prompt
+    assert "each fact_id may\n  appear only once" in prompt
+    assert "Renaming, reordering" in prompt
+    assert "return the insufficient_content object" in prompt
+    assert "full cards JSON" not in prompt
 
 
 def test_cluster_retry_is_compact_and_does_not_nest_original_prompt():

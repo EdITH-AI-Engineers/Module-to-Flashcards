@@ -23,6 +23,20 @@ def test_near_duplicate_threshold_requires_both_metrics():
     )
 
 
+def test_near_duplicate_does_not_confuse_a_substantive_term_substitution():
+    assert not are_near_duplicates(
+        "Which method uses a deterministic algorithm to process input data for binary encoding?",
+        "Which method uses a deterministic algorithm to process input data for octal encoding?",
+    )
+
+
+def test_near_duplicate_ignores_question_word_variation_for_the_same_content():
+    assert are_near_duplicates(
+        "Which number system uses base 2 to represent digital values?",
+        "What number system uses base 2 to represent digital values?",
+    )
+
+
 def test_module_accepts_twenty_valid_clusters():
     assert validate_module(valid_clusters()) == ()
 

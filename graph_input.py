@@ -6,7 +6,10 @@ import re
 from typing import Any, Mapping
 
 from flashcard_types import GraphFact, ModuleIdentity
-from structured_module import deduplicate_lesson_fact_records
+from structured_module import (
+    deduplicate_lesson_fact_records,
+    filter_lesson_fact_records,
+)
 
 
 class GraphInputError(ValueError):
@@ -82,7 +85,8 @@ def extract_graph_facts(graph: Mapping[str, Any]) -> tuple[GraphFact, ...]:
     used_lesson_ids: set[str] = set()
     used_statements: set[str] = set()
     if isinstance(lesson_values, list):
-        deduplicated_values = deduplicate_lesson_fact_records(lesson_values)
+        usable_values = filter_lesson_fact_records(lesson_values)
+        deduplicated_values = deduplicate_lesson_fact_records(usable_values)
         for index, item in enumerate(deduplicated_values, start=1):
             if not isinstance(item, Mapping):
                 continue

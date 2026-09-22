@@ -296,6 +296,18 @@ def build_concept_plan_prompt(
 
     For each concept, copy one or more fact_ids exactly from the input. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements.{context_guidance} Choose exactly {CARDS_PER_CLUSTER} distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
 
+    EVIDENCE OWNERSHIP
+    - Each fact_id may appear at most once in the entire concepts array. Once
+      an ID is used, do not repeat it in that concept or any later concept,
+      even as background or supporting context.
+    - A concept may own multiple fact_ids when they support the same learning
+      point. If multiple IDs are paraphrases, partial versions, or cumulative
+      versions of that point, keep them together under one concept; never use
+      them to manufacture several concepts.
+    - Every concept must be supported by its own exclusive fact_ids. A new
+      name or different assessment approaches do not make reused evidence a
+      distinct concept. You do not need to use every available fact.
+
     Return one JSON object whose top-level key is "concepts" and whose value is an array. The array must contain exactly {CONCEPTS_PER_MODULE} concept objects before its closing bracket. Every concept object has these keys: name (string), fact_ids (non-empty string array), and assessment_approaches (array of exactly {CARDS_PER_CLUSTER} distinct allowed approaches). Do not treat a one-object shape illustration as a complete answer.
 
     Fill all {CONCEPTS_PER_MODULE} positions in this checklist before closing the concepts array:
@@ -303,7 +315,7 @@ def build_concept_plan_prompt(
     Do not stop after 11 or 12 objects. Do not add a 21st object. Each position must have a unique concept name.
     Use the JSON key "fact_ids" literally, with a normal underscore and no backslash. Every concept must copy at least one exact fact_id from graph_facts.
 
-    Only if fewer than {CONCEPTS_PER_MODULE} distinct concepts are genuinely supported, return an object with the single key insufficient_content. Its value must specifically state how many concepts are supportable and why, using at least five words. Never copy generic placeholder wording into that field.
+    Only if fewer than {CONCEPTS_PER_MODULE} distinct concepts with exclusive evidence are genuinely supported, return an object with the single key insufficient_content. Its value must specifically state how many concepts are supportable and why, using at least five words. Never copy generic placeholder wording into that field. Never reuse a fact_id merely to reach {CONCEPTS_PER_MODULE} concepts.
     """
         + overlap_guidance
         + """
@@ -504,13 +516,28 @@ substitute a different but equally ungrounded invented term."""
             + "\n... (truncated; regenerate the full JSON from the ORIGINAL REQUEST, not from this partial excerpt)"
         )
 
-    return f"""Correct the rejected JSON below.
-
-VALIDATION ERRORS:
-{error_bullets}
-{grounding_block}
-
-MANDATORY CORRECTIONS:
+    is_concept_plan_retry = (
+        'top-level key is "concepts"' in original_prompt
+        or any("reuses fact id" in error for error in error_list)
+    )
+    if is_concept_plan_retry:
+        mandatory_corrections = f"""MANDATORY CORRECTIONS:
+- Return one complete replacement JSON object in the exact concept-plan shape
+  required by the ORIGINAL REQUEST.
+- Keep the earliest concept named by each reuse error as that fact_id's owner.
+  Remove the reused fact_id from every later concept named by the error.
+- Every concept must have its own non-empty fact_ids array, and each fact_id may
+  appear only once in the full array.
+- Replace an unsupported later concept with a genuinely different concept
+  grounded only in fact_ids that no other concept uses. Renaming, reordering,
+  or changing assessment approaches does not resolve reused evidence.
+- Keep paraphrased, partial, or cumulative versions of one learning point under
+  a single concept instead of distributing them across concepts.
+- If exclusive evidence cannot support {CONCEPTS_PER_MODULE} distinct concepts,
+  return the insufficient_content object permitted by the ORIGINAL REQUEST.
+- Preserve concepts that do not have validation errors."""
+    else:
+        mandatory_corrections = """MANDATORY CORRECTIONS:
 - When a validation error names a card number, correct that exact card.
 - Set each assessment_approach to one of the planned values and make the label
   match the question's actual reasoning. Approaches may repeat.
@@ -533,9 +560,6 @@ MANDATORY CORRECTIONS:
   supplied grounded vocabulary while keeping the option plausible and
   incorrect. The vocabulary is not evidence for the question, correct answer,
   explanation, or hint. Do not introduce an outside example or technology.
-- If several errors say a fact or concept duplicates one already assigned
-  elsewhere, do not rename or reorder it -- pick a different concept
-  grounded in fact_ids that no other concept has used.
 - If an error says a question "reveals the identification answer", the
   question text repeats correct_option's exact wording. Rewrite only the
   question so it describes the concept by its function, purpose, defining
@@ -544,7 +568,15 @@ MANDATORY CORRECTIONS:
   Keep correct_option unchanged.
   Example: correct_option "Human-Computer Interaction" ->
   Invalid: "What is the term for the field that focuses on ... human-computer interaction?"
-  Valid: "What term describes the field concerned with designing computer systems people can use effectively, safely, and enjoyably?"
+  Valid: "What term describes the field concerned with designing computer systems people can use effectively, safely, and enjoyably?"""  # noqa: E501
+
+    return f"""Correct the rejected JSON below.
+
+VALIDATION ERRORS:
+{error_bullets}
+{grounding_block}
+
+{mandatory_corrections}
 
 ORIGINAL REQUEST:
 {original_prompt}
@@ -626,6 +658,10 @@ def build_cluster_retry_prompt(
       question is recall or classification, not scenario analysis. You may
       change the approach label only when it then accurately describes the
       question.
+    - If a card duplicates an earlier cluster, replace the flagged question
+      with one that assesses a genuinely different learning point supported by
+      concept_facts. Changing filler words, swapping the question stem, or
+      merely reversing its polarity does not resolve the duplicate.
     - Remove provenance wording and keep the answer out of identification stems.
     - Include all eleven required fields and preserve expalanation spelling.
     - Return JSON only with the shape {{"cards":[...]}}.{grounding_block}

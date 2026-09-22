@@ -20,8 +20,93 @@ _SECTION_TAG = re.compile(r"^\[(/?)([A-Z_]+)(?:\s+\d+)?\]$")
 _SLIDE_OPEN_TAG = re.compile(r"^\[SLIDE\s+(\d+)\]$", flags=re.IGNORECASE)
 _PRESENTATION_NOISE = re.compile(
     r"^(?:(?:this|the|the first|the current|first)\s+(?:slide|page)\b|"
-    r"the module title\b|(?:this|the)\s+module\s+"
-    r"(?:introduces|covers|presents|provides an overview of)\b)",
+    r"the module title\b|(?:this|the)\s+(?:module|lesson|chapter|section)\s+"
+    r"(?:introduces|covers|discusses|presents|contains|provides an overview of)\b|"
+    r"(?:this|the)\s+(?:content|material|presentation)\s+"
+    r"(?:includes|contains|covers|discusses|introduces|presents)\b)",
+    flags=re.IGNORECASE,
+)
+_FACT_LIST_MARKER = re.compile(r"^(?:[-\u2022\u25aa\u25e6\u2023]|\d+[.)])\s*")
+_FACT_URL = re.compile(r"(?:https?://|www\.|\bdoi\s*:)", flags=re.IGNORECASE)
+_FACT_SECTION_PATH = re.compile(
+    r"^(?:module|unit|chapter|lesson|section)\s*[a-z0-9.-]*\s*[:>\u203a\u2192-]",
+    flags=re.IGNORECASE,
+)
+_FACT_LEARNING_OBJECTIVE = re.compile(
+    r"^(?:(?:learning\s+)?objectives?\b|"
+    r"(?:the\s+)?(?:learner|student|reader)s?\s+"
+    r"(?:will|should|can|must)\s+(?:be\s+able\s+to\s+)?)",
+    flags=re.IGNORECASE,
+)
+_FACT_PRESENCE_ONLY = re.compile(
+    r"\b(?:is|are|was|were)\s+(?:a\s+|the\s+)?(?:key\s+)?"
+    r"(?:aspect|concept|item|part|section|topic)s?\s+"
+    r"(?:covered|discussed|included|introduced|mentioned|presented)\s+in\b",
+    flags=re.IGNORECASE,
+)
+_FACT_PROVENANCE_SUFFIX = re.compile(
+    r"\b(?:covered|discussed|included|introduced|mentioned|presented)\s+in\s+"
+    r"(?:this|the)\s+(?:module|lesson|chapter|section|slide|presentation)\b",
+    flags=re.IGNORECASE,
+)
+_FACT_QUOTE_META = re.compile(
+    r"^(?:the\s+)?(?:quote|quotation)\s+(?:by|from)\b.*\b"
+    r"(?:mentions|states|says|describes)\b",
+    flags=re.IGNORECASE,
+)
+_FACT_FRAGMENT_START_WORDS = {
+    "and",
+    "or",
+    "but",
+    "it",
+    "this",
+    "these",
+    "those",
+    "that",
+    "which",
+    "who",
+    "whose",
+    "where",
+    "when",
+    "while",
+    "because",
+    "is",
+    "are",
+    "was",
+    "were",
+    "has",
+    "have",
+    "had",
+    "can",
+    "could",
+    "may",
+    "might",
+    "must",
+    "should",
+    "would",
+}
+_FACT_FRAGMENT_END = re.compile(
+    r"(?:[,;:/-]|\b(?:a|an|and|as|at|by|for|from|in|of|on|or|the|to|with))$",
+    flags=re.IGNORECASE,
+)
+_FACT_RELATION_VERB = re.compile(
+    r"\b(?:is|are|was|were|becomes?|refers?|means?|defines?|describes?|"
+    r"includes?|contains?|comprises?|consists?|involves?|uses?|stores?|"
+    r"produces?|converts?|causes?|affects?|determines?|requires?|enables?|"
+    r"supports?|provides?|allows?|prevents?|reduces?|increases?|improves?|"
+    r"measures?|evaluates?|assesses?|represents?|follows?|precedes?|creates?|"
+    r"controls?|performs?|occurs?|exists?|depends?|leads?|results?)\b",
+    flags=re.IGNORECASE,
+)
+_FACT_PREDICATE_START = re.compile(
+    r"\b(?:is|are|was|were|has|have|had|can|could|may|might|must|should|would|"
+    r"refers?|means?|defines?|describes?|outlines?|addresses?|includes?|contains?|"
+    r"comprises?|consists?|involves?|uses?|stores?|produces?|converts?|causes?|"
+    r"affects?|determines?|requires?|enables?|supports?|provides?|allows?|prevents?|"
+    r"reduces?|increases?|improves?|measures?|measured|measuring|evaluates?|"
+    r"evaluated|evaluating|assesses?|assessed|assessing|categorizes?|categorized|"
+    r"represents?|follows?|precedes?|creates?|controls?|performs?|occurs?|exists?|"
+    r"depends?|leads?|results?)\b",
     flags=re.IGNORECASE,
 )
 
@@ -62,6 +147,93 @@ def _normalized_fact_text(value: object) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", text))
 
 
+def _clean_fact_text(value: object) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if text.startswith("- "):
+        text = text[2:].strip()
+    return _FACT_LIST_MARKER.sub("", text).strip()
+
+
+def _is_self_contained_content_fact(statement: str) -> bool:
+    """Return whether fallback slide text states a usable claim on its own.
+
+    Normalized definitions and knowledge statements have already been rewritten
+    as facts. Raw CONTENT is only a fallback, so incomplete OCR lines, list
+    labels, and headings need a stricter check before becoming fact IDs.
+    """
+
+    first_word_match = re.match(r"[A-Za-z]+", statement)
+    first_word = first_word_match.group(0) if first_word_match else ""
+    starts_with_fragment_word = (
+        first_word.casefold() in _FACT_FRAGMENT_START_WORDS
+        and not first_word.isupper()
+    )
+    if starts_with_fragment_word or _FACT_FRAGMENT_END.search(statement):
+        return False
+    if statement[0].islower():
+        return False
+    words = re.findall(r"[A-Za-z0-9]+(?:['\u2019-][A-Za-z0-9]+)*", statement)
+    if len(words) < 2:
+        return False
+    if len(words) == 2:
+        return statement.endswith((".", "!")) and bool(
+            re.search(r"[a-z]", words[1])
+        )
+    if statement.endswith((".", "!")) or ": " in statement:
+        return True
+    if _FACT_RELATION_VERB.search(statement):
+        return True
+    # A longer line can be a complete unpunctuated OCR sentence. Requiring
+    # length and some lower-case prose prevents title-like text from passing.
+    lower_case_words = sum(bool(re.search(r"[a-z]", word)) for word in words)
+    return len(words) >= 8 and lower_case_words >= len(words) // 2
+
+
+def filter_lesson_fact_records(
+    records: Sequence[Mapping[str, object]],
+) -> tuple[dict[str, object], ...]:
+    """Remove non-facts without imposing a module-specific vocabulary.
+
+    The rules identify presentation form rather than subject matter, so they
+    apply equally to technical, humanities, and other lesson modules. No
+    minimum fact count is imposed: a sparse module retains its few substantive
+    claims and can still follow the normal insufficient-content path.
+    """
+
+    usable: list[dict[str, object]] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            continue
+        statement = _clean_fact_text(record.get("statement", ""))
+        if (
+            not _meaningful(statement)
+            or len(statement) < 5
+            or len(statement.split()) < 2
+        ):
+            continue
+        topic = _clean_fact_text(record.get("topic", ""))
+        if topic and _normalized_fact_text(statement) == _normalized_fact_text(topic):
+            continue
+        if (
+            _FACT_URL.search(statement)
+            or statement.endswith("?")
+            or _FACT_SECTION_PATH.match(statement)
+            or _FACT_LEARNING_OBJECTIVE.match(statement)
+            or _PRESENTATION_NOISE.match(statement)
+            or _FACT_PRESENCE_ONLY.search(statement)
+            or _FACT_PROVENANCE_SUFFIX.search(statement)
+            or _FACT_QUOTE_META.match(statement)
+        ):
+            continue
+        kind = str(record.get("kind", "")).strip().casefold()
+        if kind == "content" and not _is_self_contained_content_fact(statement):
+            continue
+        candidate = dict(record)
+        candidate["statement"] = statement
+        usable.append(candidate)
+    return tuple(usable)
+
+
 def _fact_content_tokens(value: object) -> tuple[str, ...]:
     return tuple(
         token
@@ -70,11 +242,43 @@ def _fact_content_tokens(value: object) -> tuple[str, ...]:
     )
 
 
+def _fact_subject_tokens(value: object) -> frozenset[str]:
+    normalized = _normalized_fact_text(value)
+    match = _FACT_PREDICATE_START.search(normalized)
+    if match is None:
+        return frozenset()
+    return frozenset(
+        token
+        for token in normalized[: match.start()].split()
+        if token not in _FACT_BRIDGE_WORDS
+    )
+
+
+def _same_fact_subject(left: object, right: object) -> bool:
+    left_subject = _fact_subject_tokens(left)
+    right_subject = _fact_subject_tokens(right)
+    if not left_subject or not right_subject:
+        return False
+    smaller, larger = sorted(
+        (left_subject, right_subject),
+        key=len,
+    )
+    return smaller <= larger and len(larger) - len(smaller) <= 1
+
+
 def _looks_like_enumeration(value: object) -> bool:
     text = str(value or "")
     separators = len(re.findall(r"[,;]", text))
     numbered_items = len(re.findall(r"(?:^|\s)\d+[.)]\s", text))
     return separators >= 2 or numbered_items >= 3
+
+
+def _fact_information_score(record: Mapping[str, object]) -> tuple[int, int]:
+    statement = record["statement"]
+    return (
+        int(_looks_like_enumeration(statement)),
+        len(_fact_content_tokens(statement)),
+    )
 
 
 def _facts_are_duplicates(left: object, right: object) -> bool:
@@ -107,8 +311,21 @@ def _facts_are_duplicates(left: object, right: object) -> bool:
         _looks_like_enumeration(left)
         and _looks_like_enumeration(right)
         and min(len(left_tokens), len(right_tokens)) >= 10
+        and overlap >= 0.80
+        and jaccard >= 0.62
+        and sequence >= 0.62
     ):
-        return overlap >= 0.80 and jaccard >= 0.62 and sequence >= 0.62
+        return True
+
+    subject_tokens = _fact_subject_tokens(left) | _fact_subject_tokens(right)
+    shared_claim_tokens = shared - subject_tokens
+    if (
+        _same_fact_subject(left, right)
+        and min(len(left_tokens), len(right_tokens)) >= 5
+        and overlap >= 0.65
+        and len(shared_claim_tokens) >= 3
+    ):
+        return True
 
     return (
         min(len(left_tokens), len(right_tokens)) >= 8
@@ -125,8 +342,8 @@ def deduplicate_lesson_fact_records(
 ) -> tuple[dict[str, object], ...]:
     """Collapse repeated facts while retaining the best text and all slides.
 
-    The longest cumulative enumeration wins. For ordinary paraphrases, the
-    first statement remains canonical so stable source order is preserved.
+    The richest statement wins, so partial or cumulative renderings do not
+    survive as separate fact IDs. Ties preserve stable source order.
     """
 
     merged: list[dict[str, object]] = []
@@ -169,12 +386,10 @@ def deduplicate_lesson_fact_records(
             assert isinstance(existing_slides, list)
             all_slides.update(existing_slides)
 
-        chosen = duplicate_group[0]
-        if _looks_like_enumeration(statement):
-            chosen = max(
-                (*duplicate_group, candidate),
-                key=lambda item: len(_fact_content_tokens(item["statement"])),
-            )
+        chosen = max(
+            (*duplicate_group, candidate),
+            key=_fact_information_score,
+        )
         chosen["slides"] = sorted(all_slides)
         merged[primary] = chosen
         for index in reversed(matches[1:]):
@@ -354,12 +569,10 @@ def parse_module_metadata(text: str) -> dict[str, str]:
 
 
 def _lesson_fact_text(value: str) -> str | None:
-    text = re.sub(r"\s+", " ", value).strip()
-    if text.startswith("- "):
-        text = text[2:].strip()
+    text = _clean_fact_text(value)
     if not _meaningful(text) or _PRESENTATION_NOISE.match(text):
         return None
-    if len(text) < 12 or len(text.split()) < 3:
+    if len(text) < 5 or len(text.split()) < 2:
         return None
     return text
 
@@ -422,14 +635,15 @@ def extract_lesson_facts(text: str) -> tuple[dict[str, object], ...]:
         cleaned = _lesson_fact_text(statement)
         if cleaned is None:
             return
-        facts.append(
-            {
-                "statement": cleaned,
-                "slides": [slide_number],
-                "kind": kind,
-                "topic": topic,
-            }
-        )
+        candidate = {
+            "statement": cleaned,
+            "slides": [slide_number],
+            "kind": kind,
+            "topic": topic,
+        }
+        usable = filter_lesson_fact_records((candidate,))
+        if usable:
+            facts.append(usable[0])
 
     for slide in slides:
         slide_number = int(slide["number"])
@@ -485,7 +699,8 @@ def extract_lesson_facts(text: str) -> tuple[dict[str, object], ...]:
                     topic=topic,
                 )
 
-    return deduplicate_lesson_fact_records(facts, reassign_ids=True)
+    usable_facts = filter_lesson_fact_records(facts)
+    return deduplicate_lesson_fact_records(usable_facts, reassign_ids=True)
 
 
 def graph_ready_text(text: str) -> str:

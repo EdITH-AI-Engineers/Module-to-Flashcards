@@ -60,25 +60,12 @@ PROVENANCE_PATTERNS = (
     r"\bchunk\b",
     r"\bcitation\b",
     r"\burl\b",
-    r"\bconcept facts?\b",
-    r"\bdistractor pool\b",
-    r"\ballowed[_\s]wrong[_\s]option[_\s]terms\b",
     r"\b(?:provided|supplied|given)\s+"
     r"(?:facts?|material|information|text|source(?:\s+material)?)\b",
     r"\b(?:in|from)\s+the\s+(?:facts?|material|text|information|slides?)\b",
 )
 DIRECT_STEM = re.compile(r"^(what(?:\s+term)?|which|who|where|when|why|how)\b", re.I)
 LEADING_WRAPPER = re.compile(r"^(according to|based on)\b", re.I)
-SCENARIO_ACTOR = re.compile(
-    r"\b(?:a|an|the)\s+(?:user|learner|student|designer|developer|team|"
-    r"organization|operator|employee|customer|participant|person|group|company|"
-    r"system|interface|application|website|device|product|workflow|task)\b",
-    re.I,
-)
-SCENARIO_LEAD = re.compile(
-    r"^(?:if|when|whenever|after|before|during|suppose|imagine|given that)\b",
-    re.I,
-)
 CARD_FIELDS = {
     "type",
     "question",
@@ -188,23 +175,6 @@ def _stem(token: str) -> str:
     the validator from rejecting options that a human would clearly
     recognize as reusing the same word, not to do real linguistic
     stemming."""
-    derivational_roots = {
-        "safe": "safe",
-        "safety": "safe",
-        "comfort": "comfort",
-        "comfortable": "comfort",
-        "enjoy": "enjoy",
-        "enjoyable": "enjoy",
-        "enjoyment": "enjoy",
-        "efficient": "efficient",
-        "efficiency": "efficient",
-        "effective": "effective",
-        "effectiveness": "effective",
-        "satisfied": "satisfy",
-        "satisfaction": "satisfy",
-    }
-    if token in derivational_roots:
-        return derivational_roots[token]
     if token.isdigit():
         return token
     if len(token) > 4 and token.endswith("ies"):
@@ -391,18 +361,6 @@ def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
             raise ValidationError(
                 f"card {position} is missing fields: {', '.join(missing)}"
             )
-        if any(
-            isinstance(field_value, str)
-            and re.search(
-                r"\b(?:distractor pool|allowed[_\s]wrong[_\s]option[_\s]terms)\b",
-                field_value,
-                flags=re.I,
-            )
-            for field_value in item.values()
-        ):
-            raise ValidationError(
-                f"card {position} treats internal distractor data as answer authority"
-            )
 
         if "difficulty" in metadata_missing:
             warnings.warn(
@@ -483,8 +441,7 @@ def _contains_provenance(value: str) -> bool:
 
 _PROVENANCE_SOURCE = (
     r"(?:(?:provided|supplied|given)\s+)?"
-    r"(?:concept\s+facts?|distractor\s+pool|facts?|material|"
-    r"module(?:\s+content)?|document|lesson|slides?|"
+    r"(?:facts?|material|module(?:\s+content)?|document|lesson|slides?|"
     r"source(?:\s+material)?|knowledge\s+graph|file|text|information)"
 )
 _EXPLICIT_STATED_AS_RE = re.compile(
@@ -607,13 +564,27 @@ def validate_cluster(
             "cluster must contain at least one multiple-choice, identification, and true-false card"
         )
 
-    expected_approaches = set(concept.assessment_approaches)
-    for position, card in enumerate(cards, start=1):
-        if card.assessment_approach not in expected_approaches:
-            errors.append(
-                f"card {position} assessment_approach must be one of the planned "
-                f"approaches: {', '.join(sorted(expected_approaches))}"
-            )
+    approaches = tuple(card.assessment_approach for card in cards)
+    if (
+        len(approaches) != CARDS_PER_CLUSTER
+        or len(set(approaches)) != CARDS_PER_CLUSTER
+    ):
+        errors.append(
+            f"cluster must use {CARDS_PER_CLUSTER} distinct assessment approaches"
+        )
+    expected_approaches = tuple(concept.assessment_approaches)
+    if approaches != expected_approaches:
+        errors.append(
+            "cluster approaches must match the planned assessment approaches in order"
+        )
+        for position, (actual, expected) in enumerate(
+            zip(approaches, expected_approaches), start=1
+        ):
+            if actual != expected:
+                errors.append(
+                    f"card {position} assessment_approach must be {expected!r}, "
+                    f"received {actual!r}"
+                )
 
     if source_facts:
         grounded_terms = {
@@ -655,17 +626,6 @@ def validate_cluster(
             or not card.assessment_approach.strip()
         ):
             errors.append(f"{prefix} assessment approach must not be empty")
-        elif (
-            card.assessment_approach == "scenario analysis"
-            and not (
-                SCENARIO_ACTOR.search(card.question)
-                or SCENARIO_LEAD.search(card.question.strip())
-            )
-        ):
-            errors.append(
-                f"{prefix} scenario analysis must present a concrete situation "
-                "before asking for interpretation"
-            )
         if any("\n" in value or "\r" in value for value in _text_fields(card)):
             errors.append(f"{prefix} fields must not contain line breaks")
         if LEADING_WRAPPER.match(card.question.strip()) or any(
@@ -807,8 +767,6 @@ def are_near_duplicates(left: str, right: str) -> bool:
 def validate_module(
     clusters: Sequence[FlashcardCluster],
     source_facts: Sequence[GraphFact] = (),
-    *,
-    check_question_duplicates: bool = True,
 ) -> tuple[str, ...]:
     errors: list[str] = []
     if len(clusters) != CLUSTERS_PER_MODULE:
@@ -847,15 +805,14 @@ def validate_module(
             for card_position, card in enumerate(cluster.cards, start=1)
         )
 
-    if check_question_duplicates:
-        for left_index, (left_cluster, left_card, left) in enumerate(indexed_cards):
-            for right_cluster, right_card, right in indexed_cards[left_index + 1 :]:
-                if are_near_duplicates(left.question, right.question):
-                    errors.append(
-                        "near-duplicate questions at "
-                        f"cluster {left_cluster} card {left_card} and "
-                        f"cluster {right_cluster} card {right_card}"
-                    )
+    for left_index, (left_cluster, left_card, left) in enumerate(indexed_cards):
+        for right_cluster, right_card, right in indexed_cards[left_index + 1 :]:
+            if are_near_duplicates(left.question, right.question):
+                errors.append(
+                    "near-duplicate questions at "
+                    f"cluster {left_cluster} card {left_card} and "
+                    f"cluster {right_cluster} card {right_card}"
+                )
 
     return tuple(errors)
 

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections import Counter
-from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from typing import Callable, Sequence, TypeVar
 from uuid import uuid4
@@ -17,22 +15,16 @@ from flashcard_contract import (
 from flashcard_prompt import (
     SYSTEM_PROMPT,
     build_cluster_prompt,
-    build_cluster_retry_prompt,
     build_concept_plan_prompt,
     build_duplicate_review_prompt,
     build_grounding_review_prompt,
     build_retry_prompt,
+    grounded_vocabulary,
     _card_subject,
     _dedup_fingerprint,
 )
-from flashcard_schema import (
-    build_card_cluster_schema,
-    build_concept_plan_schema,
-    build_review_schema,
-)
 from flashcard_types import (
     ChatBackend,
-    CompletionTruncatedError,
     ConceptPlan,
     FlashcardCluster,
     FlashcardDraft,
@@ -115,7 +107,6 @@ DISTRACTOR_FACT_LIMIT = 12
 _GROUNDING_ERROR_RE = re.compile(
     r"^card (\d+) (wrong_option_[123]) is not grounded in supplied module facts$"
 )
-_HINT_LEAK_ERROR_RE = re.compile(r"^card (\d+) hint reveals the correct answer$")
 
 
 def _phrase_from_fact(fact: GraphFact) -> str:
@@ -141,7 +132,8 @@ def _repair_grounding_errors(
     grounding_facts: Sequence[GraphFact],
     phrase_facts: Sequence[GraphFact] | None = None,
 ) -> tuple[FlashcardDraft, ...] | None:
-    """Deterministically patch mechanical grounding and hint-leak errors.
+    """Deterministically patch wrong_options the validator flagged as "not
+    grounded", without another model call.
 
     Local backends sometimes return byte-identical output across every
     retry attempt regardless of the corrective instructions in the retry
@@ -150,9 +142,10 @@ def _repair_grounding_errors(
     mechanical (the validator just checks for shared vocabulary with the
     supplied facts), so it can be fixed mechanically too: swap the flagged
     text for a short phrase lifted directly from an actual module fact,
-    which is grounded by construction. Hint leaks are safely replaced with
-    a neutral reasoning cue. Returns None if any error requires semantic
-    rewriting. Every repaired cluster is fully revalidated before acceptance.
+    which is grounded by construction. Returns None (declining to repair)
+    if any error is not a grounding error, so mixed failures still go
+    through the normal LLM retry path where a human-authored correction
+    is actually needed.
 
     phrase_facts, if given, restricts which facts a replacement phrase can
     be built from -- callers should pass the distractor pool here rather
@@ -161,35 +154,24 @@ def _repair_grounding_errors(
     answer rather than an actual distractor. Falls back to grounding_facts
     if phrase_facts is empty.
     """
-    grounding_matches = [
-        match
-        for error in errors
-        if (match := _GROUNDING_ERROR_RE.match(error)) is not None
-    ]
-    hint_matches = [
-        match
-        for error in errors
-        if (match := _HINT_LEAK_ERROR_RE.match(error)) is not None
-    ]
-    if not errors or len(grounding_matches) + len(hint_matches) != len(errors):
+    matches = [_GROUNDING_ERROR_RE.match(error) for error in errors]
+    if not matches or not all(matches):
         return None
 
-    candidate_phrases: list[str] = []
-    if grounding_matches:
-        source_facts = phrase_facts if phrase_facts else grounding_facts
-        candidate_phrases = [
-            phrase
-            for phrase in (_phrase_from_fact(fact) for fact in source_facts)
-            if phrase
-        ]
-        if not candidate_phrases:
-            return None
+    source_facts = phrase_facts if phrase_facts else grounding_facts
+    candidate_phrases = [
+        phrase
+        for phrase in (_phrase_from_fact(fact) for fact in source_facts)
+        if phrase
+    ]
+    if not candidate_phrases:
+        return None
 
     cards_list = list(cards)
     used_per_card: dict[int, set[str]] = {}
     cursor = 0
 
-    for match in grounding_matches:
+    for match in matches:
         card_index = int(match.group(1)) - 1
         field = match.group(2)
         if not (0 <= card_index < len(cards_list)):
@@ -219,15 +201,6 @@ def _repair_grounding_errors(
             return None
         used.add(replacement.casefold())
         cards_list[card_index] = replace(card, **{field: replacement})
-
-    for match in hint_matches:
-        card_index = int(match.group(1)) - 1
-        if not (0 <= card_index < len(cards_list)):
-            return None
-        cards_list[card_index] = replace(
-            cards_list[card_index],
-            hint="Consider the relationship or distinction needed to answer.",
-        )
 
     return tuple(cards_list)
 
@@ -294,71 +267,6 @@ class FlashcardPipeline:
         self.backend = backend
         self.config = config
         self._progress = progress or (lambda message: print(message, flush=True))
-        self._attempt_count = 0
-        self._rejected_attempt_count = 0
-        self._rejection_counts: Counter[str] = Counter()
-
-    @property
-    def rejection_stats(self) -> dict[str, object]:
-        """Return rejection metrics for the current or most recent run."""
-
-        rate = (
-            self._rejected_attempt_count / self._attempt_count
-            if self._attempt_count
-            else 0.0
-        )
-        return {
-            "attempts": self._attempt_count,
-            "rejected_attempts": self._rejected_attempt_count,
-            "rejection_rate": rate,
-            "categories": dict(sorted(self._rejection_counts.items())),
-        }
-
-    @staticmethod
-    def _rejection_category(error: str) -> str:
-        lowered = error.casefold()
-        if "truncated" in lowered or "length limit" in lowered:
-            return "truncation"
-        if "not grounded" in lowered:
-            return "grounding"
-        if "assessment approach" in lowered or "scenario analysis" in lowered:
-            return "assessment approach"
-        if "duplicate" in lowered:
-            return "duplication"
-        if any(
-            marker in lowered
-            for marker in (
-                "unknown fields",
-                "missing fields",
-                "json",
-                "expected exactly",
-                "must be an object",
-                "must be a json array",
-            )
-        ):
-            return "schema/structure"
-        return "other validation"
-
-    def _record_rejection(self, errors: Sequence[str]) -> None:
-        self._rejected_attempt_count += 1
-        categories = {self._rejection_category(error) for error in errors}
-        self._rejection_counts.update(categories)
-
-    def _report_rejection_stats(self) -> None:
-        stats = self.rejection_stats
-        attempts = int(stats["attempts"])
-        rejected = int(stats["rejected_attempts"])
-        rate = float(stats["rejection_rate"])
-        categories = stats["categories"]
-        category_text = ""
-        if isinstance(categories, dict) and categories:
-            category_text = "; categories: " + ", ".join(
-                f"{name}={count}" for name, count in categories.items()
-            )
-        self._progress(
-            f"Generation quality: {attempts} model responses, {rejected} rejected "
-            f"({rate:.1%} rejection rate){category_text}."
-        )
 
     def _complete_with_retries(
         self,
@@ -367,7 +275,6 @@ class FlashcardPipeline:
         *,
         max_tokens: int,
         label: str,
-        response_schema: Mapping[str, object] | None = None,
         include_rejected_candidate: bool = True,
         retry_prompt_builder: (
             Callable[[str, str | None, Sequence[str]], str] | None
@@ -377,38 +284,11 @@ class FlashcardPipeline:
         prompt = original_prompt
         last_errors: tuple[str, ...] = ()
         for attempt in range(1, self.config.max_retries + 1):
-            self._attempt_count += 1
-            try:
-                candidate = self.backend.complete(
-                    SYSTEM_PROMPT,
-                    prompt,
-                    max_tokens=max_tokens,
-                    schema=response_schema,
-                )
-            except CompletionTruncatedError as exc:
-                token_detail = ""
-                if exc.prompt_tokens is not None and exc.completion_tokens is not None:
-                    token_detail = (
-                        f" ({exc.prompt_tokens} prompt tokens, "
-                        f"{exc.completion_tokens} completion tokens)"
-                    )
-                last_errors = (
-                    "response was truncated before completing the JSON"
-                    + token_detail,
-                )
-                self._record_rejection(last_errors)
-                self._progress(
-                    f"[{label}] attempt {attempt}/{self.config.max_retries} "
-                    f"rejected: {last_errors[0]}"
-                )
-                prompt = build_retry(original_prompt, None, last_errors)
-                if attempt < self.config.max_retries:
-                    self._progress(
-                        f"{label}: output length limit reached. Retrying with a "
-                        f"compact regeneration request "
-                        f"(attempt {attempt + 1}/{self.config.max_retries})."
-                    )
-                continue
+            candidate = self.backend.complete(
+                SYSTEM_PROMPT,
+                prompt,
+                max_tokens=max_tokens,
+            )
             self._progress(
                 f"[{label}] attempt {attempt}/{self.config.max_retries} "
                 f"generated output:\n{candidate}"
@@ -419,7 +299,6 @@ class FlashcardPipeline:
                 raise GenerationError(f"more content is required: {exc}") from exc
             except ValidationError as exc:
                 last_errors = exc.errors
-                self._record_rejection(last_errors)
                 self._progress(
                     f"[{label}] attempt {attempt}/{self.config.max_retries} "
                     f"rejected: {' | '.join(last_errors)}"
@@ -457,20 +336,19 @@ class FlashcardPipeline:
                     errors.append(
                         f"cards {left_index + 1} and {right_index + 1} are mirrored polarity variants"
                     )
-            # Do not reject a whole cluster merely because an adjacent concept
-            # produced a similar question. Small local models commonly repeat
-            # shared terminology across related concepts, and retrying the
-            # cluster tends to reproduce the same wording until attempts are
-            # exhausted. Cross-cluster overlap is handled by the module-level
-            # review after all concepts have been generated. Keep the stricter
-            # checks above for duplicates inside this cluster and below for
-            # questions already used in an earlier module.
-            for prior_question in prior_questions:
-                if are_near_duplicates(left.question, prior_question):
-                    errors.append(
-                        f"card {left_index + 1} duplicates a question from a "
-                        "previously generated module in this course"
-                    )
+            # for cluster in existing:
+            #     for prior_index, prior in enumerate(cluster.cards, start=1):
+            #         if are_near_duplicates(left.question, prior.question):
+            #             errors.append(
+            #                 f"card {left_index + 1} duplicates card {prior_index} "
+            #                 f"from concept {cluster.concept.name!r}"
+            #             )
+            # for prior_question in prior_questions:
+            #     if are_near_duplicates(left.question, prior_question):
+            #         errors.append(
+            #             f"card {left_index + 1} duplicates a question from a "
+            #             "previously generated module in this course"
+            #         )
         return tuple(errors)
 
     def _generate_cards(
@@ -486,7 +364,6 @@ class FlashcardPipeline:
         prior_questions: Sequence[str] = (),
         concept_facts: Sequence[GraphFact] = (),
         distractor_facts: Sequence[GraphFact] = (),
-        module_facts: Sequence[GraphFact] = (),
     ) -> tuple[FlashcardDraft, ...]:
         prior_signals = tuple(
             _dedup_fingerprint(card) for cluster in existing for card in cluster.cards
@@ -498,20 +375,15 @@ class FlashcardPipeline:
             distractor_facts,
             prior_signals=prior_signals,
         )
+        vocabulary = grounded_vocabulary(concept, concept_facts, distractor_facts)
 
         def build_cluster_retry(
             original_prompt: str,
             candidate: str | None,
             errors: Sequence[str],
         ) -> str:
-            return build_cluster_retry_prompt(
-                identity,
-                concept,
-                concept_facts,
-                distractor_facts,
-                prior_signals,
-                candidate,
-                errors,
+            return build_retry_prompt(
+                original_prompt, candidate, errors, grounded_vocabulary=vocabulary
             )
 
         if review_feedback:
@@ -531,11 +403,7 @@ class FlashcardPipeline:
                     f"[{label}] card {card_position}/{len(cards)} generated: "
                     + json.dumps(asdict(card), ensure_ascii=False)
                 )
-            grounding_facts = (
-                tuple(module_facts)
-                if module_facts
-                else tuple(concept_facts) + tuple(distractor_facts)
-            )
+            grounding_facts = tuple(concept_facts) + tuple(distractor_facts)
             errors = list(validate_cluster(cards, concept, grounding_facts))
             errors.extend(self._duplicate_errors(cards, existing, prior_questions))
             if errors:
@@ -551,8 +419,8 @@ class FlashcardPipeline:
                     )
                     if not repair_errors:
                         self._progress(
-                            f"[{label}] auto-repaired {len(errors)} mechanical "
-                            "validation issue(s) locally, "
+                            f"[{label}] auto-repaired {len(errors)} ungrounded "
+                            "wrong_option(s) locally (fact-derived replacement text), "
                             "skipping LLM retry"
                         )
                         return repaired
@@ -564,10 +432,6 @@ class FlashcardPipeline:
             parse_and_validate,
             max_tokens=self.config.cluster_max_tokens,
             label=label,
-            response_schema=build_card_cluster_schema(
-                concept.assessment_approaches
-            ),
-            include_rejected_candidate=False,
             retry_prompt_builder=build_cluster_retry,
         )
 
@@ -583,7 +447,6 @@ class FlashcardPipeline:
             lambda raw: parse_review_issues(raw, known_clusters),
             max_tokens=self.config.review_max_tokens,
             label=label,
-            response_schema=build_review_schema(tuple(known_clusters)),
         )
 
     def _collect_review_issues(
@@ -636,9 +499,6 @@ class FlashcardPipeline:
         prior_concept_names: Sequence[str] = (),
         prior_questions: Sequence[str] = (),
     ) -> tuple[FlashcardCluster, ...]:
-        self._attempt_count = 0
-        self._rejected_attempt_count = 0
-        self._rejection_counts.clear()
         plan_facts = _balanced_plan_facts(facts)
         self._progress(
             f"Planning {CONCEPTS_PER_MODULE} concepts from "
@@ -654,9 +514,6 @@ class FlashcardPipeline:
             lambda raw: parse_concept_plan(raw, plan_facts),
             max_tokens=self.config.plan_max_tokens,
             label="concept plan",
-            response_schema=build_concept_plan_schema(
-                tuple(fact.fact_id for fact in plan_facts)
-            ),
             include_rejected_candidate=False,
         )
 
@@ -679,7 +536,6 @@ class FlashcardPipeline:
                 prior_questions=prior_questions,
                 concept_facts=concept_facts,
                 distractor_facts=distractor_facts,
-                module_facts=facts,
             )
             clusters.append(
                 FlashcardCluster(
@@ -689,14 +545,7 @@ class FlashcardPipeline:
                 )
             )
 
-        # Cross-cluster similarity belongs to the global review below. Running
-        # it here would abort after generation but before the reviewer could
-        # identify and regenerate the overlapping cluster.
-        initial_errors = validate_module(
-            clusters,
-            facts,
-            check_question_duplicates=False,
-        )
+        initial_errors = validate_module(clusters, facts)
         if initial_errors:
             raise GenerationError(
                 "initial module validation failed: " + "; ".join(initial_errors)
@@ -738,7 +587,6 @@ class FlashcardPipeline:
                         prior_questions=prior_questions,
                         concept_facts=review_concept_facts,
                         distractor_facts=review_distractor_facts,
-                        module_facts=facts,
                     )
                     clusters[index] = replace(old, cards=cards)
 
@@ -747,7 +595,6 @@ class FlashcardPipeline:
             raise GenerationError(
                 "final module validation failed: " + "; ".join(final_errors)
             )
-        self._report_rejection_stats()
         self._progress(
             f"{CARDS_PER_MODULE} flashcards generated "
             f"({CARDS_PER_BLOCK} + {CARDS_PER_BLOCK})."

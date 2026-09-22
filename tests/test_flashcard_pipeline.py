@@ -460,8 +460,10 @@ def test_final_duplicate_validation_paraphrases_instead_of_failing():
     duplicate_cluster = json.loads(cluster_json(2))
     duplicate_cluster["cards"][0]["question"] = first_cluster["cards"][0]["question"]
 
+    original_card = parse_cards(json.dumps(duplicate_cluster))[0]
     repaired_card = replace(
-        make_cards(2, revision=1)[0],
+        original_card,
+        question=make_cards(2, revision=1)[0].question,
         correct_option="A semantically equivalent reworded answer",
         wrong_option_1="Zephyr",
         wrong_option_2="Quasar",
@@ -559,6 +561,65 @@ def test_duplicate_card_retry_includes_rejected_card_and_exact_conflict():
     assert duplicate_question in retry_prompt
     assert clusters[1].cards[0] == parse_cards(single_card_json(accepted_card))[0]
     assert clusters[1].cards[1:] == parse_cards(cluster_json(2))[1:]
+
+
+def test_true_false_duplicate_repair_changes_only_question_and_retries_as_statement():
+    first_cluster = json.loads(cluster_json(1))
+    second_cluster = json.loads(cluster_json(2))
+    second_cluster["cards"][4]["question"] = first_cluster["cards"][4]["question"]
+    original_card = parse_cards(json.dumps(second_cluster))[4]
+    interrogative = replace(
+        original_card,
+        question="Does placing the relationship in reverse order always keep it intact?",
+    )
+    changed_metadata = replace(
+        original_card,
+        question=(
+            "The directional relationship always remains intact after its "
+            "elements are placed in reverse order."
+        ),
+        expalanation="This replacement explanation should not be allowed to change.",
+        hint="This replacement hint should remain locked during duplicate repair.",
+    )
+    accepted_card = replace(
+        original_card,
+        question=(
+            "The directional relationship always remains intact after its "
+            "elements are placed in reverse order."
+        ),
+    )
+    responses = [
+        plan_json(),
+        json.dumps(first_cluster),
+        json.dumps(second_cluster),
+        *(cluster_json(index) for index in range(3, 21)),
+        single_card_json(interrogative),
+        single_card_json(changed_metadata),
+        single_card_json(accepted_card),
+    ]
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+        progress=lambda message: None,
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    repaired = clusters[1].cards[4]
+    assert repaired.question == accepted_card.question
+    assert repaired.expalanation == original_card.expalanation
+    assert repaired.hint == original_card.hint
+    assert repaired.assessment_approach == original_card.assessment_approach
+    assert "TRUE-FALSE DECLARATIVE REQUIREMENT" in backend.calls[-2][1]
+    assert "replacement card must preserve expalanation" in backend.calls[-1][1]
+    card_schema = backend.schemas[-1]["properties"]["cards"]["items"]
+    assert card_schema["properties"]["assessment_approach"]["enum"] == [
+        original_card.assessment_approach
+    ]
+    assert card_schema["properties"]["expalanation"]["enum"] == [
+        original_card.expalanation
+    ]
 
 
 def test_cluster_grounding_uses_the_full_module_not_only_the_prompt_subset():

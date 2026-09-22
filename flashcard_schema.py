@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from flashcard_contract import CARDS_PER_CLUSTER, CONCEPTS_PER_MODULE
+from flashcard_types import FlashcardDraft
 from flashcard_validator import ALLOWED_APPROACHES, ALLOWED_TYPES
 
 
@@ -109,14 +110,35 @@ def build_card_cluster_schema(
 
 
 def build_single_card_schema(
-    assessment_approaches: Sequence[str],
+    original_card: FlashcardDraft,
 ) -> dict[str, object]:
-    """Require one complete card for a location-preserving repair."""
+    """Require one repair card while locking every non-answer field."""
 
-    schema = build_card_cluster_schema(assessment_approaches)
+    schema = build_card_cluster_schema((original_card.assessment_approach,))
     cards = schema["properties"]["cards"]
     cards["minItems"] = 1
     cards["maxItems"] = 1
+    properties = cards["items"]["properties"]
+    for field in (
+        "type",
+        "is_true",
+        "expalanation",
+        "hint",
+        "difficulty",
+        "assessment_approach",
+    ):
+        properties[field] = {"enum": [getattr(original_card, field)]}
+    if original_card.type == "true-false":
+        for field in (
+            "correct_option",
+            "wrong_option_1",
+            "wrong_option_2",
+            "wrong_option_3",
+        ):
+            properties[field] = {"enum": [getattr(original_card, field)]}
+    elif original_card.type == "identification":
+        for field in ("wrong_option_1", "wrong_option_2", "wrong_option_3"):
+            properties[field] = {"enum": [getattr(original_card, field)]}
     return schema
 
 

@@ -635,6 +635,26 @@ def build_cluster_retry_prompt(
     """
 
 
+def _duplicate_card_edit_rules(card: FlashcardDraft) -> str:
+    if card.type == "true-false":
+        return """TRUE-FALSE DECLARATIVE REQUIREMENT
+    - Paraphrase only question. It must be a declarative statement, not a
+      question. Do not begin with Does, Do, Is, Are, Can, Could, Should, Would,
+      Will, What, Which, Who, Where, When, Why, or How. End it with a period,
+      never a question mark.
+    - Copy type, is_true, all four option fields, expalanation, hint, difficulty,
+      and assessment_approach exactly."""
+    if card.type == "identification":
+        return """IDENTIFICATION EDIT LIMITS
+    - Paraphrase only question and correct_option.
+    - Copy type, all three empty wrong-option fields, is_true, expalanation,
+      hint, difficulty, and assessment_approach exactly."""
+    return """MULTIPLE-CHOICE EDIT LIMITS
+    - Paraphrase only question and the four answer-option fields.
+    - Copy type, is_true, expalanation, hint, difficulty, and
+      assessment_approach exactly."""
+
+
 def build_duplicate_card_repair_prompt(
     identity: ModuleIdentity,
     concept: ConceptPlan,
@@ -664,21 +684,40 @@ def build_duplicate_card_repair_prompt(
     - Rewrite only card_to_repair. Python will return it to json_location; do not
       generate, copy, or discuss any other card.
     - Preserve the card's learning point, factual meaning, correct-answer
-      meaning, incorrectness of wrong answers, type, is_true value, difficulty,
-      and assessment_approach.
+      meaning, and incorrectness of wrong answers.
     - Natural paraphrases may use words that do not appear verbatim in any
       corpus or fact text. Do not introduce a new claim or change which answer
       is correct.
     - Make the repaired question genuinely distinct from conflicting_questions.
       Changing only the opening question word or adding filler is insufficient.
-    - You may paraphrase the question, answer options, explanation, and hint.
-      Keep the eleven required fields and preserve the key spelling expalanation.
+    - Do not change the assessment approach. Copy every field not explicitly
+      permitted by the type-specific edit limits exactly.
+    - Keep the eleven required fields and preserve the key spelling expalanation.
     - Return one card only, with no Markdown or surrounding text.
+
+    """ + _duplicate_card_edit_rules(card) + """
 
     Required shape: {"cards":[{...exactly one complete card...}]}
 
     INPUT JSON:
     """ + _json(payload)
+
+
+def build_duplicate_card_retry_prompt(
+    original_prompt: str,
+    rejected_json: str | None,
+    errors: Sequence[str],
+    card: FlashcardDraft,
+) -> str:
+    """Retry one duplicate card without relaxing its locked fields."""
+
+    return """Retry the one-card paraphrase. Correct only the reported errors.
+    Do not change assessment_approach, type, is_true, difficulty, expalanation,
+    or hint.
+
+    """ + _duplicate_card_edit_rules(card) + """
+
+    """ + build_retry_prompt(original_prompt, rejected_json, errors)
 
 
 def build_grounding_review_prompt(

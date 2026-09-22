@@ -21,6 +21,7 @@ from flashcard_prompt import (
     build_cluster_retry_prompt,
     build_concept_plan_prompt,
     build_duplicate_card_repair_prompt,
+    build_duplicate_card_retry_prompt,
     build_duplicate_review_prompt,
     build_grounding_review_prompt,
     build_retry_prompt,
@@ -812,9 +813,28 @@ class FlashcardPipeline:
                 for field in (
                     "type",
                     "is_true",
+                    "expalanation",
+                    "hint",
                     "difficulty",
                     "assessment_approach",
                 ):
+                    if getattr(candidate, field) != getattr(original_card, field):
+                        errors.append(f"replacement card must preserve {field}")
+                locked_answer_fields: tuple[str, ...] = ()
+                if original_card.type == "true-false":
+                    locked_answer_fields = (
+                        "correct_option",
+                        "wrong_option_1",
+                        "wrong_option_2",
+                        "wrong_option_3",
+                    )
+                elif original_card.type == "identification":
+                    locked_answer_fields = (
+                        "wrong_option_1",
+                        "wrong_option_2",
+                        "wrong_option_3",
+                    )
+                for field in locked_answer_fields:
                     if getattr(candidate, field) != getattr(original_card, field):
                         errors.append(f"replacement card must preserve {field}")
                 if are_near_duplicates(candidate.question, original_card.question):
@@ -861,7 +881,15 @@ class FlashcardPipeline:
                     f"{item.card_index + 1} ({old.concept.name})"
                 ),
                 response_schema=build_single_card_schema(
-                    old.concept.assessment_approaches
+                    original_card
+                ),
+                retry_prompt_builder=lambda original, rejected, errors: (
+                    build_duplicate_card_retry_prompt(
+                        original,
+                        rejected,
+                        errors,
+                        original_card,
+                    )
                 ),
             )
             updated_cards = list(old.cards)

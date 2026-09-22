@@ -80,6 +80,38 @@ def test_extract_facts_prefers_normalized_lesson_facts_with_context():
     assert facts[0].topic == "Project Foundations"
 
 
+def test_extract_facts_collapses_existing_cumulative_fact_ids():
+    value = graph()
+    prefix = "Norman's seven principles are: "
+    principles = (
+        "use knowledge in the world and in the head",
+        "simplify task structures",
+        "make things visible",
+        "get mappings right",
+        "exploit constraints",
+        "design for error",
+        "standardize when all else fails",
+    )
+    value["facts"] = [
+        {
+            "id": "f81",
+            "statement": prefix + "; ".join(principles[:-1]),
+            "slides": [30],
+        },
+        {
+            "id": "f84",
+            "statement": prefix + "; ".join(principles),
+            "slides": [31],
+        },
+    ]
+
+    facts = extract_graph_facts(value)
+
+    assert len(facts) == 1
+    assert facts[0].fact_id == "f84"
+    assert facts[0].slides == (30, 31)
+
+
 def test_extract_facts_drops_only_slide_self_referential_statements():
     value = graph()
     value["facts"] = [

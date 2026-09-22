@@ -4,11 +4,96 @@ from structured_module import (
     Definition,
     StructuredModule,
     StructuredSlide,
+    deduplicate_lesson_fact_records,
     extract_lesson_facts,
     graph_ready_text,
     parse_module_metadata,
     render_structured_module,
 )
+
+
+def test_deduplicate_lesson_facts_keeps_complete_cumulative_list():
+    rules = (
+        "strive for consistency",
+        "enable frequent users to use shortcuts",
+        "offer informative feedback",
+        "design dialogs to yield closure",
+        "prevent errors",
+        "permit easy reversal of actions",
+        "support internal locus of control",
+        "reduce short-term memory load",
+    )
+    prefix = "Shneiderman's eight golden rules are: "
+    records = (
+        {
+            "id": "f72",
+            "statement": prefix + "; ".join(rules[1:]),
+            "slides": [20],
+        },
+        {
+            "id": "f73",
+            "statement": prefix + "; ".join(item for item in rules if item != rules[1]),
+            "slides": [21],
+        },
+        {
+            "id": "f75",
+            "statement": prefix + "; ".join(rules),
+            "slides": [22],
+        },
+    )
+
+    facts = deduplicate_lesson_fact_records(records)
+
+    assert len(facts) == 1
+    assert facts[0]["id"] == "f75"
+    assert facts[0]["statement"] == records[2]["statement"]
+    assert facts[0]["slides"] == [20, 21, 22]
+
+
+def test_deduplicate_lesson_facts_merges_metric_paraphrases():
+    records = (
+        {
+            "id": "f60",
+            "statement": (
+                "Learnability metrics include percentage of functions learned, "
+                "time to learn, and ease-of-learning ratings."
+            ),
+            "slides": [12],
+        },
+        {
+            "id": "f64",
+            "statement": (
+                "Learnability metrics include the percentage of functions learned, "
+                "time to learn, and ease-of-learning ratings."
+            ),
+            "slides": [13],
+        },
+    )
+
+    facts = deduplicate_lesson_fact_records(records)
+
+    assert len(facts) == 1
+    assert facts[0]["id"] == "f60"
+    assert facts[0]["slides"] == [12, 13]
+
+
+def test_deduplicate_lesson_facts_keeps_parallel_concepts_distinct():
+    records = (
+        {
+            "id": "f40",
+            "statement": "A system is useful if it provides the functions users need.",
+            "slides": [8],
+        },
+        {
+            "id": "f41",
+            "statement": "A system is usable if users can operate its functions effectively.",
+            "slides": [8],
+        },
+    )
+
+    facts = deduplicate_lesson_fact_records(records)
+
+    assert [fact["id"] for fact in facts] == ["f40", "f41"]
 
 
 def make_module(*, content=("A processor executes instructions.",)):
@@ -90,6 +175,7 @@ def test_extract_lesson_facts_keeps_context_and_filters_presentation_noise():
                 ),
                 knowledge_statements=(
                     "The slide introduces the instruction cycle.",
+                    "The module introduces HCI principles and concepts.",
                     "The processor fetches an instruction before decoding it.",
                 ),
                 brief_explanation="This slide presents the instruction cycle.",

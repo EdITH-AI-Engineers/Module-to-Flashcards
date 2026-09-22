@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from structured_module import (
+    deduplicate_lesson_fact_records,
     extract_lesson_facts,
     graph_ready_text,
     parse_module_metadata,
@@ -497,6 +498,7 @@ def build_graph(
     module_metadata: dict[str, str] | None = None,
     lesson_facts: Sequence[dict[str, object]] = (),
 ) -> dict:
+    lesson_facts = deduplicate_lesson_fact_records(lesson_facts)
     triples = list(resolve_entity_aliases(sanitize_triples(triples)))
     node_names: dict[str, str] = {}
     degrees: defaultdict[str, int] = defaultdict(int)

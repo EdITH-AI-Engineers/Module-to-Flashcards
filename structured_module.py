@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import difflib
 import re
-from typing import Iterable
+from typing import Iterable, Mapping, Sequence
+import unicodedata
 
 
 FORMAT_VERSION = "1"
@@ -18,9 +20,170 @@ _SECTION_TAG = re.compile(r"^\[(/?)([A-Z_]+)(?:\s+\d+)?\]$")
 _SLIDE_OPEN_TAG = re.compile(r"^\[SLIDE\s+(\d+)\]$", flags=re.IGNORECASE)
 _PRESENTATION_NOISE = re.compile(
     r"^(?:(?:this|the|the first|the current|first)\s+(?:slide|page)\b|"
-    r"the module title\b)",
+    r"the module title\b|(?:this|the)\s+module\s+"
+    r"(?:introduces|covers|presents|provides an overview of)\b)",
     flags=re.IGNORECASE,
 )
+
+_FACT_BRIDGE_WORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "be",
+    "been",
+    "being",
+    "described",
+    "describes",
+    "in",
+    "include",
+    "includes",
+    "is",
+    "its",
+    "of",
+    "refer",
+    "refers",
+    "that",
+    "the",
+    "through",
+    "to",
+    "was",
+    "were",
+    "which",
+    "within",
+    "with",
+}
+_FACT_NEGATIONS = {"except", "never", "no", "not", "without"}
+
+
+def _normalized_fact_text(value: object) -> str:
+    text = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    return " ".join(re.findall(r"[a-z0-9]+", text))
+
+
+def _fact_content_tokens(value: object) -> tuple[str, ...]:
+    return tuple(
+        token
+        for token in _normalized_fact_text(value).split()
+        if token not in _FACT_BRIDGE_WORDS
+    )
+
+
+def _looks_like_enumeration(value: object) -> bool:
+    text = str(value or "")
+    separators = len(re.findall(r"[,;]", text))
+    numbered_items = len(re.findall(r"(?:^|\s)\d+[.)]\s", text))
+    return separators >= 2 or numbered_items >= 3
+
+
+def _facts_are_duplicates(left: object, right: object) -> bool:
+    """Match reworded facts and cumulative list fragments conservatively."""
+
+    normalized_left = _normalized_fact_text(left)
+    normalized_right = _normalized_fact_text(right)
+    if not normalized_left or not normalized_right:
+        return False
+    if normalized_left == normalized_right:
+        return True
+
+    left_tokens = _fact_content_tokens(left)
+    right_tokens = _fact_content_tokens(right)
+    left_set = set(left_tokens)
+    right_set = set(right_tokens)
+    if not left_set or not right_set:
+        return False
+    if (left_set & _FACT_NEGATIONS) != (right_set & _FACT_NEGATIONS):
+        return False
+
+    shared = left_set & right_set
+    overlap = len(shared) / min(len(left_set), len(right_set))
+    jaccard = len(shared) / len(left_set | right_set)
+    sequence = difflib.SequenceMatcher(
+        None, normalized_left, normalized_right
+    ).ratio()
+
+    if (
+        _looks_like_enumeration(left)
+        and _looks_like_enumeration(right)
+        and min(len(left_tokens), len(right_tokens)) >= 10
+    ):
+        return overlap >= 0.80 and jaccard >= 0.62 and sequence >= 0.62
+
+    return (
+        min(len(left_tokens), len(right_tokens)) >= 8
+        and overlap >= 0.95
+        and jaccard >= 0.85
+        and sequence >= 0.90
+    )
+
+
+def deduplicate_lesson_fact_records(
+    records: Sequence[Mapping[str, object]],
+    *,
+    reassign_ids: bool = False,
+) -> tuple[dict[str, object], ...]:
+    """Collapse repeated facts while retaining the best text and all slides.
+
+    The longest cumulative enumeration wins. For ordinary paraphrases, the
+    first statement remains canonical so stable source order is preserved.
+    """
+
+    merged: list[dict[str, object]] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            continue
+        statement = re.sub(
+            r"\s+", " ", str(record.get("statement", ""))
+        ).strip()
+        if not statement:
+            continue
+        candidate = dict(record)
+        candidate["statement"] = statement
+        raw_slides = candidate.get("slides")
+        candidate_slides: list[int] = []
+        if isinstance(raw_slides, (list, tuple)):
+            for value in raw_slides:
+                try:
+                    number = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if number > 0 and number not in candidate_slides:
+                    candidate_slides.append(number)
+        candidate["slides"] = candidate_slides
+
+        matches = [
+            index
+            for index, existing in enumerate(merged)
+            if _facts_are_duplicates(existing["statement"], statement)
+        ]
+        if not matches:
+            merged.append(candidate)
+            continue
+
+        primary = matches[0]
+        duplicate_group = [merged[index] for index in matches]
+        all_slides = set(candidate_slides)
+        for existing in duplicate_group:
+            existing_slides = existing["slides"]
+            assert isinstance(existing_slides, list)
+            all_slides.update(existing_slides)
+
+        chosen = duplicate_group[0]
+        if _looks_like_enumeration(statement):
+            chosen = max(
+                (*duplicate_group, candidate),
+                key=lambda item: len(_fact_content_tokens(item["statement"])),
+            )
+        chosen["slides"] = sorted(all_slides)
+        merged[primary] = chosen
+        for index in reversed(matches[1:]):
+            del merged[index]
+
+    if reassign_ids:
+        for index, fact in enumerate(merged, start=1):
+            fact["id"] = f"f{index}"
+    return tuple(merged)
 
 
 def _single_line(value: object, fallback: str = NOT_SPECIFIED) -> str:
@@ -248,7 +411,6 @@ def extract_lesson_facts(text: str) -> tuple[dict[str, object], ...]:
 
     module_title = metadata.get("module_title", "")
     facts: list[dict[str, object]] = []
-    used_statements: set[str] = set()
 
     def add_fact(
         statement: str,
@@ -260,13 +422,8 @@ def extract_lesson_facts(text: str) -> tuple[dict[str, object], ...]:
         cleaned = _lesson_fact_text(statement)
         if cleaned is None:
             return
-        key = re.sub(r"[^\w]+", " ", cleaned, flags=re.UNICODE).strip().casefold()
-        if key in used_statements:
-            return
-        used_statements.add(key)
         facts.append(
             {
-                "id": f"f{len(facts) + 1}",
                 "statement": cleaned,
                 "slides": [slide_number],
                 "kind": kind,
@@ -328,7 +485,7 @@ def extract_lesson_facts(text: str) -> tuple[dict[str, object], ...]:
                     topic=topic,
                 )
 
-    return tuple(facts)
+    return deduplicate_lesson_fact_records(facts, reassign_ids=True)
 
 
 def graph_ready_text(text: str) -> str:

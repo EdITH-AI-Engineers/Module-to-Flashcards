@@ -29,6 +29,24 @@ def _clean_text(value: object) -> str:
     return text.strip()
 
 
+def _clean_ocr_text(value: object) -> str:
+    text = _clean_text(value)
+    lines: list[str] = []
+    for line in text.splitlines():
+        compact = re.sub(r"\s+", "", line)
+        if (
+            compact
+            and len(compact) <= 3
+            and not any(character.isalnum() for character in compact)
+        ):
+            # Tesseract commonly turns speaker/playback overlays into isolated
+            # punctuation (for example, "!"). Do not send those icon artifacts
+            # to the text-only normalization model as if they were slide content.
+            continue
+        lines.append(line)
+    return _clean_text("\n".join(lines))
+
+
 def _meaningful_count(text: str) -> int:
     return sum(character.isalnum() for character in text)
 
@@ -139,7 +157,7 @@ def extract_pdf_pages(
                 pages.append(ExtractedPage(index + 1, direct_text, "text"))
                 continue
 
-            ocr_text = _clean_text(ocr_reader(page, dpi))
+            ocr_text = _clean_ocr_text(ocr_reader(page, dpi))
             if _meaningful_count(ocr_text) > 0:
                 pages.append(ExtractedPage(index + 1, ocr_text, "ocr"))
             elif _meaningful_count(direct_text) > 0:

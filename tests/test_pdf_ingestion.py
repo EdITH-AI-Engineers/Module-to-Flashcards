@@ -89,6 +89,39 @@ def test_sparse_page_uses_ocr_at_requested_dpi(tmp_path):
     assert calls == [(document.pages[0], 240)]
 
 
+def test_ocr_drops_short_symbol_only_lines_from_media_icons(tmp_path):
+    source = pdf_file(tmp_path)
+    document = FakeDocument([""])
+
+    pages = extract_pdf_pages(
+        source,
+        document_factory=lambda path: document,
+        ocr=lambda page, dpi: (
+            "Human Interface Computer\n!\nDisplays\nSensors and Responders"
+        ),
+    )
+
+    assert pages[0].method == "ocr"
+    assert pages[0].text == (
+        "Human Interface Computer\nDisplays\nSensors and Responders"
+    )
+
+
+def test_direct_text_keeps_symbol_only_lines(tmp_path):
+    source = pdf_file(tmp_path)
+    document = FakeDocument(
+        ["Readable text-layer content remains unchanged.\n!\nMore readable content."]
+    )
+
+    pages = extract_pdf_pages(
+        source,
+        document_factory=lambda path: document,
+        ocr=lambda page, dpi: pytest.fail("OCR must not run for readable text"),
+    )
+
+    assert "\n!\n" in pages[0].text
+
+
 def test_empty_ocr_page_is_retained_as_unreadable_when_other_page_is_readable(tmp_path):
     source = pdf_file(tmp_path)
     document = FakeDocument(

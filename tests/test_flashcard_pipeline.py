@@ -209,7 +209,7 @@ def test_truncated_cluster_retries_without_embedding_partial_output():
     assert "ORIGINAL REQUEST" not in retry_prompt
 
 
-def test_context_first_multiple_choice_allows_local_distractor_repair():
+def test_context_first_multiple_choice_keeps_relevant_external_distractor():
     cards = list(make_cards(1))
     cards[0] = replace(
         cards[0],
@@ -217,7 +217,7 @@ def test_context_first_multiple_choice_allows_local_distractor_repair():
             "A learner groups a value by its numerical base. "
             "This example demonstrates what classification?"
         ),
-        wrong_option_3="Unrelated guess",
+        wrong_option_3="Hexadecimal classification",
         hint="Classification 1",
     )
     facts = graph_facts()
@@ -227,11 +227,9 @@ def test_context_first_multiple_choice_allows_local_distractor_repair():
         tuple(cards), errors, facts, phrase_facts=facts[1:]
     )
 
-    assert errors == (
-        "card 1 wrong_option_3 is not grounded in supplied module facts",
-        "card 1 hint reveals the correct answer",
-    )
+    assert errors == ("card 1 hint reveals the correct answer",)
     assert repaired is not None
+    assert repaired[0].wrong_option_3 == "Hexadecimal classification"
     assert validate_cluster(repaired, make_concept(1), facts) == ()
 
 
@@ -616,9 +614,9 @@ def test_true_false_duplicate_repair_restores_locked_prose_outside_schema():
     assert card_schema["properties"]["hint"] == {"type": "string"}
 
 
-def test_cluster_grounding_uses_the_full_module_not_only_the_prompt_subset():
+def test_cluster_accepts_relevant_distractor_without_full_module_token_match():
     cards = list(make_cards(1))
-    cards[0] = replace(cards[0], wrong_option_3="Distant grounded term")
+    cards[0] = replace(cards[0], wrong_option_3="Related external alternative")
     response = json.dumps({"cards": [card.__dict__ for card in cards]})
     backend = FakeBackend([response])
     pipeline = FlashcardPipeline(
@@ -627,11 +625,6 @@ def test_cluster_grounding_uses_the_full_module_not_only_the_prompt_subset():
         progress=lambda message: None,
     )
     concept_fact = GraphFact("e1", "subject1 relates to object1")
-    distant_fact = GraphFact(
-        "e99",
-        "Alternative reverse discard replace distant grounded term",
-    )
-
     generated = pipeline._generate_cards(
         ModuleIdentity("CPE0021", "1"),
         make_concept(1),
@@ -639,10 +632,10 @@ def test_cluster_grounding_uses_the_full_module_not_only_the_prompt_subset():
         label="full-module grounding",
         concept_facts=(concept_fact,),
         distractor_facts=(),
-        module_facts=(concept_fact, distant_fact),
+        module_facts=(concept_fact,),
     )
 
-    assert generated[0].wrong_option_3 == "Distant grounded term"
+    assert generated[0].wrong_option_3 == "Related external alternative"
     assert pipeline.rejection_stats["rejected_attempts"] == 0
 
 

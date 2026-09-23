@@ -116,9 +116,6 @@ def _balanced_plan_facts(
 DISTRACTOR_FACT_LIMIT = 12
 
 
-_GROUNDING_ERROR_RE = re.compile(
-    r"^card (\d+) (wrong_option_[123]) is not grounded in supplied module facts$"
-)
 _HINT_LEAK_ERROR_RE = re.compile(r"^card (\d+) hint reveals the correct answer$")
 _MODULE_DUPLICATE_RE = re.compile(
     r"^near-duplicate questions at cluster (\d+) card (\d+) "
@@ -139,108 +136,29 @@ class _DuplicateRepairItem:
     reasons: tuple[str, ...]
 
 
-def _phrase_from_fact(fact: GraphFact) -> str:
-    """Turn one grounding fact into a short, option-shaped phrase, so a
-    repaired wrong_option reads like a normal answer choice rather than a
-    dumped sentence fragment."""
-    statement = fact.statement.strip().rstrip(".")
-    for sep in (";", ","):
-        if sep in statement:
-            statement = statement.split(sep, 1)[0].strip()
-            break
-    words = statement.split()
-    if len(words) > 12:
-        statement = " ".join(words[:12])
-    if statement:
-        statement = statement[0].upper() + statement[1:]
-    return statement
-
-
 def _repair_grounding_errors(
     cards: Sequence[FlashcardDraft],
     errors: Sequence[str],
     grounding_facts: Sequence[GraphFact],
     phrase_facts: Sequence[GraphFact] | None = None,
 ) -> tuple[FlashcardDraft, ...] | None:
-    """Deterministically patch mechanical grounding and hint-leak errors.
+    """Deterministically repair hint leakage without rewriting distractors.
 
-    Local backends sometimes return byte-identical output across every
-    retry attempt regardless of the corrective instructions in the retry
-    prompt -- when that happens, re-prompting harder is a dead end no
-    matter how the prompt is worded. A "not grounded" violation is purely
-    mechanical (the validator just checks for shared vocabulary with the
-    supplied facts), so it can be fixed mechanically too: swap the flagged
-    text for a short phrase lifted directly from an actual module fact,
-    which is grounded by construction. Hint leaks are safely replaced with
-    a neutral reasoning cue. Returns None if any error requires semantic
-    rewriting. Every repaired cluster is fully revalidated before acceptance.
-
-    phrase_facts, if given, restricts which facts a replacement phrase can
-    be built from -- callers should pass the distractor pool here rather
-    than the concept's own facts, since a wrong_option built from the
-    concept's own fact would just be a true restatement of the correct
-    answer rather than an actual distractor. Falls back to grounding_facts
-    if phrase_facts is empty.
+    The legacy function name and unused fact parameters are retained for
+    compatibility with existing callers. Wrong options are semantic choices:
+    they may use relevant outside-corpus terminology and must never be replaced
+    mechanically with an arbitrary phrase copied from another fact.
     """
-    grounding_matches = [
-        match
-        for error in errors
-        if (match := _GROUNDING_ERROR_RE.match(error)) is not None
-    ]
+    del grounding_facts, phrase_facts
     hint_matches = [
         match
         for error in errors
         if (match := _HINT_LEAK_ERROR_RE.match(error)) is not None
     ]
-    if not errors or len(grounding_matches) + len(hint_matches) != len(errors):
+    if not errors or len(hint_matches) != len(errors):
         return None
 
-    candidate_phrases: list[str] = []
-    if grounding_matches:
-        source_facts = phrase_facts if phrase_facts else grounding_facts
-        candidate_phrases = [
-            phrase
-            for phrase in (_phrase_from_fact(fact) for fact in source_facts)
-            if phrase
-        ]
-        if not candidate_phrases:
-            return None
-
     cards_list = list(cards)
-    used_per_card: dict[int, set[str]] = {}
-    cursor = 0
-
-    for match in grounding_matches:
-        card_index = int(match.group(1)) - 1
-        field = match.group(2)
-        if not (0 <= card_index < len(cards_list)):
-            return None
-        card = cards_list[card_index]
-        used = used_per_card.setdefault(
-            card_index,
-            {
-                option.strip().casefold()
-                for option in (
-                    card.correct_option,
-                    card.wrong_option_1,
-                    card.wrong_option_2,
-                    card.wrong_option_3,
-                )
-                if option.strip()
-            },
-        )
-        replacement = None
-        for offset in range(len(candidate_phrases)):
-            phrase = candidate_phrases[(cursor + offset) % len(candidate_phrases)]
-            if phrase.casefold() not in used:
-                replacement = phrase
-                cursor += offset + 1
-                break
-        if replacement is None:
-            return None
-        used.add(replacement.casefold())
-        cards_list[card_index] = replace(card, **{field: replacement})
-
     for match in hint_matches:
         card_index = int(match.group(1)) - 1
         if not (0 <= card_index < len(cards_list)):
@@ -258,16 +176,14 @@ def _select_distractor_facts(
     concept: ConceptPlan,
     limit: int = DISTRACTOR_FACT_LIMIT,
 ) -> tuple[GraphFact, ...]:
-    """Pick distractor material likely to actually support a groundable wrong option.
+    """Pick nearby material that can suggest topically relevant wrong options.
 
     A blind positional slice of "the first N facts that are not this
     concept's own" tends to hand the model facts from a completely
     unrelated part of the module. With nothing usable to adapt, the model
-    tends to fall back on a generic, plausible-sounding but ungrounded
-    guess -- which is exactly the "not grounded in supplied module facts"
-    failure this produces. Preferring facts that share the concept's own
-    topic, then facts on nearby slides, gives the model distractor
-    material that is actually related to the question it is writing.
+    tends to fall back on a generic or unrelated guess. Preferring facts that
+    share the concept's topic, then facts on nearby slides, gives the model
+    useful vocabulary without making exact corpus wording mandatory.
     """
     concept_fact_ids = set(concept.fact_ids)
     candidates = [fact for fact in facts if fact.fact_id not in concept_fact_ids]

@@ -526,7 +526,8 @@ _PROVENANCE_MODIFIER_RE = re.compile(
     rf",?\s+(?:as\s+)?"
     rf")"
     rf"(?:mentioned|discussed|described|defined|presented|introduced|covered)"
-    rf"\s+in\s+(?:the\s+)?{_PROVENANCE_SOURCE}\b\s*,?",
+    rf"\s+in\s+(?:the\s+)?{_PROVENANCE_SOURCE}\b"
+    rf"(?!['’]s\b)\s*,?",
     re.I,
 )
 _PROVENANCE_WRAPPER_RE = re.compile(
@@ -535,14 +536,6 @@ _PROVENANCE_WRAPPER_RE = re.compile(
     rf"(?:the\s+)?{_PROVENANCE_SOURCE})\b(?=\s*[,?.!]|$),?\s*",
     re.I,
 )
-_DANGLING_STATED_IN_RE = re.compile(
-    r"\bis\s+explicitly\s+stated\s+in\s+the\s+(?:provided|supplied)\s+facts?\b", re.I
-)
-_LEFTOVER_FACTS_RE = re.compile(
-    r"\b(?:in\s+)?(?:the\s+)?(?:provided|supplied)\s+facts?\b", re.I
-)
-
-
 def _strip_citation_phrasing(text: str) -> str:
     """Remove formulaic "as stated in the provided/supplied fact(s)" citation
     clauses from model-written prose, keeping any real content around them.
@@ -553,14 +546,15 @@ def _strip_citation_phrasing(text: str) -> str:
     rule even though the underlying claim is perfectly fine, and the model
     frequently fails to stop doing it even after being told to in a retry.
     This rewrites the common shapes in place of relying on further retries.
+    It intentionally does not delete a bare source noun such as "the provided
+    fact": that phrase may be the sentence's subject or possessor. Any unsafe
+    residual provenance is handled by the field fallback or normal validation.
     """
     text = _EXPLICIT_STATED_AS_RE.sub(r"is \1", text)
     text = _LEADING_FACTS_STATE_RE.sub("", text)
     text = _LEADING_PROVENANCE_ASSERTION_RE.sub("", text)
     text = _PROVENANCE_MODIFIER_RE.sub(" ", text)
     text = _PROVENANCE_WRAPPER_RE.sub(" ", text)
-    text = _DANGLING_STATED_IN_RE.sub("", text)
-    text = _LEFTOVER_FACTS_RE.sub("", text)
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"\s+([.,?!])", r"\1", text)
     text = re.sub(r"\.\s*\.", ".", text)
@@ -617,7 +611,7 @@ def _sanitize_question(text: str) -> str:
     catches whatever is really wrong with it.
     """
     cleaned = _strip_citation_phrasing(text)
-    if not cleaned:
+    if not cleaned or _contains_provenance(cleaned):
         return text
     if len(re.findall(r"[A-Za-z0-9]+", cleaned)) < 3:
         return text
@@ -648,29 +642,6 @@ def validate_cluster(
                 f"card {position} assessment_approach must be one of the planned "
                 f"approaches: {', '.join(sorted(expected_approaches))}"
             )
-
-    if source_facts:
-        grounded_terms = {
-            token
-            for fact in source_facts
-            for token in _grounding_tokens(fact.statement)
-        }
-        for fact in source_facts:
-            if fact.topic:
-                grounded_terms.update(_grounding_tokens(fact.topic))
-        grounded_terms.update(_grounding_tokens(concept.name))
-        grounded_terms.update(
-            token for fact in concept.facts for token in _grounding_tokens(fact)
-        )
-        for position, card in enumerate(cards, start=1):
-            if card.type != "multiple-choice":
-                continue
-            for option_name in ("wrong_option_1", "wrong_option_2", "wrong_option_3"):
-                option_terms = set(_grounding_tokens(getattr(card, option_name)))
-                if option_terms and not option_terms & grounded_terms:
-                    errors.append(
-                        f"card {position} {option_name} is not grounded in supplied module facts"
-                    )
 
     for position, card in enumerate(cards, start=1):
         prefix = f"card {position}"

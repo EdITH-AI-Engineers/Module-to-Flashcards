@@ -267,6 +267,57 @@ def test_cards_parser_keeps_compound_source_phrase_intact():
     assert cards[0].question == question
 
 
+def test_cards_parser_does_not_partially_strip_possessive_provenance_modifier():
+    payload = json.loads(cards_json())
+    question = "Which role is mentioned in the module's focus statement?"
+    payload["cards"][0]["question"] = question
+
+    cards = parse_cards(json.dumps(payload))
+
+    assert cards[0].question == question
+    assert "card 1 exposes provenance metadata" in validate_cluster(
+        cards, valid_concept()
+    )
+
+
+@pytest.mark.parametrize(
+    "hint",
+    (
+        "Focus on the specific role mentioned in the module's focus statement.",
+        "Recall the main topic mentioned in the module's description.",
+        "Refer to the provided fact about the history of HCI.",
+        "This follows, as indicated by the provided facts.",
+    ),
+)
+def test_cards_parser_falls_back_instead_of_damaging_provenance_hints(hint):
+    payload = json.loads(cards_json())
+    payload["cards"][0]["hint"] = hint
+
+    card = parse_cards(json.dumps(payload))[0]
+
+    assert card.hint == (
+        "Consider the key relationship or distinction central to this topic."
+    )
+
+
+@pytest.mark.parametrize(
+    "explanation",
+    (
+        "While HCI involves several disciplines, the provided fact emphasizes its interdisciplinary nature.",
+        "The central role of perception in interaction is explicitly stated in the provided fact.",
+    ),
+)
+def test_cards_parser_falls_back_instead_of_damaging_provenance_explanations(
+    explanation,
+):
+    payload = json.loads(cards_json())
+    payload["cards"][0]["expalanation"] = explanation
+
+    card = parse_cards(json.dumps(payload))[0]
+
+    assert card.expalanation == "Base 2 is the correct answer here."
+
+
 @pytest.mark.parametrize(
     "question",
     (
@@ -663,18 +714,18 @@ def test_cluster_rejects_an_unplanned_assessment_approach():
     )
 
 
-def test_grounding_accepts_common_derivational_word_forms():
+def test_cluster_allows_relevant_distractors_that_are_absent_from_source_facts():
     values = list(valid_cards())
     values[0] = replace(
         values[0],
-        wrong_option_1="Safety",
-        wrong_option_2="Comfort",
-        wrong_option_3="Enjoyment",
+        wrong_option_1="Octal representation",
+        wrong_option_2="Decimal notation",
+        wrong_option_3="Hexadecimal encoding",
     )
     facts = (
         GraphFact(
             "e1",
-            "binary uses base 2 and should be safe comfortable and enjoyable",
+            "binary uses base 2",
         ),
     )
 

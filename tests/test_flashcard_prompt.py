@@ -191,10 +191,13 @@ def test_cluster_prompt_allows_planned_approaches_in_any_card_order():
     ]
     assert "distractor_pool" not in payload
     assert "grounded_vocabulary" not in payload
-    assert "allowed_wrong_option_terms" in payload
-    assert "binary" in payload["allowed_wrong_option_terms"]
-    assert "octal" in payload["allowed_wrong_option_terms"]
-    assert "at least one exact" in prompt
+    assert "suggested_wrong_option_terms" in payload
+    assert "binary" in payload["suggested_wrong_option_terms"]
+    assert "octal" in payload["suggested_wrong_option_terms"]
+    assert "optional topic vocabulary" in prompt
+    assert "same semantic category" in prompt
+    assert "need not appear verbatim" in prompt
+    assert "at least one exact" not in prompt
     assert payload["concept"]["assessment_approaches"] == list(
         concept().assessment_approaches
     )
@@ -304,6 +307,9 @@ def test_grounding_review_includes_evidence_and_card_content():
     assert "binary | uses | base 2" in prompt
     assert "Binary uses base 2" in prompt
     assert '"issues"' in prompt
+    assert "does not appear in the supplied facts" in prompt
+    assert "same semantic category" in prompt
+    assert "unrelated to the question or module domain" in prompt
 
 
 def test_duplicate_review_excludes_answers_and_evidence():

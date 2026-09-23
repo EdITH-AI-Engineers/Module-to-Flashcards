@@ -18,7 +18,7 @@ from flashcard_validator import _grounding_tokens
 SYSTEM_PROMPT = f"""You are a college-level educational assessment generator.
 
 SOURCE AUTHORITY
-Use only the supplied graph facts as factual authority. Do not add outside knowledge, repair a fact from memory, or infer unsupported facts. Treat each module independently. Never assess the same underlying learning point twice. If the facts cannot support the requested number of distinct concepts, report insufficient content instead of duplicating or inventing material.
+Use only the supplied graph facts as factual authority for questions, correct answers, true-false decisions, explanations, and hints. Do not add outside knowledge, repair a fact from memory, or infer unsupported claims in those fields. Multiple-choice distractors may use common closely related domain terms that are absent from the facts, but absence from the facts is never proof that an option is incorrect. Treat each module independently. Never assess the same underlying learning point twice. If the facts cannot support the requested number of distinct concepts, report insufficient content instead of duplicating or inventing material.
 
 INTERNAL OUTPUT
 Return JSON only for every internal request. Do not use Markdown fences, CSV, headings, commentary, or text outside the requested JSON object. Use exactly the requested keys and value types. Preserve the required key spelling expalanation.
@@ -55,6 +55,8 @@ type describes a card's structural format, not its reasoning style. Never copy a
 Multiple-choice rules:
 - Supply exactly one concise correct_option and three plausible, distinct, incorrect options.
 - correct_option, wrong_option_1, wrong_option_2, and wrong_option_3 must be four textually different strings. Never let a wrong_option repeat, restate, or closely paraphrase the correct_option or another wrong_option within the same card.
+- Each wrong_option must match the correct answer's semantic category and answer shape, remain relevant to the question and module domain, and be unambiguously incorrect. It may use a familiar related term that is not written verbatim in the supplied facts.
+- Avoid NOT or EXCEPT questions unless the supplied facts explicitly support why the correct_option is excluded. Never turn an invented distractor into the authoritative correct_option of a negative question.
 - Set is_true to null.
 - Do not place choices, option labels, or the answer in the question.
 
@@ -115,20 +117,20 @@ _VOCAB_EXCLUDED_WORDS = {
 }
 
 
-def grounded_vocabulary(
+def suggested_wrong_option_terms(
     concept: ConceptPlan,
     concept_facts: Sequence[GraphFact],
     distractor_facts: Sequence[GraphFact],
 ) -> tuple[str, ...]:
-    """Compute the exact set of words a wrong_option is allowed to draw its
-    substantive content from, using the identical tokenization the
-    validator applies (flashcard_validator._grounding_tokens).
+    """Collect optional topic words that can help the model write relevant
+    wrong options.
 
     Handing the model full facts from other concepts makes a small local model
     treat those facts as authority for the current question. Instead, give it
-    only the literal, mechanically-checkable words the validator will accept
-    in wrong options. This turns an abstract judgment call into a concrete
-    constraint without exposing another concept's complete learning point.
+    a compact vocabulary of nearby terms without exposing another concept's
+    complete learning point. The list is suggestive, not exhaustive: a good
+    distractor may use another familiar term from the same domain and semantic
+    category.
     """
     terms: set[str] = set()
     for fact in concept_facts:
@@ -349,11 +351,15 @@ def build_cluster_prompt(
     EVIDENCE SCOPE
     - Questions, correct answers, explanations, and hints must be supported by
       concept_facts.
-    - Each multiple-choice wrong_option must be plausible but incorrect for its
-      question and must contain at least one exact substantive term from
-      allowed_wrong_option_terms. That list is for wrong-option wording only;
-      never use it as evidence for a correct answer, question, explanation, or
-      hint. Do not invent outside topics, examples, or technologies.
+    - Each multiple-choice wrong_option must be plausible, unambiguously
+      incorrect, and relevant to the question and module domain. It must use the
+      same semantic category and answer shape as the correct option.
+      suggested_wrong_option_terms is optional topic vocabulary, not an
+      exhaustive allow-list. A closely related distractor need not appear verbatim
+      in concept_facts or that list. Never use distractor wording as evidence for
+      a correct answer, question, explanation, or hint.
+    - Avoid NOT or EXCEPT questions unless concept_facts explicitly support why
+      the correct option is excluded.
     - When the evidence supplies an equation or numerical relationship, an
       assigned application or scenario approach may test it using only supplied
       variables, values, units, and operations.
@@ -416,8 +422,8 @@ def _cluster_payload(
             {"fact_id": fact.fact_id, "statement": fact.statement}
             for fact in concept_facts
         ],
-        "allowed_wrong_option_terms": list(
-            grounded_vocabulary(concept, concept_facts, distractor_facts)[:60]
+        "suggested_wrong_option_terms": list(
+            suggested_wrong_option_terms(concept, concept_facts, distractor_facts)[:60]
         ),
     }
     condensed_prior, omitted_prior = _condensed_prior_signals(prior_signals)
@@ -455,15 +461,15 @@ def _condensed_errors(errors: Sequence[str]) -> tuple[list[str], int]:
     return seen[:MAX_RETRY_ERROR_COUNT], omitted
 
 
-MAX_RETRY_VOCAB_TERMS = 80
-
-
 def build_retry_prompt(
     original_prompt: str,
     candidate: str | None,
     errors: Iterable[str],
     grounded_vocabulary: Sequence[str] = (),
 ) -> str:
+    # Retain the legacy fourth parameter for callers compiled against the old
+    # API. It is no longer a hard allow-list for distractor wording.
+    del grounded_vocabulary
     error_list = [str(error) for error in errors]
     condensed, omitted = _condensed_errors(error_list)
     error_bullets = "\n".join(f"- {error}" for error in condensed)
@@ -472,30 +478,6 @@ def build_retry_prompt(
             f"\n- (+{omitted} more validation errors of a similar kind, "
             "omitted here for brevity -- fixing the pattern above resolves them too)"
         )
-
-    grounding_block = ""
-    has_grounding_error = any(
-        "not grounded in supplied module facts" in error for error in error_list
-    )
-    if has_grounding_error and grounded_vocabulary:
-        shown = list(grounded_vocabulary)[:MAX_RETRY_VOCAB_TERMS]
-        overflow = len(grounded_vocabulary) - len(shown)
-        vocab_text = ", ".join(shown)
-        if overflow > 0:
-            vocab_text += f", ... (+{overflow} more)"
-        grounding_block = f"""
-
-GROUNDED VOCABULARY FOR THE FLAGGED WRONG_OPTION(S):
-{vocab_text}
-
-The wrong_option(s) named above as "not grounded" contain NO word from this
-list. This is not a matter of degree -- go through the flagged wrong_option
-word by word, and if not one of its content words (ignore "a", "the", "of",
-"and", etc.) appears in the list above, the option is invalid no matter how
-plausible or academically reasonable it sounds. Rewrite it so at least one
-of its words is copied exactly from this list and remains genuinely incorrect
-for the question. This vocabulary is for wrong-option wording only. Do not
-substitute a different but equally ungrounded invented term."""
 
     rejected_json = candidate or "{}"
     if len(rejected_json) > MAX_RETRY_CANDIDATE_CHARS:
@@ -508,7 +490,6 @@ substitute a different but equally ungrounded invented term."""
 
 VALIDATION ERRORS:
 {error_bullets}
-{grounding_block}
 
 MANDATORY CORRECTIONS:
 - When a validation error names a card number, correct that exact card.
@@ -528,11 +509,6 @@ MANDATORY CORRECTIONS:
   as "according to the module", "based on the supplied material", and
   "as described in the lesson". Describe the topic directly without
   mentioning where the information came from.
-- If an error says a wrong_option "is not grounded in supplied module facts",
-  rewrite only that wrong_option using an exact substantive term from the
-  supplied grounded vocabulary while keeping the option plausible and
-  incorrect. The vocabulary is not evidence for the question, correct answer,
-  explanation, or hint. Do not introduce an outside example or technology.
 - If several errors say a fact or concept duplicates one already assigned
   elsewhere, do not rename or reorder it -- pick a different concept
   grounded in fact_ids that no other concept has used.
@@ -579,22 +555,6 @@ def build_cluster_retry_prompt(
         prior_signals,
     )
 
-    grounding_block = ""
-    if any(
-        "not grounded in supplied module facts" in error for error in error_list
-    ):
-        vocabulary = grounded_vocabulary(concept, concept_facts, distractor_facts)
-        shown = list(vocabulary)[:MAX_RETRY_VOCAB_TERMS]
-        payload["grounded_vocabulary_for_retry"] = shown
-        overflow = len(vocabulary) - len(shown)
-        if overflow:
-            payload["omitted_grounded_vocabulary_count"] = overflow
-        grounding_block = """
-    - For each flagged ungrounded wrong_option, replace only that field with a
-      plausible incorrect option containing an exact substantive term from
-      grounded_vocabulary_for_retry. That vocabulary is for wrong options only,
-      not evidence for correct content."""
-
     rejected_block = ""
     if candidate is not None:
         rejected_json = candidate
@@ -618,9 +578,11 @@ def build_cluster_retry_prompt(
       at least one of each. Scenario analysis is an approach, never a type.
     - Identification and true-false option fields must be "". Multiple-choice
       must contain one correct option and three distinct incorrect options.
-    - Questions, answers, explanations, and hints must use concept_facts.
-      Multiple-choice distractors must use allowed_wrong_option_terms rather
-      than invented outside content; those terms are not answer authority.
+    - Questions, correct answers, true-false decisions, explanations, and hints
+      must use concept_facts. Multiple-choice distractors may use a familiar
+      closely related term absent from the facts, but must remain relevant,
+      plausible, in the same semantic category, and unambiguously incorrect.
+      suggested_wrong_option_terms is optional vocabulary, not an allow-list.
     - If scenario analysis is flagged, rewrite that card around a concrete
       supported situation that requires interpretation. A direct definition
       question is recall or classification, not scenario analysis. You may
@@ -628,7 +590,7 @@ def build_cluster_retry_prompt(
       question.
     - Remove provenance wording and keep the answer out of identification stems.
     - Include all eleven required fields and preserve expalanation spelling.
-    - Return JSON only with the shape {{"cards":[...]}}.{grounding_block}
+    - Return JSON only with the shape {{"cards":[...]}}.
 
     INPUT JSON:
     {_json(payload)}{rejected_block}
@@ -733,7 +695,9 @@ def build_grounding_review_prompt(
             for cluster in clusters
         ]
     }
-    return f"""Review these generated clusters against only their supplied facts. Flag a cluster if any card contains an unsupported claim, answer leakage, an invalid distractor, a misleading explanation, or insufficient variation among its {CARDS_PER_CLUSTER} assessment approaches. Do not rewrite cards.
+    return f"""Review these generated clusters against only their supplied facts. Questions, correct answers, true-false decisions, explanations, and hints must be supported by those facts. Flag a cluster if any card contains an unsupported claim, answer leakage, an invalid distractor, a misleading explanation, or insufficient variation among its {CARDS_PER_CLUSTER} assessment approaches.
+
+    A wrong option is not invalid merely because its wording does not appear in the supplied facts. It may use a familiar related term, but it must be plausible, unambiguously incorrect, in the same semantic category and answer shape as the correct option, and relevant to the question and module domain. Flag a distractor only when it is correct or arguably correct, duplicates another option, is nonsensical, mismatches the answer category, or is unrelated to the question or module domain. Do not rewrite cards.
 
     Return only this JSON shape. Use an empty issues list when no defect exists:
     {{"issues":[{{"cluster":"valid UUID copied from input","reasons":["unsupported claim"]}}]}}

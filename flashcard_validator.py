@@ -71,7 +71,7 @@ DIRECT_STEM = re.compile(r"^(what(?:\s+term)?|which|who|where|when|why|how)\b", 
 LEADING_WRAPPER = re.compile(r"^(according to|based on)\b", re.I)
 SCENARIO_ACTOR = re.compile(
     r"\b(?:a|an|the)\s+(?:user|learner|student|designer|developer|team|"
-    r"organization|operator|employee|customer|participant|person|group|company|"
+    r"organization|operator|employee|customer|participant|researcher|person|group|company|"
     r"system|interface|application|website|device|product|workflow|task)\b",
     re.I,
 )

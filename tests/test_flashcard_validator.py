@@ -589,6 +589,23 @@ def test_scenario_analysis_rejects_a_definition_question_without_a_situation():
     )
 
 
+def test_scenario_analysis_accepts_researcher_observing_users():
+    values = list(valid_cards())
+    approaches = list(APPROACHES)
+    approaches[0] = "scenario analysis"
+    values[0] = replace(
+        values[0],
+        question=(
+            "A researcher observes that users struggle with a new interface. "
+            "This scenario demonstrates which aspect of human capabilities?"
+        ),
+        assessment_approach="scenario analysis",
+    )
+    concept = replace(valid_concept(), assessment_approaches=tuple(approaches))
+
+    assert validate_cluster(tuple(values), concept) == ()
+
+
 @pytest.mark.parametrize(
     ("position", "changes", "message"),
     [

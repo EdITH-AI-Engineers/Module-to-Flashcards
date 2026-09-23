@@ -511,6 +511,24 @@ _LEADING_FACTS_STATE_RE = re.compile(
     r"show|shows|confirm|confirms)\s+that\s+",
     re.I,
 )
+_LEADING_PROVENANCE_ASSERTION_RE = re.compile(
+    rf"^\s*(?:the\s+)?{_PROVENANCE_SOURCE}\s+(?:explicitly\s+)?"
+    r"(?:states?|stated|says?|said|explains?|explained|describes?|described|"
+    r"notes?|noted|indicates?|indicated|mentions?|mentioned|discusses?|"
+    r"discussed|shows?|showed|confirms?|confirmed)"
+    r"(?:\s+that\s+|\s*:\s*)",
+    re.I,
+)
+_PROVENANCE_MODIFIER_RE = re.compile(
+    rf"(?:"
+    rf"\s+(?:that|which)\s+(?:is|are|was|were)\s+|"
+    rf"(?<!\bis)(?<!\bare)(?<!\bwas)(?<!\bwere)(?<!\bbeen)(?<!\bbeing)"
+    rf",?\s+(?:as\s+)?"
+    rf")"
+    rf"(?:mentioned|discussed|described|defined|presented|introduced|covered)"
+    rf"\s+in\s+(?:the\s+)?{_PROVENANCE_SOURCE}\b\s*,?",
+    re.I,
+)
 _PROVENANCE_WRAPPER_RE = re.compile(
     rf",?\s*(?:(?:according\s+to|based\s+on)\s+(?:the\s+)?"
     rf"{_PROVENANCE_SOURCE}|as\s+(?:stated|described)\s+in\s+"
@@ -538,6 +556,8 @@ def _strip_citation_phrasing(text: str) -> str:
     """
     text = _EXPLICIT_STATED_AS_RE.sub(r"is \1", text)
     text = _LEADING_FACTS_STATE_RE.sub("", text)
+    text = _LEADING_PROVENANCE_ASSERTION_RE.sub("", text)
+    text = _PROVENANCE_MODIFIER_RE.sub(" ", text)
     text = _PROVENANCE_WRAPPER_RE.sub(" ", text)
     text = _DANGLING_STATED_IN_RE.sub("", text)
     text = _LEFTOVER_FACTS_RE.sub("", text)

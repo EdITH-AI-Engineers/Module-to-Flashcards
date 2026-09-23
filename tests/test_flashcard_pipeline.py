@@ -644,3 +644,48 @@ def test_cluster_grounding_uses_the_full_module_not_only_the_prompt_subset():
 
     assert generated[0].wrong_option_3 == "Distant grounded term"
     assert pipeline.rejection_stats["rejected_attempts"] == 0
+
+
+def test_provenance_wrappers_are_stripped_before_local_hint_repair():
+    cards = list(make_cards(1))
+    cards[0] = replace(
+        cards[0],
+        question=(
+            "Which classification discussed in the module applies to "
+            "topic1 alpha1 beta1 revision0?"
+        ),
+    )
+    cards[2] = replace(
+        cards[2],
+        question=(
+            "The module states that item topic1 alpha1 beta1 revision0 has "
+            "its stated relationship."
+        ),
+    )
+    cards[3] = replace(cards[3], hint=cards[3].correct_option)
+    backend = FakeBackend(
+        [json.dumps({"cards": [asdict(card) for card in cards]})]
+    )
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(final_review=False),
+        progress=lambda message: None,
+    )
+
+    generated = pipeline._generate_cards(
+        ModuleIdentity("CPE0021", "1"),
+        make_concept(1),
+        (),
+        label="provenance cleanup",
+    )
+
+    assert generated[0].question == (
+        "Which classification applies to topic1 alpha1 beta1 revision0?"
+    )
+    assert generated[2].question == (
+        "Item topic1 alpha1 beta1 revision0 has its stated relationship."
+    )
+    assert generated[3].hint == (
+        "Consider the relationship or distinction needed to answer."
+    )
+    assert len(backend.calls) == 1

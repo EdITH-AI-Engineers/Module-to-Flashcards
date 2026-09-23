@@ -193,6 +193,30 @@ def test_cards_parser_rejects_using_distractor_pool_as_answer_authority():
             "Which property, according to the module, determines the outcome?",
             "Which property determines the outcome?",
         ),
+        (
+            "The module states that design rules are a set of technical specifications.",
+            "Design rules are a set of technical specifications.",
+        ),
+        (
+            "Which term refers to the original title of a design rule discussed in the module?",
+            "Which term refers to the original title of a design rule?",
+        ),
+        (
+            "What is the original title of the design rule mentioned in the module?",
+            "What is the original title of the design rule?",
+        ),
+        (
+            "The module explicitly states that design rules guide decisions.",
+            "Design rules guide decisions.",
+        ),
+        (
+            "Which design rule, discussed in the module, guides decisions?",
+            "Which design rule guides decisions?",
+        ),
+        (
+            "Which design rule that is mentioned in the module guides decisions?",
+            "Which design rule guides decisions?",
+        ),
     ),
 )
 def test_cards_parser_removes_generic_provenance_wrappers(question, expected):
@@ -205,6 +229,22 @@ def test_cards_parser_removes_generic_provenance_wrappers(question, expected):
     assert "card 1 exposes provenance metadata" not in validate_cluster(
         cards, valid_concept()
     )
+
+
+@pytest.mark.parametrize(
+    "question",
+    (
+        "The module states are synchronized across replicas.",
+        "Which design rule was mentioned in the module?",
+    ),
+)
+def test_cards_parser_does_not_erase_substantive_provenance_predicates(question):
+    payload = json.loads(cards_json())
+    payload["cards"][0]["question"] = question
+
+    cards = parse_cards(json.dumps(payload))
+
+    assert cards[0].question == question
 
 
 def test_cards_parser_keeps_non_provenance_according_to_clause():

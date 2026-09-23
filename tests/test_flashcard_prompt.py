@@ -73,6 +73,21 @@ def test_system_prompt_requires_approach_labels_to_match_actual_reasoning():
     assert '"what term refers to..." is recall or classification' in lowered
 
 
+def test_identification_examples_are_content_neutral():
+    retry_prompt = build_retry_prompt(
+        "ORIGINAL",
+        '{"cards": []}',
+        ["card 1 question reveals the identification answer"],
+    )
+    combined = f"{SYSTEM_PROMPT}\n{retry_prompt}".casefold()
+
+    assert "human-computer interaction" not in combined
+    assert "[answer term]" not in combined
+    assert "[supported function or defining trait]" not in combined
+    assert "exact correct_option text or its abbreviation" in combined
+    assert "supported function, purpose, defining trait, or relationship" in combined
+
+
 def test_cluster_prompt_avoids_banned_provenance_language_for_distractors():
     prompt = build_cluster_prompt(
         ModuleIdentity("CPE0021", "1"),

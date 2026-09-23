@@ -63,7 +63,7 @@ Identification rules:
 - The answer must be a short phrase, not a sentence or explanation.
 - Set wrong_option_1, wrong_option_2, wrong_option_3 to empty strings and is_true to null. These three fields must literally be "" â€” do not place any distractor words, related terms, or partial answers there, even though that pattern is normal for multiple-choice.
 - Ask directly without embedding the answer or its full definition in the stem.
-- Neither the complete answer nor its abbreviation may appear anywhere in the question, even as part of a longer phrase. Describe the concept by its function, purpose, defining trait, or relationships, never by restating its name. Bad: "What is the term for the field that focuses on the design of computer technology and human-computer interaction?" (repeats the answer "human-computer interaction"). Good: "What term describes the field concerned with designing computer systems that are efficient, safe, comfortable, and enjoyable to use?" If the supplied fact defining the concept restates the concept's own name, paraphrase around the name instead of quoting the fact.
+- Neither the complete answer nor its abbreviation may appear anywhere in the question, even as part of a longer phrase. Describe the concept by its function, purpose, defining trait, or relationships, never by restating its name. Use this content-neutral pattern: a question is invalid when it contains the exact correct_option text or its abbreviation. A valid question asks for the term through a supported function, purpose, defining trait, or relationship. If the supplied fact defining the concept restates the concept's own name, paraphrase around the name instead of quoting the fact.
 
 True-false rules:
 - Write only a declarative statement in question.
@@ -139,7 +139,7 @@ def grounded_vocabulary(
     for fact_text in concept.facts:
         terms.update(_grounding_tokens(fact_text))
     # Some corpus "facts" are really mislabeled section headers (e.g. a
-    # statement that is literally "Module 1: Introduction to HCI"). Words
+    # statement that is literally "Module 1: Topic Overview"). Words
     # like "module" or "lesson" are still technically present in the source
     # text, but handing them to the model as valid grounding vocabulary
     # would just cause a wrong_option to trip the separate provenance-
@@ -542,9 +542,9 @@ MANDATORY CORRECTIONS:
   trait, or relationships -- do not restate the term, name, or its
   abbreviation anywhere in the question, even inside a longer phrase.
   Keep correct_option unchanged.
-  Example: correct_option "Human-Computer Interaction" ->
-  Invalid: "What is the term for the field that focuses on ... human-computer interaction?"
-  Valid: "What term describes the field concerned with designing computer systems people can use effectively, safely, and enjoyably?"
+  Apply this content-neutral pattern: an invalid question repeats the exact
+  correct_option text or its abbreviation. A valid question asks for the term
+  through a supported function, purpose, defining trait, or relationship.
 
 ORIGINAL REQUEST:
 {original_prompt}

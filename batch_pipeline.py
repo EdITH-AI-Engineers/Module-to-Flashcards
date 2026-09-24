@@ -20,6 +20,7 @@ from pipeline import (
     PipelinePaths,
     _valid_flashcards,
     _valid_graph,
+    _valid_checked_graph,
     _valid_structured_text,
 )
 from slide_normalizer import SlideNormalizationError
@@ -121,6 +122,7 @@ def _manifest_settings(args: argparse.Namespace) -> dict[str, object]:
         "graph_overlap_tokens": getattr(args, "overlap_tokens", 64),
         "graph_max_new_tokens": getattr(args, "max_new_tokens", 192),
         "graph_model": DEFAULT_MODEL,
+        "graph_checker": "qwen-conservative-v1",
     }
 
 
@@ -179,9 +181,18 @@ def _invalidate_for_recomputation(state: _BatchState) -> None:
     paths = state.item.paths
     manifest = _manifest_path(state.item)
     if state.needs_normalize:
-        _invalidate((paths.graph_json, paths.triples_csv, paths.flashcards, manifest))
+        _invalidate(
+            (
+                paths.unchecked_graph_json,
+                paths.unchecked_triples_csv,
+                paths.graph_json,
+                paths.triples_csv,
+                paths.flashcards,
+                manifest,
+            )
+        )
     elif state.needs_graph:
-        _invalidate((paths.flashcards, manifest))
+        _invalidate((paths.graph_json, paths.triples_csv, paths.flashcards, manifest))
     elif state.needs_flashcards:
         _invalidate((manifest,))
 
@@ -253,7 +264,7 @@ def _normalize_stage(item: BatchItem, backend: object) -> Path:
 def _graph_stage(item: BatchItem, runtime: object) -> tuple[Path, Path]:
     args = argparse.Namespace(**vars(item.args))
     args.input = item.paths.structured_text
-    args.output_dir = item.paths.graph_dir
+    args.output_dir = item.paths.unchecked_graph_dir
     args.model = getattr(item.args, "rebel_model", DEFAULT_MODEL)
     args.chunk_tokens = getattr(args, "chunk_tokens", 384)
     args.overlap_tokens = getattr(args, "overlap_tokens", 64)
@@ -267,8 +278,9 @@ def _graph_stage(item: BatchItem, runtime: object) -> tuple[Path, Path]:
 def _flashcard_stage(item: BatchItem, backend: object) -> Path | None:
     args = argparse.Namespace(**vars(item.args))
     args.graph = item.paths.graph_json
+    args.unchecked_graph = item.paths.unchecked_graph_json
     args.output = item.paths.flashcards
-    args.course_corpus = item.paths.workspace.parent / "course_corpus.json"
+    args.course_corpus = item.paths.flashcards.parent / "course_corpus.json"
     args.max_retries = item.args.attempts
     args.final_review = not item.args.skip_final_review
     args.smoke_test = False
@@ -294,10 +306,14 @@ def _make_state(item: BatchItem, timeout_seconds: float | None) -> _BatchState:
         or not reusable
         or not _valid_structured_text(paths.structured_text)
     )
-    needs_graph = needs_normalize or args.force or not _valid_graph(paths.graph_json)
+    has_graph_source = _valid_graph(paths.unchecked_graph_json) or _valid_checked_graph(
+        paths.graph_json
+    )
+    needs_graph = needs_normalize or args.force or not has_graph_source
     needs_flashcards = (
         needs_graph
         or args.force
+        or not _valid_checked_graph(paths.graph_json)
         or not _valid_flashcards(
             paths.flashcards, args.module_number, args.course_code
         )
@@ -413,7 +429,7 @@ def _stage_output(item: BatchItem, stage_name: str) -> Path:
     if stage_name == "normalize":
         return item.paths.structured_text
     if stage_name == "graph":
-        return item.paths.graph_json
+        return item.paths.unchecked_graph_json
     return item.paths.flashcards
 
 
@@ -422,6 +438,7 @@ def _result(states: Sequence[_BatchState]) -> BatchResult:
         state.item.paths.flashcards
         for state in states
         if state.active
+        and _valid_checked_graph(state.item.paths.graph_json)
         and _valid_flashcards(
             state.item.paths.flashcards,
             state.item.args.module_number,
@@ -500,7 +517,7 @@ def run_batch(
         stage_name="graph",
         loader=dependencies.rebel_loader,
         stage=dependencies.graph_stage,
-        validator=lambda item: _valid_graph(item.paths.graph_json),
+        validator=lambda item: _valid_graph(item.paths.unchecked_graph_json),
         dependencies=dependencies,
         timeout_seconds=timeout_seconds,
     ):

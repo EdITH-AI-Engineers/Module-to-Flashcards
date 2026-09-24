@@ -646,7 +646,7 @@ def test_production_graph_adapter_translates_fast_settings(tmp_path, monkeypatch
 
     assert captured["runtime"] is runtime
     assert captured["args"]["input"] == item.paths.structured_text
-    assert captured["args"]["output_dir"] == item.paths.graph_dir
+    assert captured["args"]["output_dir"] == item.paths.unchecked_graph_dir
     assert captured["args"]["device"] == "auto"
     assert captured["args"]["batch_size"] == 1
     assert captured["args"]["num_beams"] == 1
@@ -670,9 +670,10 @@ def test_production_flashcard_adapter_translates_review_settings(
     assert output == item.paths.flashcards
     assert captured["backend"] is backend
     assert captured["args"]["graph"] == item.paths.graph_json
+    assert captured["args"]["unchecked_graph"] == item.paths.unchecked_graph_json
     assert captured["args"]["output"] == item.paths.flashcards
     assert captured["args"]["course_corpus"] == (
-        item.paths.workspace.parent / "course_corpus.json"
+        item.paths.flashcards.parent / "course_corpus.json"
     )
     assert captured["args"]["max_retries"] == item.args.attempts
     assert captured["args"]["final_review"] is False

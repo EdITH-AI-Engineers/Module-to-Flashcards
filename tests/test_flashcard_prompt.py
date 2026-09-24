@@ -223,6 +223,8 @@ def test_cluster_prompt_prioritizes_distinct_supported_learning_checks():
     assert "changing only the card type" in normalized_prompt
     assert "is the correct answer here" in prompt
     assert "this statement is true" in prompt
+    assert "another valid member of the requested category" in prompt
+    assert "supported distinguishing property" in prompt
 
 
 def test_cluster_prompt_does_not_force_a_concrete_scenario_template():

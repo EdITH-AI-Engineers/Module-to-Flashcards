@@ -55,6 +55,7 @@ type describes a card's structural format, not its reasoning style. Never copy a
 Multiple-choice rules:
 - Supply exactly one concise correct_option and three plausible, distinct, incorrect options.
 - Exactly one option may satisfy the question. Never use another supported or arguably correct statement as a wrong option.
+- Never use another valid member of the requested category as a distractor. If a broad category has several valid candidates, narrow the question with a supported distinguishing property or use distractors that clearly do not satisfy it.
 - correct_option, wrong_option_1, wrong_option_2, and wrong_option_3 must be four textually different strings. Never let a wrong_option repeat, restate, or closely paraphrase the correct_option or another wrong_option within the same card.
 - Each wrong_option must match the correct answer's semantic category and answer shape, remain relevant to the question and module domain, and be unambiguously incorrect. It may use a familiar related term that is not written verbatim in the supplied facts.
 - Prefer positive questions. Do not use NOT or EXCEPT to turn an invented claim into the correct answer.
@@ -406,6 +407,9 @@ def build_cluster_prompt(
       closely related distractor need not appear in the evidence.
     - Exactly one option may satisfy a multiple-choice question; never use
       another supported or arguably correct claim as a wrong option.
+    - Never use another valid member of the requested category as a distractor.
+      If several candidates satisfy a broad stem, narrow the question with a
+      supported distinguishing property or choose clearly invalid alternatives.
     - Prefer positive questions. Do not use NOT or EXCEPT to make an invented
       claim the correct answer.
     - When the evidence supplies an equation or numerical relationship, an

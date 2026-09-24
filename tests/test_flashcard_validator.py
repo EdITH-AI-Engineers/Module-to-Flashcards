@@ -837,6 +837,97 @@ def test_cluster_allows_relevant_distractors_that_are_absent_from_source_facts()
     assert not any("not grounded" in error for error in errors)
 
 
+@pytest.mark.parametrize(
+    "options",
+    (
+        ("C", "C++", "C#", "Assembly"),
+        ("x+1", "x-1", "x*1", "x/1"),
+        ("Na+", "Na-", "Cl-", "H+"),
+        ("f/2.8", "f/4", "1/60 s", "ISO 400"),
+        ("RGB", "RGBA", "CMYK", "HSL"),
+    ),
+)
+def test_multiple_choice_distinctness_preserves_meaningful_notation(options):
+    values = list(valid_cards())
+    values[0] = replace(
+        values[0],
+        correct_option=options[0],
+        wrong_option_1=options[1],
+        wrong_option_2=options[2],
+        wrong_option_3=options[3],
+    )
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert "card 1 multiple-choice options must be distinct" not in errors
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    (
+        ("C++", " c ++ "),
+        ("f/2.8", "F / 2.8"),
+        ("x-1", "x \u2212 1"),
+        ("Na+", "na +"),
+    ),
+)
+def test_multiple_choice_distinctness_still_rejects_formatting_variants(
+    left, right
+):
+    values = list(valid_cards())
+    values[0] = replace(
+        values[0],
+        correct_option=left,
+        wrong_option_1=right,
+        wrong_option_2="Alternative B",
+        wrong_option_3="Alternative C",
+    )
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert "card 1 multiple-choice options must be distinct" in errors
+
+
+def test_short_identifier_does_not_leak_through_letters_inside_words():
+    values = list(valid_cards())
+    values[1] = replace(
+        values[1],
+        question="Which language is commonly used for systems programming?",
+        correct_option="C",
+        hint="Consider compiled languages used for systems software.",
+    )
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert "card 2 question reveals the identification answer" not in errors
+    assert "card 2 hint reveals the correct answer" not in errors
+
+
+@pytest.mark.parametrize(
+    ("answer", "question", "hint"),
+    (
+        ("C", "What is C?", "The answer is C."),
+        ("C++", "Which language is C ++?", "Recall C++ syntax."),
+        ("x+1", "What expression is x + 1?", "Use x+1."),
+    ),
+)
+def test_answer_leakage_still_detects_complete_identifiers_and_expressions(
+    answer, question, hint
+):
+    values = list(valid_cards())
+    values[1] = replace(
+        values[1],
+        question=question,
+        correct_option=answer,
+        hint=hint,
+    )
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert "card 2 question reveals the identification answer" in errors
+    assert "card 2 hint reveals the correct answer" in errors
+
+
 @pytest.mark.parametrize("phrase", ("concept fact", "distractor pool"))
 def test_cluster_rejects_internal_evidence_labels(phrase):
     values = list(valid_cards())

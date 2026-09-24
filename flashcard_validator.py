@@ -193,6 +193,87 @@ def normalize_stem(value: str) -> str:
     return " ".join(value.split())
 
 
+_TECHNICAL_SYMBOL_TRANSLATION = str.maketrans(
+    {
+        "\u2010": "-",
+        "\u2011": "-",
+        "\u2012": "-",
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2212": "-",
+        "\ufe63": "-",
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u02bc": "'",
+    }
+)
+_ATTACHED_IDENTIFIER_SYMBOLS = frozenset("_+#-*/^%=<>|&~@")
+
+
+def _canonical_option(value: str) -> str:
+    """Normalize formatting while preserving meaning-bearing notation.
+
+    Word-only normalization is useful for semantic question comparison, but it
+    destroys distinctions encoded by operators, charges, identifier suffixes,
+    ratios, and other punctuation. Option identity therefore keeps those marks
+    while normalizing Unicode variants, case, and insignificant spacing.
+    """
+
+    text = unicodedata.normalize("NFKC", value).translate(
+        _TECHNICAL_SYMBOL_TRANSLATION
+    )
+    text = " ".join(text.casefold().split())
+    text = re.sub(r"\s*([_+#*/^%=<>|&~@()\[\]{}:\-])\s*", r"\1", text)
+    # A suffix-symbol run followed by prose starts a new lexical unit. Restore
+    # that boundary after compacting optional spaces around technical symbols.
+    text = re.sub(r"(?<=\w)([+#]+)(?=[a-z]{2,}\b)", r"\1 ", text)
+    # Sentence punctuation at the end is formatting, not part of an answer.
+    text = re.sub(r"(?<=\w)[.!?,;:]+$", "", text)
+    return text
+
+
+def _left_neighbor_is_attached(text: str, start: int) -> bool:
+    if start == 0:
+        return False
+    neighbor = text[start - 1]
+    return (
+        neighbor.isalnum()
+        or neighbor in _ATTACHED_IDENTIFIER_SYMBOLS
+        or neighbor == "."
+    )
+
+
+def _right_neighbor_is_attached(text: str, end: int) -> bool:
+    if end >= len(text):
+        return False
+    neighbor = text[end]
+    if neighbor.isalnum():
+        return True
+    if neighbor in _ATTACHED_IDENTIFIER_SYMBOLS:
+        return True
+    # A period continues an identifier when followed by another identifier
+    # character (for example NET inside .NET or a component of a version).
+    return neighbor == "." and end + 1 < len(text) and text[end + 1].isalnum()
+
+
+def _contains_complete_answer(text: str, answer: str) -> bool:
+    """Return whether a complete answer identifier/phrase occurs in text."""
+
+    haystack = _canonical_option(text)
+    needle = _canonical_option(answer)
+    if not needle:
+        return False
+    search_from = 0
+    while (start := haystack.find(needle, search_from)) >= 0:
+        end = start + len(needle)
+        if not _left_neighbor_is_attached(
+            haystack, start
+        ) and not _right_neighbor_is_attached(haystack, end):
+            return True
+        search_from = start + 1
+    return False
+
+
 def _stem(token: str) -> str:
     """Light, dependency-free suffix stripping so trivial inflections (the
     module facts saying "systems" while a generated option says "system",
@@ -778,7 +859,7 @@ def validate_cluster(
                 errors.append(
                     f"{prefix} {card.type} requires one correct and three non-empty wrong options"
                 )
-            if len({_normalized(option) for option in options}) != 4:
+            if len({_canonical_option(option) for option in options}) != 4:
                 errors.append(f"{prefix} {card.type} options must be distinct")
             if card.is_true is not None:
                 errors.append(f"{prefix} {card.type} is_true must be empty")
@@ -803,8 +884,7 @@ def validate_cluster(
                 errors.append(
                     f"{prefix} identification answer must be a concise phrase"
                 )
-            normalized_answer = _normalized(answer)
-            if normalized_answer and normalized_answer in _normalized(card.question):
+            if _contains_complete_answer(card.question, answer):
                 errors.append(f"{prefix} question reveals the identification answer")
 
         elif card.type == "true-false":
@@ -821,8 +901,7 @@ def validate_cluster(
             if type(card.is_true) is not int or card.is_true not in (0, 1):
                 errors.append(f"{prefix} true-false is_true must be 0 or 1")
 
-        normalized_answer = _normalized(card.correct_option)
-        if normalized_answer and normalized_answer in _normalized(card.hint):
+        if _contains_complete_answer(card.hint, card.correct_option):
             errors.append(f"{prefix} hint reveals the correct answer")
 
     return tuple(errors)

@@ -122,16 +122,8 @@ def test_prompts_treat_scenario_analysis_as_an_approach_not_a_card_type():
 
     assert "Use only multiple-choice, identification, and true-false." in SYSTEM_PROMPT
     assert '"type":"scenario analysis"' not in prompt
-    scenario_examples = [
-        json.loads(line.strip())
-        for line in prompt.splitlines()
-        if '"assessment_approach":"scenario analysis"' in line
-    ]
-    assert {example["type"] for example in scenario_examples} == {
-        "multiple-choice",
-        "identification",
-        "true-false",
-    }
+    assert "Scenario analysis may use any allowed structural type" in prompt
+    assert "do not invent a story to force the label" in prompt
 
 
 def test_plan_prompt_serializes_relationships_without_provenance():
@@ -185,20 +177,20 @@ def test_cluster_prompt_allows_planned_approaches_in_any_card_order():
     )
 
     payload = json.loads(prompt.split("INPUT JSON:\n", 1)[1])
-    assert "facts" not in payload["concept"]
-    assert payload["concept_facts"] == [
-        {"fact_id": "e1", "statement": "binary | uses | base 2"}
-    ]
+    assert payload["topic"] == "Binary base"
+    assert payload["evidence"] == ["binary | uses | base 2"]
+    assert "concept" not in payload
+    assert "concept_facts" not in payload
+    assert "fact_id" not in prompt
     assert "distractor_pool" not in payload
     assert "grounded_vocabulary" not in payload
-    assert "suggested_wrong_option_terms" in payload
-    assert "binary" in payload["suggested_wrong_option_terms"]
-    assert "octal" in payload["suggested_wrong_option_terms"]
-    assert "optional topic vocabulary" in prompt
+    assert "suggested_wrong_option_terms" not in payload
+    assert "suggested wrong option terms" not in prompt.casefold()
+    assert "already_covered_subjects" not in payload
     assert "same semantic category" in prompt
-    assert "need not appear verbatim" in prompt
+    assert "need not appear in the evidence" in prompt
     assert "at least one exact" not in prompt
-    assert payload["concept"]["assessment_approaches"] == list(
+    assert payload["assessment_approaches"] == list(
         concept().assessment_approaches
     )
     for approach in concept().assessment_approaches:
@@ -212,7 +204,38 @@ def test_cluster_prompt_allows_planned_approaches_in_any_card_order():
     assert "REPEATED CRITICAL RULES" in prompt
     assert 'must literally be ""' in prompt
     assert "no wrong_option may repeat" in prompt
-    assert "Never write knowledge graph" in prompt
+    assert "internal generation details" in prompt
+
+
+def test_cluster_prompt_prioritizes_distinct_supported_learning_checks():
+    prompt = build_cluster_prompt(
+        ModuleIdentity("CPE0021", "1"),
+        concept(),
+        (GraphFact("e1", "binary | uses | base 2"),),
+        (GraphFact("e2", "octal | uses | base 8"),),
+    ).casefold()
+    normalized_prompt = " ".join(prompt.split())
+
+    assert "meaningfully distinct learning checks" in prompt
+    assert "same concept from supported angles" in prompt
+    assert "exactly one option" in prompt
+    assert "arguably correct" in prompt
+    assert "changing only the card type" in normalized_prompt
+    assert "is the correct answer here" in prompt
+    assert "this statement is true" in prompt
+
+
+def test_cluster_prompt_does_not_force_a_concrete_scenario_template():
+    prompt = build_cluster_prompt(
+        ModuleIdentity("CPE0021", "1"),
+        concept(),
+        (GraphFact("e1", "binary | uses | base 2"),),
+        (),
+    ).casefold()
+
+    assert "must present a concrete situation" not in prompt
+    assert "build a short, concrete situation" not in prompt
+    assert "do not invent a story" in prompt
 
 
 def test_retry_prompt_targets_named_cards_and_repeats_critical_checks():
@@ -281,8 +304,9 @@ def test_cluster_retry_is_compact_and_does_not_nest_original_prompt():
     assert "PARTIAL_CANDIDATE" in prompt
     assert "Approaches may repeat" in prompt
     assert "positional assessment_approach order" not in prompt
-    assert "A direct definition" in prompt
-    assert "not scenario analysis" in prompt
+    assert "do not invent a scenario" in prompt.casefold()
+    assert "suggested_wrong_option_terms" not in prompt
+    assert "already_covered_subjects" not in prompt
     assert len(SYSTEM_PROMPT) + len(prompt) < 30_000
 
 
@@ -310,6 +334,8 @@ def test_grounding_review_includes_evidence_and_card_content():
     assert "does not appear in the supplied facts" in prompt
     assert "same semantic category" in prompt
     assert "unrelated to the question or module domain" in prompt
+    assert "same answer-bearing relationship" in prompt
+    assert "different type, polarity, or wording" in prompt
 
 
 def test_duplicate_review_excludes_answers_and_evidence():
@@ -319,3 +345,4 @@ def test_duplicate_review_excludes_answers_and_evidence():
     assert "Binary uses base 2" not in prompt
     assert "binary | uses | base 2" not in prompt
     assert '"issues"' in prompt
+    assert "definition and its negated restatement" in prompt

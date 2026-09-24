@@ -190,6 +190,51 @@ def test_extract_facts_filters_noise_from_existing_graph_without_a_minimum():
     assert facts[0].statement == "Energy cannot be created or destroyed."
 
 
+def test_extract_facts_does_not_fall_back_to_edges_when_facts_are_all_metadata():
+    value = graph()
+    value["facts"] = [
+        {
+            "id": "f1",
+            "statement": "Module 3 is titled Programming Fundamentals.",
+            "kind": "knowledge_statement",
+        }
+    ]
+
+    with pytest.raises(GraphInputError, match="no usable lesson facts"):
+        extract_graph_facts(value)
+
+
+def test_extract_facts_filters_presentation_metadata_from_legacy_edges():
+    value = graph()
+    value["edges"] = [
+        {
+            "id": "e1",
+            "subject": "Module 3",
+            "relation": "title",
+            "object": "Programming Fundamentals",
+        }
+    ]
+
+    with pytest.raises(GraphInputError, match="no usable relationship facts"):
+        extract_graph_facts(value)
+
+
+def test_extract_facts_keeps_legacy_domain_use_of_module():
+    value = graph()
+    value["edges"] = [
+        {
+            "id": "e1",
+            "subject": "A software module",
+            "relation": "exposes",
+            "object": "a public interface",
+        }
+    ]
+
+    facts = extract_graph_facts(value)
+
+    assert facts[0].statement == "A software module | exposes | a public interface"
+
+
 def test_extract_facts_rejects_graph_without_usable_relationships():
     value = graph()
     value["edges"] = [{"id": "e1", "subject": "binary", "relation": "uses"}]

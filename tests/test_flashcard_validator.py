@@ -300,6 +300,29 @@ def test_cards_parser_falls_back_instead_of_damaging_provenance_hints(hint):
     )
 
 
+def test_cards_parser_does_not_leave_a_damaged_passive_provenance_hint():
+    payload = json.loads(cards_json())
+    payload["cards"][0]["hint"] = "The title is directly mentioned in the fact."
+
+    card = parse_cards(json.dumps(payload))[0]
+
+    assert card.hint == (
+        "Consider the key relationship or distinction central to this topic."
+    )
+    assert card.hint != "The title is directly."
+
+
+def test_cards_parser_removes_a_fact_id_wrapper_without_losing_the_explanation():
+    payload = json.loads(cards_json())
+    payload["cards"][0]["expalanation"] = (
+        "Fact f14 confirms that binary uses base 2 rather than base 10."
+    )
+
+    card = parse_cards(json.dumps(payload))[0]
+
+    assert card.expalanation == "Binary uses base 2 rather than base 10."
+
+
 @pytest.mark.parametrize(
     "explanation",
     (
@@ -307,7 +330,7 @@ def test_cards_parser_falls_back_instead_of_damaging_provenance_hints(hint):
         "The central role of perception in interaction is explicitly stated in the provided fact.",
     ),
 )
-def test_cards_parser_falls_back_instead_of_damaging_provenance_explanations(
+def test_cards_parser_preserves_unsafe_explanations_for_validation_retry(
     explanation,
 ):
     payload = json.loads(cards_json())
@@ -315,7 +338,28 @@ def test_cards_parser_falls_back_instead_of_damaging_provenance_explanations(
 
     card = parse_cards(json.dumps(payload))[0]
 
-    assert card.expalanation == "Base 2 is the correct answer here."
+    assert card.expalanation == explanation
+    assert "card 1 exposes provenance metadata" in validate_cluster(
+        (card, *valid_cards()[1:]), valid_concept()
+    )
+    assert "correct answer here" not in card.expalanation
+
+
+@pytest.mark.parametrize(
+    "explanation",
+    (
+        "Base 2 is the correct answer here.",
+        "This statement is true.",
+        "This statement is false.",
+    ),
+)
+def test_cluster_rejects_generic_explanation_filler(explanation):
+    values = list(valid_cards())
+    values[0] = replace(values[0], expalanation=explanation)
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert "card 1 expalanation must explain the answer" in errors
 
 
 @pytest.mark.parametrize(
@@ -413,6 +457,29 @@ def test_concept_plan_attaches_exact_fact_text_from_known_ids():
 
     assert concepts[0].fact_ids == ("e1",)
     assert concepts[0].facts == ("subject 1 | relates to | object 1",)
+
+
+def test_concept_plan_rejects_a_numbered_module_title_as_a_concept():
+    raw, known = plan_json()
+    payload = json.loads(raw)
+    payload["concepts"][0]["name"] = "Module 3 Title"
+
+    with pytest.raises(ValidationError, match="presentation/provenance metadata"):
+        parse_concept_plan(json.dumps(payload), known)
+
+
+def test_concept_plan_allows_module_as_a_domain_term():
+    raw, known = plan_json()
+    payload = json.loads(raw)
+    payload["concepts"][0]["name"] = "Software Module Interfaces"
+    known = (
+        GraphFact("e1", "A software module exposes a public interface."),
+        *known[1:],
+    )
+
+    concepts = parse_concept_plan(json.dumps(payload), known)
+
+    assert concepts[0].name == "Software Module Interfaces"
 
 
 def test_concept_plan_accepts_comma_separated_token_fields():
@@ -620,7 +687,7 @@ def test_each_card_type_accepts_scenario_analysis_as_its_approach(position):
     assert validate_cluster(tuple(values), concept) == ()
 
 
-def test_scenario_analysis_rejects_a_definition_question_without_a_situation():
+def test_scenario_analysis_label_does_not_require_a_scenario_template():
     values = list(valid_cards())
     approaches = list(APPROACHES)
     approaches[1] = "scenario analysis"
@@ -634,10 +701,46 @@ def test_scenario_analysis_rejects_a_definition_question_without_a_situation():
 
     errors = validate_cluster(tuple(values), concept)
 
-    assert any(
-        "scenario analysis must present a concrete situation" in error
-        for error in errors
-    )
+    assert not any("scenario analysis" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "field_value",
+    (
+        "To document a program",
+        "A software module exposes a public interface",
+        "A file stores the records",
+        "A slide mechanism controls the position",
+    ),
+)
+def test_cluster_allows_domain_uses_of_words_that_can_also_name_sources(
+    field_value,
+):
+    values = list(valid_cards())
+    values[0] = replace(values[0], wrong_option_3=field_value)
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert "card 1 exposes provenance metadata" not in errors
+
+
+@pytest.mark.parametrize(
+    "question",
+    (
+        "Which answer is listed in fact f13?",
+        "Which answer follows from the concept facts?",
+        "Which topic appears in the provided vocabulary?",
+        "Which claim follows from the already covered subjects?",
+        "Which option came from suggested wrong option terms?",
+    ),
+)
+def test_cluster_rejects_internal_generation_metadata(question):
+    values = list(valid_cards())
+    values[0] = replace(values[0], question=question)
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert "card 1 exposes provenance metadata" in errors
 
 
 def test_scenario_analysis_accepts_researcher_observing_users():

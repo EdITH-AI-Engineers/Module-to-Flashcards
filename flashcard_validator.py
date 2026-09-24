@@ -48,35 +48,48 @@ BANNED_FRAMING = (
     "Consider the following statement",
     "Evaluate this statement",
 )
+_PROVENANCE_SOURCE_TERM = (
+    r"(?:knowledge\s+graph|concept\s+facts?|facts?|source(?:\s+material)?|"
+    r"material|information|text|module(?:\s+content)?|document|lesson|"
+    r"slides?|file|chunk|citation|url|definition|vocabulary)"
+)
 PROVENANCE_PATTERNS = (
-    r"\bknowledge graph\b",
-    r"\bthe source\b",
-    r"\bsource material\b",
-    r"\bmodule(?:\s+content)?\b",
-    r"\bdocument\b",
-    r"\blesson\b",
-    r"\bslides?\b",
-    r"\bfile\b",
-    r"\bchunk\b",
-    r"\bcitation\b",
-    r"\burl\b",
+    # Internal field/control names are never educational content.
     r"\bconcept facts?\b",
     r"\bdistractor pool\b",
-    r"\ballowed[_\s]wrong[_\s]option[_\s]terms\b",
-    r"\b(?:provided|supplied|given)\s+"
-    r"(?:facts?|material|information|text|source(?:\s+material)?)\b",
-    r"\b(?:in|from)\s+the\s+(?:facts?|material|text|information|slides?)\b",
+    r"\b(?:allowed|suggested)[_\s]+wrong[_\s]+option[_\s]+terms\b",
+    r"\b(?:already covered subjects|previously covered concepts)\b",
+    r"\bprovided vocabulary\b",
+    r"\bfact(?:[_\s]+id)?\s*[:#-]?\s*[a-z]\d+\b",
+    # Ambiguous words such as module, document, slide, and file are metadata
+    # only when they participate in a source-reference construction.
+    rf"\b(?:according\s+to|based\s+on)\s+(?:the\s+)?"
+    rf"(?:(?:provided|supplied|given)\s+)?{_PROVENANCE_SOURCE_TERM}\b",
+    rf"\bas\s+(?:stated|described|noted|shown|mentioned)\s+in\s+"
+    rf"(?:the\s+)?(?:(?:provided|supplied|given)\s+)?"
+    rf"{_PROVENANCE_SOURCE_TERM}\b",
+    rf"\b(?:provided|supplied|given)\s+"
+    rf"(?:facts?|material|information|text|source(?:\s+material)?|"
+    rf"definition|vocabulary)\b",
+    rf"\b(?:appears?|found|listed|included|defined|described|mentioned|"
+    rf"discussed|presented|introduced|covered|stated|shown)\s+(?:only\s+)?"
+    rf"(?:in|by)\s+(?:the\s+)?(?:(?:provided|supplied|given)\s+)?"
+    rf"{_PROVENANCE_SOURCE_TERM}\b",
+    rf"\b(?:follows?|comes?)\s+from\s+(?:the\s+)?"
+    rf"(?:(?:provided|supplied|given)\s+)?{_PROVENANCE_SOURCE_TERM}\b",
+    rf"\b(?:the\s+)?(?:source|document|lesson|slides?|facts?|"
+    rf"knowledge\s+graph)\s+(?:explicitly\s+)?"
+    rf"(?:states?|says?|explains?|describes?|notes?|indicates?|mentions?|"
+    rf"shows?|confirms?)\b",
+    r"\b(?:the\s+)?module(?:'s|’s)\s+"
+    r"(?:content|description|focus|overview|title|heading)\b",
 )
 DIRECT_STEM = re.compile(r"^(what(?:\s+term)?|which|who|where|when|why|how)\b", re.I)
 LEADING_WRAPPER = re.compile(r"^(according to|based on)\b", re.I)
-SCENARIO_ACTOR = re.compile(
-    r"\b(?:a|an|the)\s+(?:user|learner|student|designer|developer|team|"
-    r"organization|operator|employee|customer|participant|researcher|person|group|company|"
-    r"system|interface|application|website|device|product|workflow|task)\b",
-    re.I,
-)
-SCENARIO_LEAD = re.compile(
-    r"^(?:if|when|whenever|after|before|during|suppose|imagine|given that)\b",
+GENERIC_EXPLANATION = re.compile(
+    r"^(?:.+?\s+is\s+the\s+correct\s+answer(?:\s+here)?|"
+    r"this\s+is\s+the\s+correct\s+answer(?:\s+for\s+this\s+question)?|"
+    r"this\s+statement\s+is\s+(?:true|false))\.?$",
     re.I,
 )
 CARD_FIELDS = {
@@ -519,16 +532,21 @@ def _contains_provenance(value: str) -> bool:
 # structural/administrative metadata -- the module, lesson, or course
 # framing around the content -- rather than words that merely co-occur with
 # citation phrasing.
+_PRESENTATION_CONTAINER = r"(?:module|unit|chapter|lesson|section|slide|page)"
+_PRESENTATION_IDENTIFIER = r"(?:\d+[a-z]?|[ivxlcdm]+)"
 _METADATA_ARTIFACT_PATTERNS = (
-    r"\bmodule\s*\d*\b",
-    r"\blesson\s*\d*\b",
-    r"\bchapter\s*\d*\b",
-    r"\bsubject\b",
-    r"\bcourse(?:\s+code)?\b",
-    r"\bsyllabus\b",
-    r"\btitle\b",
-    r"\bheader\b",
-    r"\bheading\b",
+    rf"^\s*(?:the\s+)?(?:title|heading|name|number|topic|focus|overview|"
+    rf"content)\s+(?:of|for)\s+(?:the\s+)?{_PRESENTATION_CONTAINER}"
+    rf"(?:\s+{_PRESENTATION_IDENTIFIER})?\b",
+    rf"^\s*(?:the\s+)?{_PRESENTATION_CONTAINER}\s+"
+    rf"{_PRESENTATION_IDENTIFIER}\b(?:\s*(?:[:|>\-])|\s+"
+    rf"(?:title|heading|name|number|topic|focus|overview|content|"
+    rf"is\s+(?:sub)?titled|is\s+named|is\s+called|covers?|discusses?|"
+    rf"focuses?\s+on|provides?\s+an?\s+overview))",
+    rf"^\s*(?:this|the)\s+{_PRESENTATION_CONTAINER}\s+"
+    rf"(?:is\s+)?(?:sub)?titled\b",
+    rf"^\s*{_PRESENTATION_CONTAINER}\s+"
+    rf"(?:title|heading|name|number|topic|focus|overview|content)\b",
 )
 
 
@@ -541,9 +559,7 @@ def _contains_metadata_artifact(value: str) -> bool:
 
 _PROVENANCE_SOURCE = (
     r"(?:(?:provided|supplied|given)\s+)?"
-    r"(?:concept\s+facts?|distractor\s+pool|facts?|material|"
-    r"module(?:\s+content)?|document|lesson|slides?|"
-    r"source(?:\s+material)?|knowledge\s+graph|file|text|information)"
+    + _PROVENANCE_SOURCE_TERM
 )
 _EXPLICIT_STATED_AS_RE = re.compile(
     r"\bis\s+explicitly\s+stated\s+as\s+(.+?)\s+in\s+the\s+(?:provided|supplied)\s+facts?\b",
@@ -563,13 +579,24 @@ _LEADING_PROVENANCE_ASSERTION_RE = re.compile(
     r"(?:\s+that\s+|\s*:\s*)",
     re.I,
 )
+_LEADING_FACT_ID_ASSERTION_RE = re.compile(
+    r"^\s*fact(?:[_\s]+id)?\s*[:#-]?\s*[a-z]\d+\s+"
+    r"(?:states?|says?|explains?|describes?|notes?|indicates?|mentions?|"
+    r"shows?|confirms?)\s+(?:that\s+|:\s*)",
+    re.I,
+)
 _PROVENANCE_MODIFIER_RE = re.compile(
     rf"(?:"
     rf"\s+(?:that|which)\s+(?:is|are|was|were)\s+|"
-    rf"(?<!\bis)(?<!\bare)(?<!\bwas)(?<!\bwere)(?<!\bbeen)(?<!\bbeing)"
-    rf",?\s+(?:as\s+)?"
+    rf",\s*(?:as\s+)?|\s+as\s+"
     rf")"
     rf"(?:mentioned|discussed|described|defined|presented|introduced|covered)"
+    rf"\s+in\s+(?:the\s+)?{_PROVENANCE_SOURCE}\b"
+    rf"(?!['’]s\b)\s*,?",
+    re.I,
+)
+_BARE_PROVENANCE_MODIFIER_RE = re.compile(
+    rf"\s+(?:mentioned|discussed|described|defined|presented|introduced|covered)"
     rf"\s+in\s+(?:the\s+)?{_PROVENANCE_SOURCE}\b"
     rf"(?!['’]s\b)\s*,?",
     re.I,
@@ -597,7 +624,24 @@ def _strip_citation_phrasing(text: str) -> str:
     text = _EXPLICIT_STATED_AS_RE.sub(r"is \1", text)
     text = _LEADING_FACTS_STATE_RE.sub("", text)
     text = _LEADING_PROVENANCE_ASSERTION_RE.sub("", text)
+    text = _LEADING_FACT_ID_ASSERTION_RE.sub("", text)
     text = _PROVENANCE_MODIFIER_RE.sub(" ", text)
+    search_from = 0
+    while (modifier := _BARE_PROVENANCE_MODIFIER_RE.search(text, search_from)):
+        prefix = text[: modifier.start()]
+        # In "X is directly mentioned in the fact", the matched words are
+        # the sentence's predicate; deleting them would leave "X is directly".
+        # Only remove a source modifier when it follows a complete noun phrase
+        # or clause instead of a copula (optionally + adverb).
+        if re.search(
+            r"\b(?:is|are|was|were|been|being)(?:\s+[a-z]+ly)?\s*$",
+            prefix,
+            flags=re.I,
+        ):
+            search_from = modifier.end()
+            continue
+        text = text[: modifier.start()] + " " + text[modifier.end() :]
+        search_from = modifier.start() + 1
     text = _PROVENANCE_WRAPPER_RE.sub(" ", text)
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"\s+([.,?!])", r"\1", text)
@@ -610,28 +654,18 @@ def _strip_citation_phrasing(text: str) -> str:
     return text
 
 
-def _explanation_fallback(
-    card_type: str, correct_option: str, is_true: int | None
-) -> str:
-    if card_type == "true-false":
-        return f"This statement is {'true' if is_true == 1 else 'false'}."
-    option = correct_option.strip().rstrip(".")
-    if option:
-        return f"{option} is the correct answer here."
-    return "This is the correct answer for this question."
-
-
 def _sanitize_explanation(
     text: str, card_type: str, correct_option: str, is_true: int | None
 ) -> str:
+    del card_type, correct_option, is_true
     cleaned = _strip_citation_phrasing(text)
     words = re.findall(r"[A-Za-z0-9]+", cleaned)
     # After stripping the citation clause there may be nothing substantive
     # left (e.g. "X is explicitly stated in the provided fact." carried no
     # real content beyond the citation) -- fall back rather than ship a
     # near-empty or still-flagged explanation.
-    if len(words) < 6 or _contains_provenance(cleaned):
-        return _explanation_fallback(card_type, correct_option, is_true)
+    if len(words) < 4 or _contains_provenance(cleaned):
+        return text
     return cleaned
 
 
@@ -704,17 +738,6 @@ def validate_cluster(
             or not card.assessment_approach.strip()
         ):
             errors.append(f"{prefix} assessment approach must not be empty")
-        elif (
-            card.assessment_approach == "scenario analysis"
-            and not (
-                SCENARIO_ACTOR.search(card.question)
-                or SCENARIO_LEAD.search(card.question.strip())
-            )
-        ):
-            errors.append(
-                f"{prefix} scenario analysis must present a concrete situation "
-                "before asking for interpretation"
-            )
         if any("\n" in value or "\r" in value for value in _text_fields(card)):
             errors.append(f"{prefix} fields must not contain line breaks")
         if LEADING_WRAPPER.match(card.question.strip()) or any(
@@ -723,6 +746,8 @@ def validate_cluster(
             errors.append(f"{prefix} question contains banned framing")
         if any(_contains_provenance(value) for value in _text_fields(card) if value):
             errors.append(f"{prefix} exposes provenance metadata")
+        if GENERIC_EXPLANATION.fullmatch(card.expalanation.strip()):
+            errors.append(f"{prefix} expalanation must explain the answer")
 
         if card.type == "identification" and not DIRECT_STEM.match(
             card.question.strip()

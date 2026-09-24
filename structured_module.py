@@ -23,13 +23,14 @@ _PRESENTATION_NOISE = re.compile(
     r"the module title\b|(?:this|the)\s+(?:module|lesson|chapter|section)\s+"
     r"(?:introduces|covers|discusses|presents|contains|provides an overview of)\b|"
     r"(?:this|the)\s+(?:content|material|presentation)\s+"
-    r"(?:titled|paged)\b)",
+    r"(?:includes|contains|covers|discusses|introduces|presents|is titled)\b)",
     flags=re.IGNORECASE,
 )
 _FACT_LIST_MARKER = re.compile(r"^(?:[-\u2022\u25aa\u25e6\u2023]|\d+[.)])\s*")
 _FACT_URL = re.compile(r"(?:https?://|www\.|\bdoi\s*:)", flags=re.IGNORECASE)
 _FACT_SECTION_PATH = re.compile(
-    r"^(?:module|unit|chapter|lesson|section)\s*[a-z0-9.-]*\s*[:>\u203a\u2192-]",
+    r"^(?:module|unit|chapter|lesson|section)\s*[a-z0-9.-]*\s*"
+    r"[:|>\u203a\u2192-]",
     flags=re.IGNORECASE,
 )
 _FACT_LEARNING_OBJECTIVE = re.compile(
@@ -65,9 +66,18 @@ _FACT_QUOTE_META = re.compile(
 # labeling rather than any module content. Ban that family explicitly rather
 # than relying on the graph-consumption side to catch every phrasing.
 _FACT_LABEL_NARRATION = re.compile(
-    r"\bis\s+(?:sub)?titled\b|"
-    r"\btitle\s+of\s+(?:this|the)\s+(?:module|slide|lesson|chapter|section)\b|"
-    r"\bcontent\s+of\s+(?:this|the)\s+(?:module|slide|lesson|chapter|section)\s+"
+    r"^(?:the\s+)?(?:title|heading|name|number|topic|focus|overview|content)\s+"
+    r"(?:of|for)\s+(?:the\s+)?(?:module|unit|chapter|lesson|section|slide|page)"
+    r"(?:\s+(?:\d+[a-z]?|[ivxlcdm]+))?\b|"
+    r"^(?:the\s+)?(?:module|unit|chapter|lesson|section|slide|page)\s+"
+    r"(?:\d+[a-z]?|[ivxlcdm]+)\b(?:\s*(?:[:|>\-])|\s+"
+    r"(?:title|heading|name|number|topic|focus|overview|content|"
+    r"is\s+(?:sub)?titled|is\s+named|is\s+called|covers?|discusses?|"
+    r"focuses?\s+on|provides?\s+an?\s+overview))|"
+    r"^(?:this|the)\s+(?:module|unit|chapter|lesson|section|slide|page)\s+"
+    r"(?:is\s+)?(?:sub)?titled\b|"
+    r"^content\s+of\s+(?:this|the)\s+"
+    r"(?:module|unit|chapter|lesson|section|slide|page)\s+"
     r"(?:is\s+(?:about|titled)\b|discusses\b|mentions\b|includes\b)",
     flags=re.IGNORECASE,
 )
@@ -244,6 +254,8 @@ def filter_lesson_fact_records(
         ):
             continue
         kind = str(record.get("kind", "")).strip().casefold()
+        if kind in {"title", "header", "heading", "objective"}:
+            continue
         if kind == "content" and not _is_self_contained_content_fact(statement):
             continue
         candidate = dict(record)

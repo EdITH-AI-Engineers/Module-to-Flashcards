@@ -80,10 +80,13 @@ def resolve_identity(
 
 
 def extract_graph_facts(graph: Mapping[str, Any]) -> tuple[GraphFact, ...]:
+    has_lesson_facts = "facts" in graph
     lesson_values = graph.get("facts")
     lesson_facts: list[GraphFact] = []
     used_lesson_ids: set[str] = set()
     used_statements: set[str] = set()
+    if has_lesson_facts and not isinstance(lesson_values, list):
+        raise GraphInputError("knowledge graph facts must be a list")
     if isinstance(lesson_values, list):
         usable_values = filter_lesson_fact_records(lesson_values)
         deduplicated_values = deduplicate_lesson_fact_records(usable_values)
@@ -115,6 +118,8 @@ def extract_graph_facts(graph: Mapping[str, Any]) -> tuple[GraphFact, ...]:
                         slides.append(number)
             topic_value = item.get("topic")
             topic = str(topic_value).strip() if topic_value is not None else None
+            kind_value = item.get("kind")
+            kind = str(kind_value).strip() if kind_value is not None else None
             used_lesson_ids.add(fact_id)
             used_statements.add(statement_key)
             lesson_facts.append(
@@ -123,10 +128,13 @@ def extract_graph_facts(graph: Mapping[str, Any]) -> tuple[GraphFact, ...]:
                     statement=statement,
                     slides=tuple(sorted(slides)),
                     topic=topic or None,
+                    kind=kind or None,
                 )
             )
     if lesson_facts:
         return tuple(lesson_facts)
+    if has_lesson_facts:
+        raise GraphInputError("graph contains no usable lesson facts")
 
     edges = graph.get("edges")
     if not isinstance(edges, list):
@@ -137,9 +145,19 @@ def extract_graph_facts(graph: Mapping[str, Any]) -> tuple[GraphFact, ...]:
     for index, edge in enumerate(edges, start=1):
         if not isinstance(edge, Mapping):
             continue
-        parts = [str(edge.get(key, "")).strip() for key in ("subject", "relation", "object")]
+        parts = [
+            str(edge.get(key, "")).strip()
+            for key in ("subject", "relation", "object")
+        ]
         if not all(parts):
             continue
+        statement = " | ".join(parts)
+        filtered = filter_lesson_fact_records(
+            ({"statement": statement, "kind": "knowledge_statement"},)
+        )
+        if not filtered:
+            continue
+        statement = str(filtered[0]["statement"])
         fact_id = str(edge.get("id") or f"e{index}")
         if fact_id in used_ids:
             fact_id = f"{fact_id}#{index}"
@@ -160,7 +178,7 @@ def extract_graph_facts(graph: Mapping[str, Any]) -> tuple[GraphFact, ...]:
         facts.append(
             GraphFact(
                 fact_id=fact_id,
-                statement=" | ".join(parts),
+                statement=statement,
                 slides=tuple(sorted(slide_numbers)),
             )
         )

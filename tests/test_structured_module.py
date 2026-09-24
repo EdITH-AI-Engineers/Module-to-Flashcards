@@ -305,6 +305,50 @@ def test_filter_lesson_facts_keeps_a_sparse_short_substantive_claim():
     assert filter_lesson_fact_records(records) == records
 
 
+def test_filter_lesson_facts_removes_numbered_presentation_metadata_generically():
+    records = (
+        {
+            "id": "f1",
+            "statement": "Module 3 Title: Programming Fundamentals.",
+            "kind": "knowledge_statement",
+        },
+        {
+            "id": "f2",
+            "statement": "Module 3 is titled Programming Fundamentals.",
+            "kind": "knowledge_statement",
+        },
+        {
+            "id": "f3",
+            "statement": "The title of Module 3 is Programming Fundamentals.",
+            "kind": "knowledge_statement",
+        },
+        {
+            "id": "f4",
+            "statement": "Module 3 focuses on programming fundamentals.",
+            "kind": "knowledge_statement",
+        },
+        {
+            "id": "f5",
+            "statement": "Module 3 | title | Programming Fundamentals",
+            "kind": "knowledge_statement",
+        },
+        {
+            "id": "f6",
+            "statement": "A software module exposes a public interface.",
+            "kind": "knowledge_statement",
+        },
+        {
+            "id": "f7",
+            "statement": "A document title identifies a work.",
+            "kind": "knowledge_statement",
+        },
+    )
+
+    facts = filter_lesson_fact_records(records)
+
+    assert [fact["id"] for fact in facts] == ["f6", "f7"]
+
+
 def make_module(*, content=("A processor executes instructions.",)):
     return StructuredModule(
         course_code="CPE0021",

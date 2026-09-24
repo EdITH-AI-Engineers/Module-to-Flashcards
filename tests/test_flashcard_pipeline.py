@@ -380,9 +380,9 @@ def test_pipeline_threads_prior_concepts_and_retries_prior_question_duplicate():
 
     plan_payload = json.loads(backend.calls[0][1].split("INPUT JSON:\n", 1)[1])
     assert plan_payload["previously_covered_concepts"] == ["Earlier concept"]
-    assert "already_covered_subjects" in backend.calls[1][1]
+    assert "already_covered_subjects" not in backend.calls[1][1]
     assert "previously generated module" in backend.calls[2][1]
-    assert "already_covered_subjects" in backend.calls[2][1]
+    assert "already_covered_subjects" not in backend.calls[2][1]
 
 
 def test_final_review_uses_five_groups_and_one_global_pass():

@@ -226,8 +226,9 @@ def test_cards_parser_removes_generic_provenance_wrappers(question, expected):
     cards = parse_cards(json.dumps(payload))
 
     assert cards[0].question == expected
-    assert "card 1 exposes provenance metadata" not in validate_cluster(
-        cards, valid_concept()
+    assert not any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in validate_cluster(cards, valid_concept())
     )
 
 
@@ -275,8 +276,9 @@ def test_cards_parser_does_not_partially_strip_possessive_provenance_modifier():
     cards = parse_cards(json.dumps(payload))
 
     assert cards[0].question == question
-    assert "card 1 exposes provenance metadata" in validate_cluster(
-        cards, valid_concept()
+    assert any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in validate_cluster(cards, valid_concept())
     )
 
 
@@ -339,8 +341,9 @@ def test_cards_parser_preserves_unsafe_explanations_for_validation_retry(
     card = parse_cards(json.dumps(payload))[0]
 
     assert card.expalanation == explanation
-    assert "card 1 exposes provenance metadata" in validate_cluster(
-        (card, *valid_cards()[1:]), valid_concept()
+    assert any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in validate_cluster((card, *valid_cards()[1:]), valid_concept())
     )
     assert "correct answer here" not in card.expalanation
 
@@ -381,7 +384,10 @@ def test_cluster_rejects_unwrapped_provenance_language(question):
 
     errors = validate_cluster(cards, valid_concept())
 
-    assert "card 1 exposes provenance metadata" in errors
+    assert any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in errors
+    )
 
 
 def test_cards_parser_rejects_boolean_true_false_value():
@@ -721,7 +727,10 @@ def test_cluster_allows_domain_uses_of_words_that_can_also_name_sources(
 
     errors = validate_cluster(tuple(values), valid_concept())
 
-    assert "card 1 exposes provenance metadata" not in errors
+    assert not any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in errors
+    )
 
 
 @pytest.mark.parametrize(
@@ -740,7 +749,10 @@ def test_cluster_rejects_internal_generation_metadata(question):
 
     errors = validate_cluster(tuple(values), valid_concept())
 
-    assert "card 1 exposes provenance metadata" in errors
+    assert any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in errors
+    )
 
 
 def test_scenario_analysis_accepts_researcher_observing_users():
@@ -938,7 +950,28 @@ def test_cluster_rejects_internal_evidence_labels(phrase):
 
     errors = validate_cluster(tuple(values), valid_concept())
 
-    assert "card 1 exposes provenance metadata" in errors
+    assert any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in errors
+    )
+
+
+def test_provenance_error_identifies_field_and_exact_trigger_phrase():
+    values = list(valid_cards())
+    values[0] = replace(
+        values[0],
+        expalanation=(
+            "Perception interprets and organizes sensory input, which aligns "
+            "with the provided definition."
+        ),
+    )
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert (
+        'card 1 expalanation exposes provenance metadata; triggering phrase '
+        '"provided definition"'
+    ) in errors
 
 
 def test_cluster_rejects_blank_assessment_approach():

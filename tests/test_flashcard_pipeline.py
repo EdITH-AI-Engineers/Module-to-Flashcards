@@ -225,6 +225,28 @@ def test_identification_answer_leak_retry_receives_exact_rejected_card():
     assert "REJECTED JSON TO CORRECT" in retry_prompt
 
 
+def test_provenance_retry_receives_field_and_exact_trigger_phrase():
+    leaking = json.loads(cluster_json(1))
+    leaking["cards"][0]["expalanation"] = (
+        "Perception interprets and organizes sensory input, which aligns with "
+        "the provided definition."
+    )
+    responses = [plan_json(), json.dumps(leaking), cluster_json(1)]
+    responses.extend(cluster_json(index) for index in range(2, 21))
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+        progress=lambda _message: None,
+    )
+
+    pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    retry_prompt = backend.calls[2][1]
+    assert "card 1 expalanation exposes provenance metadata" in retry_prompt
+    assert 'triggering phrase "provided definition"' in retry_prompt
+
+
 def test_truncated_cluster_retries_without_embedding_partial_output():
     def truncated(system, user, max_tokens):
         raise CompletionTruncatedError(

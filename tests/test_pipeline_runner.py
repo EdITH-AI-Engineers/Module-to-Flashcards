@@ -113,7 +113,7 @@ def test_pipeline_paths_use_a_sanitized_per_pdf_workspace(tmp_path):
     assert paths.structured_text == paths.workspace / "structured_module.txt"
     assert paths.graph_json == paths.workspace / "knowledge_graph" / "knowledge_graph.json"
     assert paths.flashcards == (
-        tmp_path / "flashcards" / "CPE0021" / "flashcard-M1.csv"
+        tmp_path / "flashcards" / "CPE0021" / "CPE0021_M1.csv"
     )
 
 
@@ -428,6 +428,6 @@ def test_help_documents_artifacts_resume_and_force(capsys):
     assert "--module-number" in help_text
     assert "structured_module.txt" in help_text
     assert "knowledge_graph.json" in help_text
-    assert "flashcard-M<module>.csv" in help_text
+    assert "<course>_M<module>.csv" in help_text
     assert "resume" in help_text.casefold()
     assert "--force" in help_text

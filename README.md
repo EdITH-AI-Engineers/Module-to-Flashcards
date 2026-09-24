@@ -145,7 +145,7 @@ Invoke-WebRequest http://localhost:8000/health
 
 The server accepts multiple selected PDFs in one request. Intermediate artifacts
 and checked graphs are stored under `pipeline_output/<course>/<pdf-name>/`; final
-CSV files are stored under `flashcards/<course>/flashcard-M<module>.csv`. Keep the
+CSV files are stored under `flashcards/<course>/<course>_M<module>.csv`. Keep the
 server terminal open while processing.
 There is no default processing timeout: `--timeout 0` means unlimited time.
 
@@ -263,7 +263,7 @@ pipeline_output/
         triples.csv
 flashcards/
   CPE0021/
-    flashcard-M1.csv
+    CPE0021_M1.csv
 ```
 
 If the command stops, run it again. Valid completed artifacts are reused. Use `--force` to recompute all stages:
@@ -320,7 +320,7 @@ Run stage 3 directly:
 The generated file defaults to:
 
 ```text
-flashcards/CPE0021/flashcard-M1.csv
+flashcards/CPE0021/CPE0021_M1.csv
 ```
 
 It contains two labeled CSV blocks:

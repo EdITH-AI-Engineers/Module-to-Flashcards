@@ -93,7 +93,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         epilog=(
             "Each per-PDF workspace contains structured_module.txt and the "
             "checked knowledge_graph/knowledge_graph.json. CSV output is written to "
-            "flashcards/<course>/flashcard-M<module>.csv. "
+            "flashcards/<course>/<course>_M<module>.csv. "
             "Valid completed stages are reused when the sequence resumes."
         ),
     )

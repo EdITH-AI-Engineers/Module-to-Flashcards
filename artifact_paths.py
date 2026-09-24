@@ -25,4 +25,4 @@ def flashcard_output_path(
 ) -> Path:
     course = safe_path_component(course_code, fallback="course")
     module = module_file_label(module_number)
-    return Path(flashcards_root) / course / f"flashcard-M{module}.csv"
+    return Path(flashcards_root) / course / f"{course}_M{module}.csv"

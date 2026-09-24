@@ -372,7 +372,7 @@ def test_default_output_uses_resolved_graph_module(tmp_path, monkeypatch, valid_
 
     result = main.run(args)
 
-    assert result == Path("flashcards") / "CPE0021" / "flashcard-M1.csv"
+    assert result == Path("flashcards") / "CPE0021" / "CPE0021_M1.csv"
     assert result.is_file()
 
 

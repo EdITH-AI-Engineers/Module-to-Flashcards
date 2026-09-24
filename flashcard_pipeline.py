@@ -526,7 +526,7 @@ class FlashcardPipeline:
             max_tokens=self.config.cluster_max_tokens,
             label=label,
             response_schema=build_card_cluster_schema(concept.assessment_approaches),
-            include_rejected_candidate=False,
+            include_rejected_candidate=True,
             retry_prompt_builder=build_cluster_retry,
         )
 

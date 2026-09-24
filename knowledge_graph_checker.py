@@ -5,24 +5,12 @@ import json
 import time
 from typing import Callable, Mapping, Sequence
 
-from flashcard_types import ChatBackend
+from flashcard_types import ChatBackend, CompletionTruncatedError
 
 
 class KnowledgeGraphCheckError(RuntimeError):
     """Raised when Qwen cannot return a safe graph-pruning decision."""
 
-
-CHECKER_SCHEMA: Mapping[str, object] = {
-    "type": "object",
-    "properties": {
-        "remove_ids": {
-            "type": "array",
-            "items": {"type": "string"},
-        }
-    },
-    "required": ["remove_ids"],
-    "additionalProperties": False,
-}
 
 _SYSTEM_PROMPT = """You are a University Professor and a conservative knowledge-graph quality checker.
 Review candidate items from one educational module and identify only items that
@@ -41,9 +29,9 @@ copyright lines, navigation directions, generic statements that merely say the
 module introduces/covers/discusses a topic, corrupted fragments, or material
 plainly unrelated to the module. When uncertain, keep the item.
 
-Remove any instance of mentioning the metadata of the module itself, such as the course code, module number, module title, or source file name. Do not remove any item that contains a substantive claim about the subject matter. Ensure that you do not rewrite or invent any facts, and do not change any IDs.
+Remove any instance of mentioning the metadata of the module itself, such as the course code, module number, module title, or source file name. Do not remove any item that contains a substantive claim about the subject matter. Ensure that you do not rewrite or invent any facts.
 
-Return JSON only. Copy IDs exactly. Never rewrite facts and never invent IDs."""
+Return JSON only. Classify every item in its given order. Never rewrite facts."""
 
 
 def _candidate_rows(
@@ -81,22 +69,33 @@ def _candidate_rows(
     return rows, positions
 
 
-# The reply is only a short list of IDs. With short aliases 24 rows need well
-# under 150 tokens, so hitting the cap means the model is running on (thinking
-# or repeating), not that it needs more room. Keep the cap small so a bad call
-# fails in seconds instead of minutes on a local model, allow one modest
-# increase for a genuine long reply, and never split/multiply calls.
-_BASE_MAX_TOKENS = 128
-_TOKENS_PER_ROW = 6
-_MAX_TOKENS_CAP = 768
+# One boolean is returned for every row. The schema fixes the exact array
+# length, preventing Qwen from looping over an unconstrained list until it hits
+# max_tokens. The budget still leaves ample room for JSON punctuation and
+# tokenization differences.
+_BASE_MAX_TOKENS = 64
+_TOKENS_PER_ROW = 8
+_MAX_TOKENS_CAP = 512
 
 
 def _initial_max_tokens(row_count: int) -> int:
     return min(_MAX_TOKENS_CAP, _BASE_MAX_TOKENS + _TOKENS_PER_ROW * row_count)
 
 
-def _looks_truncated(exc: Exception) -> bool:
-    return isinstance(exc, json.JSONDecodeError) or "truncat" in str(exc).lower()
+def _decision_schema(row_count: int) -> Mapping[str, object]:
+    return {
+        "type": "object",
+        "properties": {
+            "remove": {
+                "type": "array",
+                "items": {"type": "boolean"},
+                "minItems": row_count,
+                "maxItems": row_count,
+            }
+        },
+        "required": ["remove"],
+        "additionalProperties": False,
+    }
 
 
 def _review_batch(
@@ -108,16 +107,6 @@ def _review_batch(
     max_retries: int,
     progress: Callable[[str], None] | None = None,
 ) -> set[str]:
-    # Send short aliases (F1, F2, ...) instead of the graph's own IDs so the
-    # model has far fewer tokens to copy back. They are mapped back below.
-    prefix = item_kind[:1].upper()
-    alias_to_id: dict[str, str] = {}
-    alias_rows: list[dict[str, object]] = []
-    for number, row in enumerate(rows, start=1):
-        alias = f"{prefix}{number}"
-        alias_to_id[alias] = str(row["id"])
-        alias_rows.append({**row, "id": alias})
-    allowed_ids = set(alias_to_id)
     context = {
         key: metadata.get(key)
         for key in ("course_code", "module_number", "module_title", "source_file")
@@ -126,12 +115,13 @@ def _review_batch(
     user = (
         f"Module context:\n{json.dumps(context, ensure_ascii=False)}\n\n"
         f"Candidate {item_kind} items:\n"
-        f"{json.dumps(alias_rows, ensure_ascii=False)}\n\n"
-        'Return {"remove_ids": [...]} containing only IDs that clearly meet '
-        "the removal policy. Return an empty list when every item is useful. "
-        "Output the JSON object only, with no explanation or reasoning.\n"
-        "/no_think"
+        f"{json.dumps(list(rows), ensure_ascii=False)}\n\n"
+        f'Return {{"remove": [...]}} with exactly {len(rows)} booleans in '
+        "the same order as the candidate items. Use true only when that item "
+        "clearly meets the removal policy; otherwise use false. Output the "
+        "JSON object only, with no explanation or reasoning."
     )
+    schema = _decision_schema(len(rows))
     max_tokens = _initial_max_tokens(len(rows))
     last_error = "invalid checker response"
     for attempt in range(1, max_retries + 1):
@@ -146,25 +136,25 @@ def _review_batch(
                 _SYSTEM_PROMPT,
                 user,
                 max_tokens=max_tokens,
-                schema=CHECKER_SCHEMA,
+                schema=schema,
             )
             value = json.loads(raw)
-            if not isinstance(value, dict) or set(value) != {"remove_ids"}:
-                raise ValueError("response must contain only remove_ids")
-            remove_ids = value["remove_ids"]
-            if not isinstance(remove_ids, list) or any(
-                not isinstance(item, str) for item in remove_ids
+            if not isinstance(value, dict) or set(value) != {"remove"}:
+                raise ValueError("response must contain only remove")
+            decisions = value["remove"]
+            if not isinstance(decisions, list) or any(
+                not isinstance(item, bool) for item in decisions
             ):
-                raise ValueError("remove_ids must be a list of strings")
-            duplicates = len(remove_ids) != len(set(remove_ids))
-            unknown = sorted(set(remove_ids) - allowed_ids)
-            if duplicates:
-                raise ValueError("remove_ids contains duplicate IDs")
-            if unknown:
+                raise ValueError("remove must be a list of booleans")
+            if len(decisions) != len(rows):
                 raise ValueError(
-                    f"remove_ids contains unknown IDs: {', '.join(unknown)}"
+                    f"remove must contain exactly {len(rows)} decisions"
                 )
-            return {alias_to_id[item] for item in remove_ids}
+            return {
+                str(row["id"])
+                for row, remove in zip(rows, decisions)
+                if remove
+            }
         except (json.JSONDecodeError, RuntimeError, ValueError) as exc:
             last_error = str(exc)
             if progress is not None:
@@ -172,7 +162,7 @@ def _review_batch(
                     f"  attempt {attempt} failed after "
                     f"{time.monotonic() - started:.0f}s: {last_error}"
                 )
-            if _looks_truncated(exc):
+            if isinstance(exc, (CompletionTruncatedError, json.JSONDecodeError)):
                 max_tokens = min(_MAX_TOKENS_CAP, max_tokens * 2)
             if attempt == max_retries:
                 break

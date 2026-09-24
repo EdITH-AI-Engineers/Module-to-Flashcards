@@ -175,12 +175,32 @@ def test_invalid_cluster_is_retried_with_validator_feedback():
 
     assert "expected exactly 5 cards" in backend.calls[2][1]
     assert "complete replacement" in backend.calls[2][1].lower()
-    assert "REJECTED JSON TO CORRECT" not in backend.calls[2][1]
+    assert "REJECTED JSON TO CORRECT" in backend.calls[2][1]
     stats = pipeline.rejection_stats
     assert stats["attempts"] == 22
     assert stats["rejected_attempts"] == 1
     assert stats["rejection_rate"] == 1 / 22
     assert stats["categories"]["schema/structure"] == 1
+
+
+def test_identification_answer_leak_retry_receives_exact_rejected_card():
+    leaking = json.loads(cluster_json(1))
+    leaking["cards"][1]["question"] = "What term is Term 1?"
+    responses = [plan_json(), json.dumps(leaking), cluster_json(1)]
+    responses.extend(cluster_json(index) for index in range(2, 21))
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+    )
+
+    pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    retry_prompt = backend.calls[2][1]
+    assert "question reveals the identification answer" in retry_prompt
+    assert 'answer text "Term 1"' in retry_prompt
+    assert "What term is Term 1?" in retry_prompt
+    assert "REJECTED JSON TO CORRECT" in retry_prompt
 
 
 def test_truncated_cluster_retries_without_embedding_partial_output():

@@ -247,7 +247,7 @@ def build_concept_plan_prompt(
         f"""Select exactly {CONCEPTS_PER_MODULE} distinct, explicitly supported concepts for this module.
     Each concept must be assessable in {CARDS_PER_CLUSTER} genuinely different ways. Keep concepts semantically distinct and do not use presentation or provenance details as concepts.
 
-    For each concept, copy one or more fact_ids exactly from the input. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements.{context_guidance} Choose exactly {CARDS_PER_CLUSTER} distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
+    For each concept, copy one or more fact_ids exactly from the input. Every concept must have at least one anchor fact_id that is not assigned to any other concept. A fact_id may be shared as supporting context only when every affected concept still has a different unique anchor fact_id. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements.{context_guidance} Choose exactly {CARDS_PER_CLUSTER} distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
 
     Return one JSON object whose top-level key is "concepts" and whose value is an array. The array must contain exactly {CONCEPTS_PER_MODULE} concept objects before its closing bracket. Every concept object has these keys: name (string), fact_ids (non-empty string array), and assessment_approaches (array of exactly {CARDS_PER_CLUSTER} distinct allowed approaches). Do not treat a one-object shape illustration as a complete answer.
 
@@ -352,6 +352,9 @@ def build_concept_plan_retry_prompt(
     - If two concepts would assess the same underlying learning point, keep
       one and replace the other with a concept grounded in different
       fact_ids.
+    - Every concept must include at least one anchor fact_id used by no other
+      concept. A shared fact_id may provide context only when each concept
+      also has a different unique anchor fact_id.
     - Every fact_id must be copied exactly from graph_facts; do not alter or
       fabricate one.
     - Only return insufficient_content if fewer than {CONCEPTS_PER_MODULE}
@@ -617,6 +620,41 @@ def build_cluster_retry_prompt(
     if omitted:
         error_bullets += f"\n- (+{omitted} similar errors omitted)"
 
+    answer_leak_guidance = ""
+    if candidate is not None:
+        try:
+            candidate_value = json.loads(candidate)
+            candidate_cards = candidate_value.get("cards", [])
+        except (json.JSONDecodeError, AttributeError):
+            candidate_cards = []
+        forbidden_answers: list[str] = []
+        for error in error_list:
+            match = re.match(
+                r"^card (\d+) question reveals the identification answer$",
+                error,
+            )
+            if match is None:
+                continue
+            card_number = int(match.group(1))
+            if not 1 <= card_number <= len(candidate_cards):
+                continue
+            card = candidate_cards[card_number - 1]
+            if not isinstance(card, dict):
+                continue
+            answer = card.get("correct_option")
+            if isinstance(answer, str) and answer.strip():
+                forbidden_answers.append(
+                    f'    - Card {card_number}: the question must not contain '
+                    f'the answer text {json.dumps(answer.strip(), ensure_ascii=False)} '
+                    "or its abbreviation. Keep that correct_option and describe "
+                    "its supported function or defining relationship instead."
+                )
+        if forbidden_answers:
+            answer_leak_guidance = (
+                "\n\n    ANSWER TEXT FORBIDDEN IN IDENTIFICATION QUESTIONS\n"
+                + "\n".join(forbidden_answers)
+            )
+
     # Tell the model exactly which cards it is allowed to touch. Without
     # this, "regenerate one complete replacement five-card JSON object"
     # invites the model to silently rewrite cards no error complained
@@ -672,7 +710,7 @@ def build_cluster_retry_prompt(
     CORRECTIONS
     - Return exactly {CARDS_PER_CLUSTER} complete cards. Set each
       assessment_approach to a planned value that matches the question's actual
-      reasoning. Approaches may repeat; no planned value is required to appear.{preserve_bullet}
+      reasoning. Approaches may repeat; no planned value is required to appear.{preserve_bullet}{answer_leak_guidance}
     - Use only multiple-choice, identification, and true-false types, including
       at least one of each. Scenario analysis is an approach, never a type.
     - Identification and true-false option fields must be "". Multiple-choice
@@ -980,7 +1018,7 @@ def build_grounding_review_prompt(
             for cluster in clusters
         ]
     }
-    return f"""Review these generated clusters against only their supplied facts. Questions, correct answers, true-false decisions, explanations, and hints must be supported by those facts. Flag a cluster if any card contains an unsupported claim, answer leakage, an invalid distractor, or a misleading explanation. Also flag a cluster when two cards ask the same question with at most one word different; cards that test the same fact in differently worded questions, in a different type, or in negated form are not duplicates.
+    return f"""Review these generated clusters against only their supplied facts. Questions, correct answers, true-false decisions, explanations, and hints must be supported by those facts. Flag a cluster if any card contains an unsupported claim, answer leakage, an invalid distractor, or a misleading explanation. Also flag a cluster when two cards ask the same question with at most one word different; cards that test the same fact in differently worded questions, in a different type, or in negated form are not duplicates. Do not infer duplication merely from the same answer-bearing relationship when there is a different type, polarity, or wording.
 
     A wrong option is not invalid merely because its wording does not appear in the supplied facts. It may use a familiar related term, but it must be plausible, unambiguously incorrect, in the same semantic category and answer shape as the correct option, and relevant to the question and module domain. Flag a distractor only when it is correct or arguably correct, duplicates another option, is nonsensical, mismatches the answer category, or is unrelated to the question or module domain. Do not rewrite cards.
 
@@ -1006,7 +1044,7 @@ def build_duplicate_review_prompt(
             for cluster in clusters
         ]
     }
-    return """Compare all question stems for near duplication. Flag only a question that is the same sentence as another question with at most one filler, modifier, or synonym word added, removed, or swapped. Do not flag questions that merely assess the same fact or concept in differently worded questions, questions of different types, or a question and its negated form (for example \"is a component\" versus \"is NOT a component\"). A swapped key term that changes what is asked (for example binary versus octal) makes a different question. Report each duplicate pair once: put the later cluster/card in the issue's cluster field and at the start of its reason, and identify the earlier card after the word cluster. Every reason must use exactly the form "card <number> duplicates cluster <uuid> card <number>". Do not judge factual correctness in this pass and do not rewrite questions.
+    return """Compare all question stems for near duplication. Flag only a question that is the same sentence as another question with at most one filler, modifier, or synonym word added, removed, or swapped. Do not flag questions that merely assess the same fact or concept in differently worded questions, questions of different types, or a question and its negated form (for example \"is a component\" versus \"is NOT a component\"). Under this surface-only rule, a definition and its negated restatement are not duplicates unless the stems otherwise differ by at most one word. A swapped key term that changes what is asked (for example binary versus octal) makes a different question. Report each duplicate pair once: put the later cluster/card in the issue's cluster field and at the start of its reason, and identify the earlier card after the word cluster. Every reason must use exactly the form "card <number> duplicates cluster <uuid> card <number>". Do not judge factual correctness in this pass and do not rewrite questions.
 
     Return only this JSON shape. Use an empty issues list when no duplicate exists:
     {"issues":[{"cluster":"valid UUID copied from input","reasons":["card 2 duplicates cluster <uuid> card 4"]}]}

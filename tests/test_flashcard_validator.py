@@ -485,14 +485,19 @@ def test_concept_plan_allows_module_as_a_domain_term():
 def test_concept_plan_accepts_comma_separated_token_fields():
     raw, known = plan_json()
     payload = json.loads(raw)
-    payload["concepts"][0]["fact_ids"] = "e1,e2,e3"
+    known = (
+        *known,
+        GraphFact("e21", "additional subject | supports | first concept"),
+        GraphFact("e22", "another subject | supports | first concept"),
+    )
+    payload["concepts"][0]["fact_ids"] = "e1,e21,e22"
     payload["concepts"][0]["assessment_approaches"] = (
         "recall,comparison,classification,application,scenario analysis"
     )
 
     concepts = parse_concept_plan(json.dumps(payload), known)
 
-    assert concepts[0].fact_ids == ("e1", "e2", "e3")
+    assert concepts[0].fact_ids == ("e1", "e21", "e22")
     assert concepts[0].assessment_approaches == (
         "recall",
         "comparison",
@@ -561,15 +566,26 @@ def test_concept_plan_rejects_unknown_fact_id():
         parse_concept_plan(json.dumps(payload), known)
 
 
-def test_concept_plan_allows_fact_id_reused_by_another_concept():
+def test_concept_plan_allows_shared_context_when_each_concept_has_unique_anchor():
+    raw, known = plan_json()
+    payload = json.loads(raw)
+    known = (*known, GraphFact("e21", "shared context | supports | both concepts"))
+    payload["concepts"][1]["fact_ids"] = ["e2", "e21"]
+    payload["concepts"][6]["fact_ids"] = ["e7", "e21"]
+
+    concepts = parse_concept_plan(json.dumps(payload), known)
+
+    assert concepts[1].fact_ids == ("e2", "e21")
+    assert concepts[6].fact_ids == ("e7", "e21")
+
+
+def test_concept_plan_rejects_concept_with_only_reused_fact_ids():
     raw, known = plan_json()
     payload = json.loads(raw)
     payload["concepts"][6]["fact_ids"] = ["e2"]
 
-    concepts = parse_concept_plan(json.dumps(payload), known)
-
-    assert concepts[1].fact_ids == ("e2",)
-    assert concepts[6].fact_ids == ("e2",)
+    with pytest.raises(ValidationError, match="no uniquely assigned anchor fact_id"):
+        parse_concept_plan(json.dumps(payload), known)
 
 
 def test_concept_plan_reports_explicit_insufficient_content():

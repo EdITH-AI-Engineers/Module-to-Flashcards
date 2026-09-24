@@ -214,7 +214,7 @@ def test_run_checks_unchecked_graph_before_concept_generation(
 
     class Backend:
         def complete(self, system, user, *, max_tokens, schema=None):
-            return '{"remove_ids":[]}'
+            return '{"remove":[false]}'
 
     class FakePipeline:
         def __init__(self, backend, config, **kwargs):

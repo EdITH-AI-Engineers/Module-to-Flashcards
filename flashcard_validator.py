@@ -219,9 +219,7 @@ def _canonical_option(value: str) -> str:
     while normalizing Unicode variants, case, and insignificant spacing.
     """
 
-    text = unicodedata.normalize("NFKC", value).translate(
-        _TECHNICAL_SYMBOL_TRANSLATION
-    )
+    text = unicodedata.normalize("NFKC", value).translate(_TECHNICAL_SYMBOL_TRANSLATION)
     text = " ".join(text.casefold().split())
     text = re.sub(r"\s*([_+#*/^%=<>|&~@()\[\]{}:\-])\s*", r"\1", text)
     # A suffix-symbol run followed by prose starts a new lexical unit. Restore
@@ -624,8 +622,7 @@ _METADATA_ARTIFACT_PATTERNS = (
     rf"(?:title|heading|name|number|topic|focus|overview|content|"
     rf"is\s+(?:sub)?titled|is\s+named|is\s+called|covers?|discusses?|"
     rf"focuses?\s+on|provides?\s+an?\s+overview))",
-    rf"^\s*(?:this|the)\s+{_PRESENTATION_CONTAINER}\s+"
-    rf"(?:is\s+)?(?:sub)?titled\b",
+    rf"^\s*(?:this|the)\s+{_PRESENTATION_CONTAINER}\s+" rf"(?:is\s+)?(?:sub)?titled\b",
     rf"^\s*{_PRESENTATION_CONTAINER}\s+"
     rf"(?:title|heading|name|number|topic|focus|overview|content)\b",
 )
@@ -633,15 +630,11 @@ _METADATA_ARTIFACT_PATTERNS = (
 
 def _contains_metadata_artifact(value: str) -> bool:
     return any(
-        re.search(pattern, value, flags=re.I)
-        for pattern in _METADATA_ARTIFACT_PATTERNS
+        re.search(pattern, value, flags=re.I) for pattern in _METADATA_ARTIFACT_PATTERNS
     )
 
 
-_PROVENANCE_SOURCE = (
-    r"(?:(?:provided|supplied|given)\s+)?"
-    + _PROVENANCE_SOURCE_TERM
-)
+_PROVENANCE_SOURCE = r"(?:(?:provided|supplied|given)\s+)?" + _PROVENANCE_SOURCE_TERM
 _EXPLICIT_STATED_AS_RE = re.compile(
     r"\bis\s+explicitly\s+stated\s+as\s+(.+?)\s+in\s+the\s+(?:provided|supplied)\s+facts?\b",
     re.I,
@@ -688,6 +681,8 @@ _PROVENANCE_WRAPPER_RE = re.compile(
     rf"(?:the\s+)?{_PROVENANCE_SOURCE})\b(?=\s*[,?.!]|$),?\s*",
     re.I,
 )
+
+
 def _strip_citation_phrasing(text: str) -> str:
     """Remove formulaic "as stated in the provided/supplied fact(s)" citation
     clauses from model-written prose, keeping any real content around them.
@@ -708,7 +703,7 @@ def _strip_citation_phrasing(text: str) -> str:
     text = _LEADING_FACT_ID_ASSERTION_RE.sub("", text)
     text = _PROVENANCE_MODIFIER_RE.sub(" ", text)
     search_from = 0
-    while (modifier := _BARE_PROVENANCE_MODIFIER_RE.search(text, search_from)):
+    while modifier := _BARE_PROVENANCE_MODIFIER_RE.search(text, search_from):
         prefix = text[: modifier.start()]
         # In "X is directly mentioned in the fact", the matched words are
         # the sentence's predicate; deleting them would leave "X is directly".
@@ -907,15 +902,57 @@ def validate_cluster(
     return tuple(errors)
 
 
-def _polarity_variant(left: str, right: str) -> bool:
-    polarity = {"not", "never", "without", "except", "least", "most"}
-    left_tokens = normalize_stem(left).split()
-    right_tokens = normalize_stem(right).split()
-    left_base = [token for token in left_tokens if token not in polarity]
-    right_base = [token for token in right_tokens if token not in polarity]
-    return left_base == right_base and bool(
-        (set(left_tokens) ^ set(left_base)) or (set(right_tokens) ^ set(right_base))
+# Negation and polarity words. A question and its negated form ask for
+# different things (the members of a set versus the exception), so a polarity
+# difference means the questions are NOT duplicates.
+_NEGATION_TOKENS = frozenset(
+    {
+        "not",
+        "no",
+        "never",
+        "without",
+        "except",
+        "neither",
+        "nor",
+        "cannot",
+        "least",
+        "most",
+    }
+)
+
+# Near-duplicate = the same question with just one word different. Only an
+# inserted or removed word counts by default ("a component" vs "a key
+# component"). A swapped word usually changes what is asked ("binary" vs
+# "octal"), so substitution is opt-in.
+NEAR_DUPLICATE_COUNT_SUBSTITUTION = False
+# Insertion/deletion only counts once the shorter question has at least this
+# many content words, so very short stems are not flagged for one extra word.
+NEAR_DUPLICATE_MIN_CONTENT_TOKENS = 4
+
+
+def _expand_negative_contractions(value: str) -> str:
+    text = unicodedata.normalize("NFKC", value).casefold().replace("\u2019", "'")
+    text = text.replace("can't", "cannot").replace("won't", "will not")
+    return re.sub(r"(\w+)n't\b", r"\1 not", text)
+
+
+def _negation_markers(value: str) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            token
+            for token in normalize_stem(_expand_negative_contractions(value)).split()
+            if token in _NEGATION_TOKENS
+        )
     )
+
+
+def _polarity_variant(left: str, right: str) -> bool:
+    """Kept for callers compiled against the old API.
+
+    Negation is no longer treated as duplication, so this always returns False.
+    """
+    del left, right
+    return False
 
 
 _QUESTION_FRAME_TOKENS = {
@@ -934,39 +971,53 @@ _QUESTION_FRAME_TOKENS = {
 def _question_content_tokens(value: str) -> tuple[str, ...]:
     return tuple(
         _stem(token)
-        for token in normalize_stem(value).split()
-        if token not in _QUESTION_FRAME_TOKENS
+        for token in normalize_stem(_expand_negative_contractions(value)).split()
+        if token not in _QUESTION_FRAME_TOKENS and token not in _NEGATION_TOKENS
     )
 
 
-def are_near_duplicates(left: str, right: str) -> bool:
-    normalized_left = normalize_stem(left)
-    normalized_right = normalize_stem(right)
-    if normalized_left == normalized_right:
+def _within_one_word_edit(
+    left: Sequence[str], right: Sequence[str], *, allow_substitution: bool
+) -> bool:
+    """True when the word sequences are equal or differ by exactly one word."""
+    if tuple(left) == tuple(right):
         return True
+    if abs(len(left) - len(right)) > 1:
+        return False
+    if len(left) == len(right):
+        if not allow_substitution:
+            return False
+        return sum(1 for x, y in zip(left, right) if x != y) == 1
+    short, long_ = (left, right) if len(left) < len(right) else (right, left)
+    if len(short) < NEAR_DUPLICATE_MIN_CONTENT_TOKENS:
+        return False
+    i = 0
+    while i < len(short) and short[i] == long_[i]:
+        i += 1
+    return tuple(short[i:]) == tuple(long_[i + 1 :])
+
+
+def are_near_duplicates(left: str, right: str) -> bool:
+    """Same question with at most one word different, ignoring negation.
+
+    This is a surface check, not a same-idea check: two questions about the
+    same fact are fine as long as they are worded differently. Questions whose
+    negation differs (NOT / EXCEPT / least / most) are never duplicates.
+    """
+    if normalize_stem(left) == normalize_stem(right):
+        return True
+    if _negation_markers(left) != _negation_markers(right):
+        return False
 
     left_sequence = _question_content_tokens(left)
     right_sequence = _question_content_tokens(right)
-    left_tokens = set(left_sequence)
-    right_tokens = set(right_sequence)
-    if not left_tokens or not right_tokens:
+    if not left_sequence or not right_sequence:
         return False
-
-    # A high surface score can come from a long shared template with one
-    # different learning point (for example, "binary" versus "octal").
-    # Deterministic rejection is safe only when the content difference is
-    # one-sided, such as an added filler word, or is only question framing.
-    if left_tokens - right_tokens and right_tokens - left_tokens:
-        return False
-
-    union = left_tokens | right_tokens
-    jaccard = len(left_tokens & right_tokens) / len(union) if union else 1.0
-    sequence = difflib.SequenceMatcher(
-        None,
-        " ".join(left_sequence),
-        " ".join(right_sequence),
-    ).ratio()
-    return jaccard >= 0.85 and sequence >= 0.88
+    return _within_one_word_edit(
+        left_sequence,
+        right_sequence,
+        allow_substitution=NEAR_DUPLICATE_COUNT_SUBSTITUTION,
+    )
 
 
 def validate_module(

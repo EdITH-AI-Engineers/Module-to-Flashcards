@@ -27,7 +27,7 @@ CARD FIELD CONTRACT
 Every card, with no exceptions, must include all eleven fields: type, question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, is_true, expalanation, hint, difficulty, assessment_approach. Before returning JSON, verify every card object has exactly these eleven keys. If any card is missing a key, add it before responding.
 
 QUESTION QUALITY
-Write clear, authentic college-level assessment items. Assess terminology, distinctions, relationships, mechanisms, processes, causes, effects, classifications, applications, implications, conditions, limitations, or technical reasoning only when the supplied facts support them. Difficulty must come from the required thinking, never confusing wording. Do not mechanically convert a fact into a stem or reveal an answer through its full definition. The five cards must be meaningfully distinct learning checks. They may assess the same concept from supported angles, but changing only the card type, polarity, or wording does not create a different question. Assign each card whichever planned assessment approach accurately describes the reasoning it requires. Approaches may repeat, and no planned approach is required to appear. Prefer useful variety when the facts support it, but never mislabel a question merely to cover every approach.
+Write clear, authentic college-level assessment items. Assess terminology, distinctions, relationships, mechanisms, processes, causes, effects, classifications, applications, implications, conditions, limitations, or technical reasoning only when the supplied facts support them. Difficulty must come from the required thinking, never confusing wording. Do not mechanically convert a fact into a stem or reveal an answer through its full definition. The five cards must be meaningfully distinct learning checks. They may assess the same concept from supported angles, but changing only the card type, opening phrase, or a single word does not create a different question. Asking the negated form (the exception instead of the member) does. Assign each card whichever planned assessment approach accurately describes the reasoning it requires. Approaches may repeat, and no planned approach is required to appear. Prefer useful variety when the facts support it, but never mislabel a question merely to cover every approach.
 
 ASSESSMENT APPROACH SEMANTICS
 - recall: directly retrieve an explicitly supported term, property, relationship, or fact.
@@ -298,11 +298,7 @@ def build_concept_plan_retry_prompt(
         error_bullets += f"\n- (+{omitted} similar errors omitted)"
 
     unusable_ids = sorted(
-        {
-            fact.fact_id
-            for fact in facts
-            if _contains_metadata_artifact(fact.statement)
-        }
+        {fact.fact_id for fact in facts if _contains_metadata_artifact(fact.statement)}
     )
     unusable_guidance = ""
     if unusable_ids:
@@ -400,7 +396,8 @@ def build_cluster_prompt(
       evidence.
     - The five cards must be meaningfully distinct learning checks. They may
       assess the same concept from supported angles, but changing only the card
-      type, polarity, opening phrase, or wording is not a different question.
+      type, opening phrase, or one word is not a different question. A negated
+      form of a question is a different question.
     - Each multiple-choice wrong_option must be plausible, unambiguously
       incorrect, and relevant to the question and subject domain. It must use
       the same semantic category and answer shape as the correct option. A
@@ -567,6 +564,42 @@ REJECTED JSON:
 """
 
 
+_CARD_NUMBER_RE = re.compile(r"\bcards?\s+(\d+)(?:\s+and\s+(\d+))?\b", re.I)
+
+
+def _flagged_card_positions(
+    errors: Sequence[str], total: int = CARDS_PER_CLUSTER
+) -> set[int] | None:
+    """Return exactly which card numbers a validation-error list names.
+
+    Every per-card error validate_cluster raises is built as
+    f"card {position} ...", and every near-duplicate error pipeline.py
+    raises is built as f"cards {i} and {j} ...", so in practice almost all
+    errors name their card(s) explicitly. Returns None -- "don't know" --
+    the moment any error does NOT name a card (a whole-cluster error such as
+    a wrong card count, or a future error format this helper wasn't updated
+    for): the caller must then treat every card as possibly wrong rather
+    than promise to leave any of them untouched. This is checked against the
+    full, pre-condensing error list, not the display-truncated one, so a
+    card whose error got dropped by _condensed_errors' cap is never
+    mistaken for one that passed.
+    """
+    flagged: set[int] = set()
+    for error in errors:
+        matches = list(_CARD_NUMBER_RE.finditer(str(error)))
+        if not matches:
+            return None
+        for match in matches:
+            for group in match.groups():
+                if group is None:
+                    continue
+                position = int(group)
+                if not 1 <= position <= total:
+                    return None
+                flagged.add(position)
+    return flagged
+
+
 def build_cluster_retry_prompt(
     identity: ModuleIdentity,
     concept: ConceptPlan,
@@ -583,6 +616,35 @@ def build_cluster_retry_prompt(
     error_bullets = "\n".join(f"- {error}" for error in condensed)
     if omitted:
         error_bullets += f"\n- (+{omitted} similar errors omitted)"
+
+    # Tell the model exactly which cards it is allowed to touch. Without
+    # this, "regenerate one complete replacement five-card JSON object"
+    # invites the model to silently rewrite cards no error complained
+    # about -- which is how a card with four perfectly fine multiple-choice
+    # options on one attempt comes back with all four options collapsed to
+    # the same sentence on the next, purely as collateral damage from fixing
+    # an unrelated card.
+    preserve_bullet = ""
+    if candidate is not None:
+        flagged = _flagged_card_positions(error_list)
+        if flagged and len(flagged) < CARDS_PER_CLUSTER:
+            flagged_list = sorted(flagged)
+            preserved = sorted(set(range(1, CARDS_PER_CLUSTER + 1)) - flagged)
+            flagged_words = ", ".join(str(n) for n in flagged_list)
+            preserved_words = ", ".join(str(n) for n in preserved)
+            flagged_noun = "card" + ("s" if len(flagged_list) > 1 else "")
+            flagged_verb = "are" if len(flagged_list) > 1 else "is"
+            preserved_noun = "card" + ("s" if len(preserved) > 1 else "")
+            preserve_bullet = (
+                f"\n    - Only {flagged_noun} {flagged_words} {flagged_verb} "
+                "named by a validation error below; every other card in "
+                "REJECTED JSON already passed every check. Copy "
+                f"{preserved_noun} {preserved_words} into your answer "
+                "completely unchanged -- identical question, options, "
+                "is_true, expalanation, hint, difficulty, and "
+                "assessment_approach, character for character. Rewrite only "
+                "the flagged card(s) above."
+            )
 
     payload = _cluster_payload(
         identity,
@@ -610,11 +672,15 @@ def build_cluster_retry_prompt(
     CORRECTIONS
     - Return exactly {CARDS_PER_CLUSTER} complete cards. Set each
       assessment_approach to a planned value that matches the question's actual
-      reasoning. Approaches may repeat; no planned value is required to appear.
+      reasoning. Approaches may repeat; no planned value is required to appear.{preserve_bullet}
     - Use only multiple-choice, identification, and true-false types, including
       at least one of each. Scenario analysis is an approach, never a type.
     - Identification and true-false option fields must be "". Multiple-choice
       must contain one correct option and three distinct incorrect options.
+      Distinct means genuinely different claims, not the same claim reworded
+      -- if the facts are too narrow to support three different wrong
+      options, use a closely related plausible term from outside the facts
+      rather than paraphrasing correct_option three times.
     - Questions, correct answers, true-false decisions, explanations, and hints
       must use evidence. Multiple-choice distractors may use a familiar
       closely related term absent from the facts, but must remain relevant,
@@ -625,10 +691,19 @@ def build_cluster_retry_prompt(
       reasoning more accurately.
     - Make all five cards meaningfully distinct learning checks. They may assess
       the same concept from supported angles, but do not repeat a question by
-      changing only its type, polarity, or wording.
+      changing only its type, opening phrase, or one word.
     - Remove provenance wording and keep the answer out of identification stems.
       Never mention fact IDs, evidence labels, prior subjects, or other internal
-      generation details.
+      generation details. If an error says a question "reveals the
+      identification answer", the question text repeats correct_option's
+      exact wording (or its abbreviation) somewhere inside it. Rewrite only
+      the question so it asks for the term by its function, purpose,
+      defining trait, or relationship to another supplied fact -- never by
+      restating the term itself. Keep correct_option unchanged. If the
+      concept's facts are too narrow to describe the term any other way,
+      write that card about a different supported angle on the concept (a
+      citation, a component, a contrast with a distractor fact) instead of
+      re-describing the same definition again.
     - Each expalanation must explain the supported relationship or distinction,
       not merely say that an answer is correct or a statement is true or false.
     - Include all eleven required fields and preserve expalanation spelling.
@@ -682,7 +757,8 @@ def build_duplicate_card_repair_prompt(
         "card_to_repair": asdict(card),
         "conflicting_questions": list(conflicting_questions),
     }
-    return """Paraphrase exactly one flagged flashcard.
+    return (
+        """Paraphrase exactly one flagged flashcard.
 
     REPAIR RULES
     - Rewrite only card_to_repair. Python will return it to json_location; do not
@@ -693,18 +769,143 @@ def build_duplicate_card_repair_prompt(
       corpus or fact text. Do not introduce a new claim or change which answer
       is correct.
     - Make the repaired question genuinely distinct from conflicting_questions.
-      Changing only the opening question word or adding filler is insufficient.
+      A question that differs from a conflicting question by only one word (or
+      only the opening question word) is still a duplicate. Negating the
+      question is allowed and counts as different, but the options must change
+      to match. Otherwise restructure the stem (scenario, fill-in-the-blank,
+      condition first, or the same relationship asked from the other
+      direction).
     - Do not change the assessment approach. Copy every field not explicitly
       permitted by the type-specific edit limits exactly.
     - Keep the eleven required fields and preserve the key spelling expalanation.
     - Return one card only, with no Markdown or surrounding text.
 
-    """ + _duplicate_card_edit_rules(card) + """
+    """
+        + _duplicate_card_edit_rules(card)
+        + """
 
     Required shape: {"cards":[{...exactly one complete card...}]}
 
     INPUT JSON:
-    """ + _json(payload)
+    """
+        + _json(payload)
+    )
+
+
+_DUPLICATE_PARAPHRASE_TECHNIQUES: dict[str, tuple[str, ...]] = {
+    "multiple-choice": (
+        "INVERT (swap question and answer): make the concept that is now "
+        "correct_option the subject of the stem and ask for the category, "
+        "system, or relationship it belongs to (or the reverse). Rebuild "
+        "correct_option and all three wrong options for the new question; all "
+        "four must stay in one semantic category and answer shape.",
+        "FLIP POLARITY WITH A NEW ANSWER SET: turn a NOT / EXCEPT / does-not-"
+        "belong stem into a positive 'Which ... is part of ...' stem whose "
+        "correct_option is a supported member and whose wrong options are "
+        "outside items (or the reverse). Do not merely add or delete the "
+        "word NOT; the options must change too.",
+        "SCENARIO: wrap the same supported relationship in a short concrete "
+        "situation (a person, task, or observation) and ask what applies. The "
+        "stem must not reuse the conflicting stem's opening words.",
+        "RESTRUCTURE: use fill-in-the-blank, condition-first ('When ..., "
+        "which ...'), or definition-first phrasing so the sentence skeleton "
+        "differs from every conflicting question.",
+        "SHIFT ANGLE: test the same supported fact through a different element "
+        "of it (a component, its function, or a contrast with one wrong "
+        "option), keeping the learning point but changing what is asked.",
+    ),
+    "true-false": (
+        "NEGATE AND FLIP: state the opposite claim as a declarative statement "
+        "and flip is_true to match. Also rewrite the subject/predicate "
+        "wording; a bare 'not' insertion is not enough.",
+        "REVERSE THE RELATION: swap subject and predicate so the statement "
+        "reads from the other direction (e.g. 'X are part of Y' becomes 'Y "
+        "includes X'), keeping is_true.",
+        "SUBSTITUTE A SUPPORTED DETAIL: state the claim about a different "
+        "supported member, function, or condition of the same concept, "
+        "setting is_true to match the supplied facts.",
+        "SCENARIO OR CONDITION: express the claim inside a brief situation or "
+        "an if/when clause, still as a declarative statement.",
+    ),
+    "identification": (
+        "INVERT (swap question and answer): put the current correct_option in "
+        "the stem and ask for the supported function, category, or "
+        "relationship as the new correct_option. The new answer must not "
+        "appear in the stem.",
+        "DESCRIBE BY FUNCTION: replace the defining phrase with a supported "
+        "purpose, trait, or relationship and keep correct_option.",
+        "SHIFT ANGLE: ask for a different supported element of the same "
+        "concept (a component, citation, or contrast) instead of its "
+        "definition.",
+        "RESTRUCTURE: condition-first or scenario-based stem with a different "
+        "sentence skeleton from every conflicting question.",
+    ),
+}
+
+
+def _duplicate_retry_technique_block(card: FlashcardDraft, attempt: int) -> str:
+    techniques = _DUPLICATE_PARAPHRASE_TECHNIQUES.get(
+        card.type, _DUPLICATE_PARAPHRASE_TECHNIQUES["multiple-choice"]
+    )
+    index = max(0, attempt - 2) % len(techniques)
+    primary = techniques[index]
+    others = "\n".join(f"    - {t}" for i, t in enumerate(techniques) if i != index)
+    return f"""PARAPHRASE TECHNIQUE FOR THIS ATTEMPT (attempt {attempt})
+    - Apply this technique first: {primary}
+    - You may combine it with any technique below if that is what it takes to
+      make the question clearly different:
+{others}
+    - Adding, removing, or swapping a single word (for example inserting
+      "key") or changing only the opening question word is NOT a paraphrase;
+      the duplicate check compares the whole sentence word by word. Negating
+      the question does count as different, provided the options change to
+      match.
+    - Do not reuse the wording of any rejected question (listed below), and do
+      not return to an earlier attempt's stem."""
+
+
+def _duplicate_retry_edit_rules(card: FlashcardDraft) -> str:
+    """Retry edit limits: the technique may require changing the answer."""
+    common = """RETRY EDIT LIMITS
+    - Always copy type, difficulty, and assessment_approach exactly.
+    - The learning point stays the same, and every field must remain supported
+      only by the supplied facts."""
+    if card.type == "true-false":
+        return common + """
+    - question must be a declarative statement, not a question. Do not begin
+      with Does, Do, Is, Are, Can, Could, Should, Would, Will, What, Which,
+      Who, Where, When, Why, or How. End it with a period.
+    - Set is_true to whatever the new statement's truth is; keep all four
+      option fields empty. Rewrite expalanation and hint to match the new
+      statement."""
+    if card.type == "identification":
+        return common + """
+    - You may change question and correct_option. Keep the three wrong-option
+      fields exactly "" and is_true null. If correct_option changes, rewrite
+      expalanation and hint to match."""
+    return common + """
+    - You may change question, correct_option, and all three wrong options.
+      Keep is_true null and the four options textually different.
+    - If correct_option changes, rewrite expalanation and hint so they explain
+      the NEW answer; do not copy text that describes the old one."""
+
+
+def _rejected_question_texts(
+    rejected_json: str | None, errors: Sequence[str]
+) -> list[str]:
+    seen: list[str] = []
+    if rejected_json:
+        try:
+            data = json.loads(rejected_json)
+            for item in data.get("cards", []):
+                question = str(item.get("question", "")).strip()
+                if question:
+                    seen.append(question)
+        except (ValueError, AttributeError, TypeError):
+            pass
+    for error in errors:
+        seen.extend(re.findall(r"'([^']{8,})'", str(error)))
+    return list(dict.fromkeys(seen))
 
 
 def build_duplicate_card_retry_prompt(
@@ -712,16 +913,58 @@ def build_duplicate_card_retry_prompt(
     rejected_json: str | None,
     errors: Sequence[str],
     card: FlashcardDraft,
+    *,
+    attempt: int = 2,
+    rejected_questions: Sequence[str] = (),
 ) -> str:
-    """Retry one duplicate card without relaxing its locked fields."""
+    """Retry one duplicate card with a different paraphrase technique.
 
-    return """Retry the one-card paraphrase. Correct only the reported errors.
-    Do not change assessment_approach, type, is_true, difficulty, expalanation,
-    or hint.
+    ``attempt`` is the attempt number about to run (2 or 3) so each retry uses
+    a different technique. ``rejected_questions`` may carry every stem rejected
+    on earlier attempts, so the model cannot cycle back to one.
+    """
 
-    """ + _duplicate_card_edit_rules(card) + """
+    rejected = list(
+        dict.fromkeys(
+            [*rejected_questions, *_rejected_question_texts(rejected_json, errors)]
+        )
+    )
+    rejected_block = "\n".join(f"    - {q}" for q in rejected) or "    - (none)"
+    return (
+        """Retry the one-card paraphrase. The last attempt was rejected because it
+    is still a near-duplicate of another question.
 
-    """ + build_retry_prompt(original_prompt, rejected_json, errors)
+    STRUCTURE CHANGE REQUIRED
+    - You must change the structure of the question, not just its wording.
+      The duplicate check compares the whole sentence word by word, so a
+      question that differs from a conflicting question by one added, removed,
+      or swapped word (for example inserting "key" or "primary") is still a
+      duplicate. Changing only the opening word (Which/What) is also still a
+      duplicate.
+    - Build a new sentence skeleton: reorder the clauses, change the question
+      form (fill-in-the-blank, condition-first, scenario, or a statement to
+      complete), or ask the same relationship from the other direction. Several
+      words must differ from every conflicting question, not one.
+    - Negating the question is allowed and counts as different, but the answer
+      options must change to match.
+    - Before answering, compare your new question with each conflicting
+      question and each rejected question below. If they still share the same
+      sentence skeleton, restructure again.
+
+    """
+        + _duplicate_retry_technique_block(card, attempt)
+        + f"""
+
+    REJECTED QUESTIONS (never reuse or lightly reword these)
+{rejected_block}
+
+    """
+        + _duplicate_retry_edit_rules(card)
+        + """
+
+    """
+        + build_retry_prompt(original_prompt, rejected_json, errors)
+    )
 
 
 def build_grounding_review_prompt(
@@ -737,7 +980,7 @@ def build_grounding_review_prompt(
             for cluster in clusters
         ]
     }
-    return f"""Review these generated clusters against only their supplied facts. Questions, correct answers, true-false decisions, explanations, and hints must be supported by those facts. Flag a cluster if any card contains an unsupported claim, answer leakage, an invalid distractor, or a misleading explanation. Also flag a cluster when two cards test the same answer-bearing relationship using a different type, polarity, or wording; those are duplicate learning checks, not useful variation.
+    return f"""Review these generated clusters against only their supplied facts. Questions, correct answers, true-false decisions, explanations, and hints must be supported by those facts. Flag a cluster if any card contains an unsupported claim, answer leakage, an invalid distractor, or a misleading explanation. Also flag a cluster when two cards ask the same question with at most one word different; cards that test the same fact in differently worded questions, in a different type, or in negated form are not duplicates.
 
     A wrong option is not invalid merely because its wording does not appear in the supplied facts. It may use a familiar related term, but it must be plausible, unambiguously incorrect, in the same semantic category and answer shape as the correct option, and relevant to the question and module domain. Flag a distractor only when it is correct or arguably correct, duplicates another option, is nonsensical, mismatches the answer category, or is unrelated to the question or module domain. Do not rewrite cards.
 
@@ -763,7 +1006,7 @@ def build_duplicate_review_prompt(
             for cluster in clusters
         ]
     }
-    return """Compare all question stems for semantic and near duplication. Flag only questions that assess the same learning point in substantially the same way as another question. A definition and its negated restatement are duplicates even when one is identification and the other is true-false. Report each duplicate pair once: put the later cluster/card in the issue's cluster field and at the start of its reason, and identify the earlier card after the word cluster. Every reason must use exactly the form "card <number> duplicates cluster <uuid> card <number>". Do not judge factual correctness in this pass and do not rewrite questions.
+    return """Compare all question stems for near duplication. Flag only a question that is the same sentence as another question with at most one filler, modifier, or synonym word added, removed, or swapped. Do not flag questions that merely assess the same fact or concept in differently worded questions, questions of different types, or a question and its negated form (for example \"is a component\" versus \"is NOT a component\"). A swapped key term that changes what is asked (for example binary versus octal) makes a different question. Report each duplicate pair once: put the later cluster/card in the issue's cluster field and at the start of its reason, and identify the earlier card after the word cluster. Every reason must use exactly the form "card <number> duplicates cluster <uuid> card <number>". Do not judge factual correctness in this pass and do not rewrite questions.
 
     Return only this JSON shape. Use an empty issues list when no duplicate exists:
     {"issues":[{"cluster":"valid UUID copied from input","reasons":["card 2 duplicates cluster <uuid> card 4"]}]}

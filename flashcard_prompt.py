@@ -247,7 +247,7 @@ def build_concept_plan_prompt(
         f"""Select exactly {CONCEPTS_PER_MODULE} distinct, explicitly supported concepts for this module.
     Each concept must be assessable in {CARDS_PER_CLUSTER} genuinely different ways. Keep concepts semantically distinct and do not use presentation or provenance details as concepts.
 
-    For each concept, copy one or more fact_ids exactly from the input. Every concept must have at least one anchor fact_id that is not assigned to any other concept. A fact_id may be shared as supporting context only when every affected concept still has a different unique anchor fact_id. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements.{context_guidance} Choose exactly {CARDS_PER_CLUSTER} distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
+    For each concept, copy one or more fact_ids exactly from the input. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements.{context_guidance} Choose exactly {CARDS_PER_CLUSTER} distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
 
     Return one JSON object whose top-level key is "concepts" and whose value is an array. The array must contain exactly {CONCEPTS_PER_MODULE} concept objects before its closing bracket. Every concept object has these keys: name (string), fact_ids (non-empty string array), and assessment_approaches (array of exactly {CARDS_PER_CLUSTER} distinct allowed approaches). Do not treat a one-object shape illustration as a complete answer.
 
@@ -352,9 +352,6 @@ def build_concept_plan_retry_prompt(
     - If two concepts would assess the same underlying learning point, keep
       one and replace the other with a concept grounded in different
       fact_ids.
-    - Every concept must include at least one anchor fact_id used by no other
-      concept. A shared fact_id may provide context only when each concept
-      also has a different unique anchor fact_id.
     - Every fact_id must be copied exactly from graph_facts; do not alter or
       fabricate one.
     - Only return insufficient_content if fewer than {CONCEPTS_PER_MODULE}

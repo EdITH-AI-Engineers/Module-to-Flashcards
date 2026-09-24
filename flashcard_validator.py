@@ -355,7 +355,6 @@ def parse_concept_plan(
 
     known = {fact.fact_id: fact.statement for fact in known_facts}
     results: list[ConceptPlan] = []
-    result_positions: list[int] = []
     errors: list[str] = []
     seen_names: set[str] = set()
 
@@ -424,26 +423,6 @@ def parse_concept_plan(
                 assessment_approaches=approaches,
             )
         )
-        result_positions.append(position)
-
-    # Shared facts may provide context to more than one concept, but every
-    # concept needs at least one fact that it alone owns. Otherwise a second
-    # concept can be a renamed subset of the first and generate the same core
-    # definition questions.
-    fact_usage = Counter(
-        fact_id
-        for result in results
-        for fact_id in set(result.fact_ids)
-        if fact_id in known
-    )
-    for position, result in zip(result_positions, results):
-        if result.fact_ids and not any(
-            fact_usage[fact_id] == 1 for fact_id in set(result.fact_ids)
-        ):
-            errors.append(
-                f"concept {position} has no uniquely assigned anchor fact_id; "
-                "every fact_id is reused by another concept"
-            )
 
     if errors:
         raise ValidationError(errors)

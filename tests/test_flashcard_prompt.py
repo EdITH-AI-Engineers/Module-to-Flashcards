@@ -146,14 +146,13 @@ def test_plan_prompt_serializes_relationships_without_provenance():
     assert "labels may repeat" not in prompt.casefold()
 
 
-def test_plan_prompt_requires_unique_anchor_but_allows_shared_context():
+def test_plan_prompt_does_not_require_exclusive_fact_ownership():
     prompt = build_concept_plan_prompt(
         ModuleIdentity("CPE0021", "1"),
         tuple(GraphFact(f"e{index}", f"fact {index}") for index in range(1, 21)),
     )
 
-    assert "anchor fact_id" in prompt
-    assert "shared as supporting context" in prompt
+    assert "EVIDENCE OWNERSHIP" not in prompt
     assert "each fact_id may appear at most once" not in prompt.casefold()
 
 

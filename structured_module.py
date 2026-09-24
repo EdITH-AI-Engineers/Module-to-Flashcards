@@ -243,7 +243,7 @@ def filter_lesson_fact_records(
             continue
         if (
             _FACT_URL.search(statement)
-            or statement.endswith("?")
+            or is_unresolved_question_statement(statement)
             or _FACT_SECTION_PATH.match(statement)
             or _FACT_LEARNING_OBJECTIVE.match(statement)
             or _PRESENTATION_NOISE.match(statement)
@@ -262,6 +262,17 @@ def filter_lesson_fact_records(
         candidate["statement"] = statement
         usable.append(candidate)
     return tuple(usable)
+
+
+def is_unresolved_question_statement(value: object) -> bool:
+    """Return whether extracted text poses a question without an answer.
+
+    A statement that ends at a question mark contains no answer-bearing claim
+    after the question.  Compound question-and-answer text remains eligible
+    because its final sentence ends with the supplied answer instead.
+    """
+
+    return _clean_fact_text(value).endswith(("?", "？"))
 
 
 def _fact_content_tokens(value: object) -> tuple[str, ...]:

@@ -46,6 +46,28 @@ def empty_review():
     return json.dumps({"issues": []})
 
 
+def test_pipeline_excludes_question_shaped_facts_from_factual_authority():
+    backend = FakeBackend(
+        [plan_json()] + [cluster_json(index) for index in range(1, 21)]
+    )
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(final_review=False),
+        progress=lambda _message: None,
+    )
+    question = GraphFact(
+        "question-only",
+        "Should every failed task be included in the time data?",
+    )
+
+    pipeline.run(ModuleIdentity("CPE0021", "1"), (question,) + graph_facts())
+
+    plan_payload = review_payload(backend.calls[0][1])
+    assert [item["fact_id"] for item in plan_payload["graph_facts"]] == [
+        fact.fact_id for fact in graph_facts()
+    ]
+
+
 def single_card_json(card: FlashcardDraft) -> str:
     return json.dumps({"cards": [asdict(card)]})
 

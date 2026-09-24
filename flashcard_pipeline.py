@@ -56,6 +56,7 @@ from flashcard_validator import (
     validate_cluster,
     validate_module,
 )
+from structured_module import is_unresolved_question_statement
 
 
 class GenerationError(RuntimeError):
@@ -101,6 +102,18 @@ def _exclude_structural_facts(
     concept that is unwritable for that reason.
     """
     return tuple(fact for fact in facts if fact.kind not in STRUCTURAL_FACT_KINDS)
+
+
+def _exclude_non_assertive_facts(
+    facts: Sequence[GraphFact],
+) -> tuple[GraphFact, ...]:
+    """Prevent unresolved source questions from becoming factual authority."""
+
+    return tuple(
+        fact
+        for fact in facts
+        if not is_unresolved_question_statement(fact.statement)
+    )
 
 
 def _balanced_plan_facts(
@@ -845,6 +858,7 @@ class FlashcardPipeline:
         self._attempt_count = 0
         self._rejected_attempt_count = 0
         self._rejection_counts.clear()
+        facts = _exclude_non_assertive_facts(facts)
         plan_facts = _balanced_plan_facts(_exclude_structural_facts(facts))
         self._progress(
             f"Planning {CONCEPTS_PER_MODULE} concepts from "

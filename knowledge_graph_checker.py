@@ -6,6 +6,7 @@ import time
 from typing import Callable, Mapping, Sequence
 
 from flashcard_types import ChatBackend, CompletionTruncatedError
+from structured_module import is_unresolved_question_statement
 
 
 class KnowledgeGraphCheckError(RuntimeError):
@@ -28,6 +29,13 @@ standalone page or section labels with no instructional claim, author/contact or
 copyright lines, navigation directions, generic statements that merely say the
 module introduces/covers/discusses a topic, corrupted fragments, or material
 plainly unrelated to the module. When uncertain, keep the item.
+
+A question or unresolved alternative is not a factual assertion. Remove an
+item that merely asks a question or presents an unanswered choice. If another
+candidate explicitly answers it, keep the answer-bearing item as the usable
+fact. A compound item may be kept when it includes an explicit answer after
+the question. Never infer an answer, recommendation, or true/false value from
+the wording of the question itself.
 
 Remove any instance of mentioning the metadata of the module itself, such as the course code, module number, module title, or source file name. Do not remove any item that contains a substantive claim about the subject matter. Ensure that you do not rewrite or invent any facts.
 
@@ -208,6 +216,16 @@ def check_knowledge_graph(
         rows, positions = _candidate_rows(
             values, kind="fact" if collection_name == "facts" else "edge"
         )
+        if collection_name == "facts":
+            unresolved_ids = {
+                str(row["id"])
+                for row in rows
+                if is_unresolved_question_statement(row.get("statement", ""))
+            }
+            removed_positions[collection_name].update(
+                positions[item] for item in unresolved_ids
+            )
+            rows = [row for row in rows if str(row["id"]) not in unresolved_ids]
         for offset in range(0, len(rows), batch_size):
             batch = rows[offset : offset + batch_size]
             if progress is not None:

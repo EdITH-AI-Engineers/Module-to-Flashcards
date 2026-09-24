@@ -71,6 +71,11 @@ Identification rules:
 
 True-false rules:
 - Write only a declarative statement in question.
+- Build a true-false decision only from evidence that explicitly asserts a
+  claim. An unresolved question, unanswered choice, or evidence text ending in
+  a question mark cannot establish truth or falsity. Never infer is_true from
+  the wording of such material; use different assertive evidence or use a
+  multiple-choice or identification card instead.
 - For true-false cards, correct_option, wrong_option_1, wrong_option_2, and wrong_option_3 must ALL be empty strings. The only fields that carry the answer are is_true (0 or 1) and expalanation.
 - Set is_true to integer 1 for true or integer 0 for false.
 - Do not add True or False, labels, or evaluation instructions.
@@ -618,6 +623,24 @@ def build_cluster_retry_prompt(
         error_bullets += f"\n- (+{omitted} similar errors omitted)"
 
     answer_leak_guidance = ""
+    true_false_guidance = ""
+    if any(
+        "true-false question must be a declarative statement only" in error
+        for error in error_list
+    ):
+        true_false_guidance = """
+
+    TRUE-FALSE DECLARATIVE CORRECTION
+    - A true-false question must be a declarative statement ending with a
+      period, never an interrogative beginning with Does, Do, Is, Are, Can,
+      Could, Should, Would, Will, What, Which, Who, Where, When, Why, or How.
+    - Do not infer is_true from an unresolved question, an unanswered choice,
+      or the mere fact that an issue was raised. If the evidence does not
+      explicitly settle the claim, change this card to multiple-choice or
+      identification when another true-false card remains in the cluster.
+      Otherwise, replace it with a declarative true-false statement grounded
+      in a different explicit assertion from the evidence.
+    """
     if candidate is not None:
         try:
             candidate_value = json.loads(candidate)
@@ -707,7 +730,7 @@ def build_cluster_retry_prompt(
     CORRECTIONS
     - Return exactly {CARDS_PER_CLUSTER} complete cards. Set each
       assessment_approach to a planned value that matches the question's actual
-      reasoning. Approaches may repeat; no planned value is required to appear.{preserve_bullet}{answer_leak_guidance}
+      reasoning. Approaches may repeat; no planned value is required to appear.{preserve_bullet}{answer_leak_guidance}{true_false_guidance}
     - Use only multiple-choice, identification, and true-false types, including
       at least one of each. Scenario analysis is an approach, never a type.
     - Identification and true-false option fields must be "". Multiple-choice

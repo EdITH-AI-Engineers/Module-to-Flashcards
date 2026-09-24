@@ -142,3 +142,24 @@ def test_checker_retries_a_length_truncation_with_bounded_larger_budget():
         call[1]["properties"]["remove"]["maxItems"] == 2
         for call in backend.calls
     )
+
+
+def test_checker_prunes_unresolved_question_facts_before_qwen_review():
+    value = sample_graph()
+    value["facts"] = [
+        {
+            "id": "f-question",
+            "statement": "Should every failed task be included in the time data?",
+        },
+        {
+            "id": "f-answer",
+            "statement": "Successful-task time and all-task time are separate reporting choices.",
+        },
+    ]
+    backend = Responses('{"remove":[false]}', '{"remove":[false,false]}')
+
+    checked = check_knowledge_graph(value, backend)
+
+    assert [fact["id"] for fact in checked["facts"]] == ["f-answer"]
+    assert "Should every failed task" not in backend.calls[0][1]
+    assert checked["metadata"]["graph_checker"]["removed_facts"] == 1

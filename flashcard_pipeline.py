@@ -20,6 +20,7 @@ from flashcard_prompt import (
     build_cluster_prompt,
     build_cluster_retry_prompt,
     build_concept_plan_prompt,
+    build_concept_plan_retry_prompt,
     build_duplicate_card_repair_prompt,
     build_duplicate_card_retry_prompt,
     build_duplicate_review_prompt,
@@ -76,6 +77,30 @@ class PipelineConfig:
 
 Parsed = TypeVar("Parsed")
 PLAN_FACT_LIMIT = 50
+
+# Fact `kind` values that mark structural/presentation content (slide titles,
+# section headers, module headings) rather than teachable material. Facts
+# tagged with one of these never reach the concept planner, so it cannot
+# cluster on them and produce an unwritable "Module N Title"-style concept.
+# `parse_concept_plan` also rejects any concept whose name or every backing
+# fact reads as provenance/presentation content, as a second layer of
+# defense for facts whose `kind` doesn't (or can't) mark them this way.
+STRUCTURAL_FACT_KINDS = frozenset({"title", "header", "heading", "objective"})
+
+
+def _exclude_structural_facts(
+    facts: Sequence[GraphFact],
+) -> tuple[GraphFact, ...]:
+    """Drop facts whose `kind` marks them as structural/provenance-only.
+
+    These facts (slide titles, section headers, module headings) have no
+    content of their own to assess -- any card built from one can only ever
+    restate the title/heading itself, which is exactly the presentation
+    metadata the card-writing prompt is told never to expose. Keeping them
+    out of the planner's candidate pool prevents it from ever proposing a
+    concept that is unwritable for that reason.
+    """
+    return tuple(fact for fact in facts if fact.kind not in STRUCTURAL_FACT_KINDS)
 
 
 def _balanced_plan_facts(
@@ -330,8 +355,7 @@ class FlashcardPipeline:
                         f"{exc.completion_tokens} completion tokens)"
                     )
                 last_errors = (
-                    "response was truncated before completing the JSON"
-                    + token_detail,
+                    "response was truncated before completing the JSON" + token_detail,
                 )
                 self._record_rejection(last_errors)
                 self._progress(
@@ -501,9 +525,7 @@ class FlashcardPipeline:
             parse_and_validate,
             max_tokens=self.config.cluster_max_tokens,
             label=label,
-            response_schema=build_card_cluster_schema(
-                concept.assessment_approaches
-            ),
+            response_schema=build_card_cluster_schema(concept.assessment_approaches),
             include_rejected_candidate=False,
             retry_prompt_builder=build_cluster_retry,
         )
@@ -542,10 +564,7 @@ class FlashcardPipeline:
                         errors.append(
                             f"duplicate reason references unknown cluster {target_cluster!r}"
                         )
-                    elif (
-                        target_cluster == issue.cluster
-                        and target_card == source_card
-                    ):
+                    elif target_cluster == issue.cluster and target_card == source_card:
                         errors.append("duplicate reason cannot reference the same card")
                     if not 1 <= target_card <= CARDS_PER_CLUSTER:
                         errors.append(
@@ -799,9 +818,7 @@ class FlashcardPipeline:
                     f"duplicate repair {item.cluster_index + 1} card "
                     f"{item.card_index + 1} ({old.concept.name})"
                 ),
-                response_schema=build_single_card_schema(
-                    original_card
-                ),
+                response_schema=build_single_card_schema(original_card),
                 retry_prompt_builder=lambda original, rejected, errors: (
                     build_duplicate_card_retry_prompt(
                         original,
@@ -828,7 +845,7 @@ class FlashcardPipeline:
         self._attempt_count = 0
         self._rejected_attempt_count = 0
         self._rejection_counts.clear()
-        plan_facts = _balanced_plan_facts(facts)
+        plan_facts = _balanced_plan_facts(_exclude_structural_facts(facts))
         self._progress(
             f"Planning {CONCEPTS_PER_MODULE} concepts from "
             f"{len(plan_facts)} grounded lesson facts..."
@@ -838,6 +855,21 @@ class FlashcardPipeline:
             plan_facts,
             prior_concept_names,
         )
+
+        def build_concept_plan_retry(
+            original_prompt: str,
+            candidate: str | None,
+            errors: Sequence[str],
+        ) -> str:
+            del original_prompt  # rebuilt fresh from identity/plan_facts below
+            return build_concept_plan_retry_prompt(
+                identity,
+                plan_facts,
+                prior_concept_names,
+                candidate,
+                errors,
+            )
+
         concepts = self._complete_with_retries(
             plan_prompt,
             lambda raw: parse_concept_plan(raw, plan_facts),
@@ -847,6 +879,7 @@ class FlashcardPipeline:
                 tuple(fact.fact_id for fact in plan_facts)
             ),
             include_rejected_candidate=False,
+            retry_prompt_builder=build_concept_plan_retry,
         )
 
         clusters: list[FlashcardCluster] = []
@@ -894,12 +927,10 @@ class FlashcardPipeline:
         relaxed_grounding_cluster_ids: set[str] = set()
         duplicate_repairs = 0
         if self.config.final_review:
-            issues, grounding_clusters, duplicate_issues = (
-                self._collect_review_issues(clusters)
+            issues, grounding_clusters, duplicate_issues = self._collect_review_issues(
+                clusters
             )
-            duplicate_cluster_ids = {
-                issue.cluster for issue in duplicate_issues
-            }
+            duplicate_cluster_ids = {issue.cluster for issue in duplicate_issues}
             if issues:
                 by_id = {
                     cluster.cluster: index for index, cluster in enumerate(clusters)
@@ -994,9 +1025,7 @@ class FlashcardPipeline:
             final_errors = validate_module(
                 clusters,
                 facts,
-                skip_grounding_cluster_ids=frozenset(
-                    relaxed_grounding_cluster_ids
-                ),
+                skip_grounding_cluster_ids=frozenset(relaxed_grounding_cluster_ids),
             )
         if final_errors:
             raise GenerationError(

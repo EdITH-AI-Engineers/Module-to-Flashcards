@@ -37,6 +37,7 @@ class GraphFact:
     statement: str
     slides: tuple[int, ...] = ()
     topic: str | None = None
+    kind: str | None = None
 
 
 @dataclass(frozen=True)

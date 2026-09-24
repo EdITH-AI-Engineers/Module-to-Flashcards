@@ -279,6 +279,11 @@ def parse_concept_plan(
         if normalized_name in seen_names:
             errors.append(f"{prefix} duplicates another concept name")
         seen_names.add(normalized_name)
+        if _contains_metadata_artifact(name):
+            errors.append(
+                f"{prefix} name exposes presentation/provenance metadata "
+                "instead of naming an assessable topic"
+            )
 
         try:
             fact_ids = _tolerant_string_list(item.get("fact_ids"), f"{prefix} fact_ids")
@@ -296,6 +301,14 @@ def parse_concept_plan(
                 errors.append(f"{prefix} uses unknown fact id {fact_id!r}")
             else:
                 resolved_facts.append(known[fact_id])
+        if resolved_facts and all(
+            _contains_metadata_artifact(fact) for fact in resolved_facts
+        ):
+            errors.append(
+                f"{prefix} is grounded only in presentation/provenance "
+                "content (e.g. a title or header) and has no assessable "
+                "content to write cards from"
+            )
         if (
             len(approaches) != CARDS_PER_CLUSTER
             or len(set(approaches)) != CARDS_PER_CLUSTER
@@ -493,6 +506,37 @@ def _text_fields(card: FlashcardDraft) -> tuple[str, ...]:
 
 def _contains_provenance(value: str) -> bool:
     return any(re.search(pattern, value, flags=re.I) for pattern in PROVENANCE_PATTERNS)
+
+
+# Narrower than PROVENANCE_PATTERNS/_contains_provenance on purpose. That
+# check is tuned to catch an LLM narrating where a *card's* claim came from
+# ("as stated in the provided facts") and includes common English words
+# (material, document, file, information) that show up innocently in real
+# domain content. Running it against raw source *fact statements* at
+# concept-plan time was flagging legitimate single-fact concepts whenever
+# their one backing fact happened to contain one of those words for an
+# unrelated reason. This list is restricted to terms that are themselves
+# structural/administrative metadata -- the module, lesson, or course
+# framing around the content -- rather than words that merely co-occur with
+# citation phrasing.
+_METADATA_ARTIFACT_PATTERNS = (
+    r"\bmodule\s*\d*\b",
+    r"\blesson\s*\d*\b",
+    r"\bchapter\s*\d*\b",
+    r"\bsubject\b",
+    r"\bcourse(?:\s+code)?\b",
+    r"\bsyllabus\b",
+    r"\btitle\b",
+    r"\bheader\b",
+    r"\bheading\b",
+)
+
+
+def _contains_metadata_artifact(value: str) -> bool:
+    return any(
+        re.search(pattern, value, flags=re.I)
+        for pattern in _METADATA_ARTIFACT_PATTERNS
+    )
 
 
 _PROVENANCE_SOURCE = (

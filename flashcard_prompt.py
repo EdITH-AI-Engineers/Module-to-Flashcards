@@ -13,7 +13,7 @@ from flashcard_types import (
     GraphFact,
     ModuleIdentity,
 )
-from flashcard_validator import _grounding_tokens
+from flashcard_validator import _contains_metadata_artifact, _grounding_tokens
 
 SYSTEM_PROMPT = f"""You are a college-level educational assessment generator.
 
@@ -313,6 +313,108 @@ def build_concept_plan_prompt(
     """
         + _json(payload)
     )
+
+
+def build_concept_plan_retry_prompt(
+    identity: ModuleIdentity,
+    facts: Sequence[GraphFact],
+    prior_concept_names: Sequence[str],
+    candidate: str | None,
+    errors: Iterable[str],
+) -> str:
+    """Build a self-contained concept-plan retry, not the cards-oriented one.
+
+    parse_concept_plan reports errors by a concept's *position* in the array
+    ("concept 6 is grounded only in presentation/provenance content..."), but
+    the model regenerates the whole array from scratch each attempt, so a
+    position number from the last rejection describes nothing stable about
+    the next one -- the same offending fact just resurfaces under a new
+    concept name and a new position. What stays constant across attempts is
+    *which fact_ids* are provenance/presentation-only and can never ground a
+    concept alone. Naming those fact_ids directly, instead of only replaying
+    the old position-indexed error text, is what lets the model avoid them on
+    retry instead of reshuffling them into a different slot and failing
+    again. This also drops the generic build_retry_prompt's card-only
+    MANDATORY CORRECTIONS (identification wording, multiple-choice option
+    counts, etc.), which don't apply to a concept plan and only crowd out the
+    guidance that does.
+    """
+
+    error_list = [str(error) for error in errors]
+    condensed, omitted = _condensed_errors(error_list)
+    error_bullets = "\n".join(f"- {error}" for error in condensed)
+    if omitted:
+        error_bullets += f"\n- (+{omitted} similar errors omitted)"
+
+    unusable_ids = sorted(
+        {
+            fact.fact_id
+            for fact in facts
+            if _contains_metadata_artifact(fact.statement)
+        }
+    )
+    unusable_guidance = ""
+    if unusable_ids:
+        unusable_guidance = (
+            "\n- These fact_ids describe presentation or provenance metadata "
+            "(a title, header, section, or slide label), not assessable "
+            "module content. No concept may rely on them, whether alone or "
+            "combined only with other ids from this list: "
+            + ", ".join(unusable_ids)
+            + "\n"
+        )
+
+    payload: dict[str, object] = {
+        "course_code": identity.course_code,
+        "module_number": identity.module_number,
+        "graph_facts": [
+            {
+                "fact_id": fact.fact_id,
+                "statement": fact.statement,
+                **({"topic": fact.topic} if fact.topic else {}),
+                **({"slides": list(fact.slides)} if fact.slides else {}),
+            }
+            for fact in facts
+        ],
+    }
+    if prior_concept_names:
+        payload["previously_covered_concepts"] = list(prior_concept_names)
+
+    rejected_block = ""
+    if candidate is not None:
+        rejected_json = candidate
+        if len(rejected_json) > MAX_RETRY_CANDIDATE_CHARS:
+            rejected_json = rejected_json[:MAX_RETRY_CANDIDATE_CHARS].rstrip()
+        rejected_block = f"""
+
+    REJECTED JSON TO CORRECT:
+    {rejected_json}"""
+
+    return f"""Regenerate one complete replacement concept plan.
+
+    VALIDATION ERRORS
+    {error_bullets}
+
+    CORRECTIONS
+    - Return exactly {CONCEPTS_PER_MODULE} concept objects, each with a
+      unique name, fact_ids (copied exactly from graph_facts, never rewritten
+      or invented), and exactly {CARDS_PER_CLUSTER} distinct assessment
+      approaches from the allowed list.
+    - A concept name must name an assessable topic. Never use a title,
+      header, section, or slide label as a concept name.{unusable_guidance}
+    - If two concepts would assess the same underlying learning point, keep
+      one and replace the other with a concept grounded in different
+      fact_ids.
+    - Every fact_id must be copied exactly from graph_facts; do not alter or
+      fabricate one.
+    - Only return insufficient_content if fewer than {CONCEPTS_PER_MODULE}
+      concepts are genuinely supportable once the unusable fact_ids above are
+      set aside; state specifically how many are supportable and why.
+    - Return JSON only, with no Markdown or surrounding text.
+
+    INPUT JSON:
+    {_json(payload)}{rejected_block}
+    """
 
 
 def build_cluster_prompt(

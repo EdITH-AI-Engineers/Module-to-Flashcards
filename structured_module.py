@@ -23,7 +23,7 @@ _PRESENTATION_NOISE = re.compile(
     r"the module title\b|(?:this|the)\s+(?:module|lesson|chapter|section)\s+"
     r"(?:introduces|covers|discusses|presents|contains|provides an overview of)\b|"
     r"(?:this|the)\s+(?:content|material|presentation)\s+"
-    r"(?:includes|contains|covers|discusses|introduces|presents)\b)",
+    r"(?:titled|paged)\b)",
     flags=re.IGNORECASE,
 )
 _FACT_LIST_MARKER = re.compile(r"^(?:[-\u2022\u25aa\u25e6\u2023]|\d+[.)])\s*")
@@ -52,6 +52,23 @@ _FACT_PROVENANCE_SUFFIX = re.compile(
 _FACT_QUOTE_META = re.compile(
     r"^(?:the\s+)?(?:quote|quotation)\s+(?:by|from)\b.*\b"
     r"(?:mentions|states|says|describes)\b",
+    flags=re.IGNORECASE,
+)
+# The normalizer prompt already tells the model never to write a knowledge
+# statement that describes presentation metadata, but a noncompliant
+# generation can still narrate the slide's own title/content fields back as
+# if they were a fact -- e.g. "The module is titled 'Module 3: ...' and the
+# content is 'Responders'." or "The content of the slide is about the
+# properties of light." Neither reads as an enumeration, a presence-only
+# claim, or provenance-suffixed like the checks above, since the sentence
+# itself has verb structure -- it just happens to be about the slide's own
+# labeling rather than any module content. Ban that family explicitly rather
+# than relying on the graph-consumption side to catch every phrasing.
+_FACT_LABEL_NARRATION = re.compile(
+    r"\bis\s+(?:sub)?titled\b|"
+    r"\btitle\s+of\s+(?:this|the)\s+(?:module|slide|lesson|chapter|section)\b|"
+    r"\bcontent\s+of\s+(?:this|the)\s+(?:module|slide|lesson|chapter|section)\s+"
+    r"(?:is\s+(?:about|titled)\b|discusses\b|mentions\b|includes\b)",
     flags=re.IGNORECASE,
 )
 _FACT_FRAGMENT_START_WORDS = {
@@ -223,6 +240,7 @@ def filter_lesson_fact_records(
             or _FACT_PRESENCE_ONLY.search(statement)
             or _FACT_PROVENANCE_SUFFIX.search(statement)
             or _FACT_QUOTE_META.match(statement)
+            or _FACT_LABEL_NARRATION.search(statement)
         ):
             continue
         kind = str(record.get("kind", "")).strip().casefold()

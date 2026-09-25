@@ -182,6 +182,70 @@ def test_run_reuses_injected_backend(tmp_path, monkeypatch, valid_clusters):
     assert main.run(args, backend=shared_backend) == output_path
 
 
+def test_run_checks_unchecked_graph_before_concept_generation(
+    tmp_path, monkeypatch, valid_clusters
+):
+    unchecked_dir = tmp_path / "unchecked"
+    unchecked_dir.mkdir()
+    unchecked_path = unchecked_dir / "knowledge_graph.json"
+    unchecked_path.write_text(
+        json.dumps(
+            {
+                "metadata": {
+                    "course_code": "GEN101",
+                    "module_number": "1",
+                    "module_title": "Foundations",
+                },
+                "nodes": [],
+                "edges": [],
+                "facts": [
+                    {
+                        "id": "f1",
+                        "statement": "A system transforms an input into an output.",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (unchecked_dir / "triples.csv").write_text("subject,relation,object\n")
+    checked_path = tmp_path / "knowledge_graph" / "knowledge_graph.json"
+    output_path = tmp_path / "cards.csv"
+
+    class Backend:
+        def complete(self, system, user, *, max_tokens, schema=None):
+            return '{"remove":[false]}'
+
+    class FakePipeline:
+        def __init__(self, backend, config, **kwargs):
+            pass
+
+        def run(self, identity, facts, **kwargs):
+            saved = json.loads(checked_path.read_text(encoding="utf-8"))
+            assert saved["metadata"]["graph_checker"]["status"] == "checked"
+            assert [fact.fact_id for fact in facts] == ["f1"]
+            return valid_clusters
+
+    monkeypatch.setattr(main, "FlashcardPipeline", FakePipeline)
+    args = main.parse_args(
+        [
+            str(checked_path),
+            "--unchecked-graph",
+            str(unchecked_path),
+            "--course-code",
+            "GEN101",
+            "--module-number",
+            "1",
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    assert main.run(args, backend=Backend()) == output_path
+    assert not unchecked_path.exists()
+    assert not (unchecked_dir / "triples.csv").exists()
+
+
 def test_run_threads_and_updates_course_corpus(tmp_path, monkeypatch, valid_clusters):
     graph_path = tmp_path / "graph.json"
     graph_path.write_text(
@@ -308,7 +372,7 @@ def test_default_output_uses_resolved_graph_module(tmp_path, monkeypatch, valid_
 
     result = main.run(args)
 
-    assert result == Path("flashcards") / "module_01.csv"
+    assert result == Path("flashcards") / "CPE0021" / "CPE0021_M1.csv"
     assert result.is_file()
 
 

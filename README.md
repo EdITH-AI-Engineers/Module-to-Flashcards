@@ -14,7 +14,7 @@ Quick start:
 2. Keep `ModuleToFlashcards.exe`, `runtime`, `models`, `tesseract`, and `licenses` together.
 3. Double-click `ModuleToFlashcards.exe` and leave its console open.
 4. Wait for the `http://127.0.0.1:8000` readiness message.
-5. Use the existing browser extension. Results appear under `data/pipeline_output` beside the EXE.
+5. Use the existing browser extension. CSV results appear under `data/flashcards/<course>/` beside the EXE.
 6. Press Ctrl+C in the console to stop the server.
 
 Input files must be PDF files. Export `.ppt` or `.pptx` presentations to PDF before selecting them in the extension. The packaged release neither downloads models nor uses a Hugging Face user cache; missing or modified bundle files cause startup to stop instead of accessing the network.
@@ -36,6 +36,7 @@ ModuleToFlashcards/
   data/
     uploads/
     pipeline_output/
+    flashcards/
     temporary/
     logs/
 ```
@@ -91,7 +92,9 @@ The complete local sequence is:
 3. Qwen organizes the extracted page text into a validated structured TXT file.
 4. The graph stage preserves normalized definitions and knowledge statements with
    their slide/topic context, while REBEL adds relationship nodes and edges.
-5. Qwen generates and validates flashcards from a balanced set of grounded lesson
+5. Qwen conservatively removes presentation noise and irrelevant graph items,
+   then publishes the checked graph.
+6. Qwen generates and validates flashcards from a balanced set of grounded lesson
    facts covering the readable slides.
 
 No PDF or extracted document content is uploaded to Mistral or another API. The selected Qwen model is text-only: Tesseract recovers visible labels from slide images, but Qwen does not perform visual interpretation of diagrams or photographs.
@@ -140,14 +143,17 @@ Confirm that the server is ready before using the extension:
 Invoke-WebRequest http://localhost:8000/health
 ```
 
-The server accepts multiple selected PDFs in one request and writes results under
-`pipeline_output/<sanitized-course-code>/<pdf-name>/`. Keep the server terminal open while processing.
+The server accepts multiple selected PDFs in one request. Intermediate artifacts
+and checked graphs are stored under `pipeline_output/<course>/<pdf-name>/`; final
+CSV files are stored under `flashcards/<course>/<course>_M<module>.csv`. Keep the
+server terminal open while processing.
 There is no default processing timeout: `--timeout 0` means unlimited time.
 
 For a multi-file request, the server stages work to reduce memory pressure and
 model reloads: it normalizes all pending PDFs with one Qwen load, builds all
-pending knowledge graphs with one REBEL load, then generates flashcards with a
-second Qwen load. Heavy inference is sequential, not parallel. If one module
+pending knowledge graphs with one REBEL load, then uses a second Qwen load to
+prune each graph before generating flashcards from it. Heavy inference is
+sequential, not parallel. If one module
 fails in a stage, it is reported in `errors` and does not block the other
 modules from continuing. Re-send the same file to resume: valid completed
 artifacts are reused, while incomplete downstream stages run again.
@@ -249,12 +255,15 @@ The command creates a per-PDF workspace:
 
 ```text
 pipeline_output/
-  module/
-    structured_module.txt
-    knowledge_graph/
-      knowledge_graph.json
-      triples.csv
-    flashcards.csv
+  CPE0021/
+    module/
+      structured_module.txt
+      knowledge_graph/
+        knowledge_graph.json
+        triples.csv
+flashcards/
+  CPE0021/
+    CPE0021_M1.csv
 ```
 
 If the command stops, run it again. Valid completed artifacts are reused. Use `--force` to recompute all stages:
@@ -311,7 +320,7 @@ Run stage 3 directly:
 The generated file defaults to:
 
 ```text
-flashcards/module_1.csv
+flashcards/CPE0021/CPE0021_M1.csv
 ```
 
 It contains two labeled CSV blocks:

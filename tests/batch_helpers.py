@@ -61,7 +61,12 @@ def make_items(tmp_path, *names):
             BatchItem(
                 name,
                 args,
-                pipeline.pipeline_paths(pdf, args.output_root),
+                pipeline.pipeline_paths(
+                    pdf,
+                    args.output_root,
+                    args.course_code,
+                    args.module_number,
+                ),
             )
         )
     return tuple(items)
@@ -72,8 +77,8 @@ def materialize(item, stage):
         item.paths.structured_text.parent.mkdir(parents=True, exist_ok=True)
         item.paths.structured_text.write_text(structured_content(), encoding="utf-8")
     elif stage == "graph":
-        item.paths.graph_dir.mkdir(parents=True, exist_ok=True)
-        item.paths.graph_json.write_text(
+        item.paths.unchecked_graph_dir.mkdir(parents=True, exist_ok=True)
+        item.paths.unchecked_graph_json.write_text(
             json.dumps(
                 {
                     "metadata": {"module_number": item.args.module_number},
@@ -91,6 +96,13 @@ def materialize(item, stage):
             encoding="utf-8",
         )
     else:
+        item.paths.graph_dir.mkdir(parents=True, exist_ok=True)
+        graph = json.loads(item.paths.unchecked_graph_json.read_text(encoding="utf-8"))
+        graph.setdefault("metadata", {})["graph_checker"] = {
+            "status": "checked",
+            "model": "test",
+        }
+        item.paths.graph_json.write_text(json.dumps(graph), encoding="utf-8")
         item.paths.flashcards.parent.mkdir(parents=True, exist_ok=True)
         item.paths.flashcards.write_text(
             flashcard_content(item.args.course_code, item.args.module_number),

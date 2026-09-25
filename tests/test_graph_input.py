@@ -80,6 +80,24 @@ def test_extract_facts_prefers_normalized_lesson_facts_with_context():
     assert facts[0].topic == "Project Foundations"
 
 
+def test_extract_facts_drops_unresolved_question_shaped_lesson_facts():
+    value = graph()
+    value["facts"] = [
+        {
+            "id": "f1",
+            "statement": "Should every failed task be included in the time data?",
+        },
+        {
+            "id": "f2",
+            "statement": "Successful-task time and all-task time are separate reporting choices.",
+        },
+    ]
+
+    facts = extract_graph_facts(value)
+
+    assert [fact.fact_id for fact in facts] == ["f2"]
+
+
 def test_extract_facts_collapses_existing_cumulative_fact_ids():
     value = graph()
     prefix = "Norman's seven principles are: "

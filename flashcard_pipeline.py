@@ -17,6 +17,7 @@ from flashcard_contract import (
 )
 from flashcard_prompt import (
     SYSTEM_PROMPT,
+    _rejected_question_texts,
     build_cluster_prompt,
     build_cluster_retry_prompt,
     build_concept_plan_prompt,
@@ -56,6 +57,7 @@ from flashcard_validator import (
     validate_cluster,
     validate_module,
 )
+from structured_module import is_unresolved_question_statement
 
 
 class GenerationError(RuntimeError):
@@ -101,6 +103,18 @@ def _exclude_structural_facts(
     concept that is unwritable for that reason.
     """
     return tuple(fact for fact in facts if fact.kind not in STRUCTURAL_FACT_KINDS)
+
+
+def _exclude_non_assertive_facts(
+    facts: Sequence[GraphFact],
+) -> tuple[GraphFact, ...]:
+    """Prevent unresolved source questions from becoming factual authority."""
+
+    return tuple(
+        fact
+        for fact in facts
+        if not is_unresolved_question_statement(fact.statement)
+    )
 
 
 def _balanced_plan_facts(
@@ -526,7 +540,7 @@ class FlashcardPipeline:
             max_tokens=self.config.cluster_max_tokens,
             label=label,
             response_schema=build_card_cluster_schema(concept.assessment_approaches),
-            include_rejected_candidate=False,
+            include_rejected_candidate=True,
             retry_prompt_builder=build_cluster_retry,
         )
 
@@ -809,6 +823,21 @@ class FlashcardPipeline:
                 if errors:
                     raise ValidationError(errors)
                 return candidate
+            retry_state = {"attempt": 1, "rejected": []}
+
+            def duplicate_retry(original, rejected, errors):
+                retry_state["attempt"] += 1
+                retry_state["rejected"].extend(
+                    _rejected_question_texts(rejected, errors)
+                )
+                return build_duplicate_card_retry_prompt(
+                    original,
+                    rejected,
+                    errors,
+                    original_card,
+                    attempt=retry_state["attempt"],
+                    rejected_questions=tuple(retry_state["rejected"]),
+                )
 
             repaired_card = self._complete_with_retries(
                 prompt,
@@ -819,14 +848,7 @@ class FlashcardPipeline:
                     f"{item.card_index + 1} ({old.concept.name})"
                 ),
                 response_schema=build_single_card_schema(original_card),
-                retry_prompt_builder=lambda original, rejected, errors: (
-                    build_duplicate_card_retry_prompt(
-                        original,
-                        rejected,
-                        errors,
-                        original_card,
-                    )
-                ),
+                retry_prompt_builder=duplicate_retry,
             )
             updated_cards = list(old.cards)
             updated_cards[item.card_index] = repaired_card
@@ -845,6 +867,7 @@ class FlashcardPipeline:
         self._attempt_count = 0
         self._rejected_attempt_count = 0
         self._rejection_counts.clear()
+        facts = _exclude_non_assertive_facts(facts)
         plan_facts = _balanced_plan_facts(_exclude_structural_facts(facts))
         self._progress(
             f"Planning {CONCEPTS_PER_MODULE} concepts from "

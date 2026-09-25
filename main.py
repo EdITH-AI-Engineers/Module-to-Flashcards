@@ -5,8 +5,10 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import time
 from typing import Sequence
 
+from artifact_paths import flashcard_output_path
 from flashcard_csv import render_module, write_module_output
 from flashcard_pipeline import FlashcardPipeline, GenerationError, PipelineConfig
 from flashcard_types import ChatBackend
@@ -17,6 +19,66 @@ from graph_input import (
     resolve_identity,
 )
 from local_qwen import DEFAULT_N_CTX, LocalQwenBackend, ensure_model
+from knowledge_graph_checker import (
+    KnowledgeGraphCheckError,
+    check_knowledge_graph,
+    is_checked_graph,
+)
+from text_extractor import save_outputs
+
+
+def format_duration(seconds: float) -> str:
+    total_seconds = int(round(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}h {minutes:02d}m {secs:02d}s"
+    if minutes:
+        return f"{minutes:d}m {secs:02d}s"
+    return f"{secs:d}s"
+
+
+def load_course_elapsed_seconds(course_dir: Path) -> float:
+    path = Path(course_dir) / "course_timing.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            return 0.0
+        total = value.get("total_elapsed_seconds", 0.0)
+        return float(total) if isinstance(total, (int, float)) else 0.0
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return 0.0
+
+
+def append_course_elapsed_seconds(course_dir: Path, module_elapsed_seconds: float) -> float:
+    course_dir = Path(course_dir)
+    updated_total = load_course_elapsed_seconds(course_dir) + module_elapsed_seconds
+    path = course_dir / "course_timing.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            delete=False,
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        ) as handle:
+            temporary_path = Path(handle.name)
+            json.dump(
+                {"total_elapsed_seconds": updated_total},
+                handle,
+                ensure_ascii=False,
+                indent=2,
+            )
+            handle.write("\n")
+        temporary_path.replace(path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+    return updated_total
 
 
 def load_course_corpus(course_dir: Path) -> tuple[list[str], list[str]]:
@@ -84,9 +146,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         )
     )
     parser.add_argument("graph", type=Path, help="knowledge_graph.json path")
+    parser.add_argument(
+        "--unchecked-graph",
+        type=Path,
+        help=(
+            "unchecked REBEL graph to prune with Qwen before publishing the "
+            "positional knowledge_graph.json"
+        ),
+    )
     parser.add_argument("--course-code", help="exact course code")
     parser.add_argument("--module-number", help="exact module number")
-    parser.add_argument("--output", type=Path, help="output text file")
+    parser.add_argument("--output", type=Path, help="output CSV file")
     parser.add_argument(
         "--course-corpus",
         type=Path,
@@ -138,9 +208,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path | None:
-    graph = load_graph(args.graph)
-    identity = resolve_identity(graph, args.course_code, args.module_number)
-    facts = extract_graph_facts(graph)
+    pipeline_start_time = time.monotonic()
+    graph_path = Path(args.graph)
+    unchecked_path = getattr(args, "unchecked_graph", None)
+    checked_graph = None
+    if graph_path.is_file():
+        candidate = load_graph(graph_path)
+        if is_checked_graph(candidate) or unchecked_path is None:
+            checked_graph = candidate
+
+    source_path = Path(unchecked_path) if unchecked_path is not None else graph_path
+    source_graph = checked_graph if checked_graph is not None else load_graph(source_path)
+    identity = resolve_identity(source_graph, args.course_code, args.module_number)
 
     if backend is None:
         try:
@@ -168,11 +247,47 @@ def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path
             raise RuntimeError("Qwen smoke test returned an unexpected JSON value")
         return None
 
-    output = args.output or Path("flashcards") / f"module_{identity.module_number}.csv"
+    if checked_graph is None:
+        print(
+            "[knowledge-graph-checker] reviewing REBEL graph before final save...",
+            file=sys.stderr,
+            flush=True,
+        )
+        checked_graph = check_knowledge_graph(
+            source_graph,
+            backend,
+            max_retries=args.max_retries,
+            progress=lambda message: print(message, file=sys.stderr, flush=True),
+        )
+        save_outputs(checked_graph, graph_path.parent)
+        if unchecked_path is not None:
+            unchecked_graph_path = Path(unchecked_path)
+            for temporary_artifact in (
+                unchecked_graph_path,
+                unchecked_graph_path.with_name("triples.csv"),
+            ):
+                try:
+                    temporary_artifact.unlink()
+                except FileNotFoundError:
+                    pass
+        print(
+            "[knowledge-graph-checker] checked graph published: "
+            f"{graph_path.resolve()}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    graph = checked_graph
+    identity = resolve_identity(graph, args.course_code, args.module_number)
+    facts = extract_graph_facts(graph)
+
+    output = args.output or flashcard_output_path(
+        Path("flashcards"), identity.course_code, identity.module_number
+    )
     course_dir = (
         Path(args.course_corpus).parent
         if getattr(args, "course_corpus", None)
-        else output.parent.parent
+        else output.parent
     )
     prior_concept_names, prior_questions = load_course_corpus(course_dir)
     print(
@@ -215,6 +330,16 @@ def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path
         file=sys.stderr,
         flush=True,
     )
+
+    module_elapsed_seconds = time.monotonic() - pipeline_start_time
+    course_elapsed_seconds = append_course_elapsed_seconds(course_dir, module_elapsed_seconds)
+    print(
+        f"[flashcard-pipeline] module runtime for {identity.course_code} "
+        f"module {identity.module_number}: {format_duration(module_elapsed_seconds)} "
+        f"(course total so far: {format_duration(course_elapsed_seconds)})",
+        file=sys.stderr,
+        flush=True,
+    )
     return output
 
 
@@ -222,7 +347,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         output = run(args)
-    except (GraphInputError, GenerationError, RuntimeError, ValueError, OSError) as exc:
+    except (
+        GraphInputError,
+        GenerationError,
+        KnowledgeGraphCheckError,
+        RuntimeError,
+        ValueError,
+        OSError,
+    ) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 

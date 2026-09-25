@@ -46,6 +46,28 @@ def empty_review():
     return json.dumps({"issues": []})
 
 
+def test_pipeline_excludes_question_shaped_facts_from_factual_authority():
+    backend = FakeBackend(
+        [plan_json()] + [cluster_json(index) for index in range(1, 21)]
+    )
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(final_review=False),
+        progress=lambda _message: None,
+    )
+    question = GraphFact(
+        "question-only",
+        "Should every failed task be included in the time data?",
+    )
+
+    pipeline.run(ModuleIdentity("CPE0021", "1"), (question,) + graph_facts())
+
+    plan_payload = review_payload(backend.calls[0][1])
+    assert [item["fact_id"] for item in plan_payload["graph_facts"]] == [
+        fact.fact_id for fact in graph_facts()
+    ]
+
+
 def single_card_json(card: FlashcardDraft) -> str:
     return json.dumps({"cards": [asdict(card)]})
 
@@ -175,12 +197,54 @@ def test_invalid_cluster_is_retried_with_validator_feedback():
 
     assert "expected exactly 5 cards" in backend.calls[2][1]
     assert "complete replacement" in backend.calls[2][1].lower()
-    assert "REJECTED JSON TO CORRECT" not in backend.calls[2][1]
+    assert "REJECTED JSON TO CORRECT" in backend.calls[2][1]
     stats = pipeline.rejection_stats
     assert stats["attempts"] == 22
     assert stats["rejected_attempts"] == 1
     assert stats["rejection_rate"] == 1 / 22
     assert stats["categories"]["schema/structure"] == 1
+
+
+def test_identification_answer_leak_retry_receives_exact_rejected_card():
+    leaking = json.loads(cluster_json(1))
+    leaking["cards"][1]["question"] = "What term is Term 1?"
+    responses = [plan_json(), json.dumps(leaking), cluster_json(1)]
+    responses.extend(cluster_json(index) for index in range(2, 21))
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+    )
+
+    pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    retry_prompt = backend.calls[2][1]
+    assert "question reveals the identification answer" in retry_prompt
+    assert 'answer text "Term 1"' in retry_prompt
+    assert "What term is Term 1?" in retry_prompt
+    assert "REJECTED JSON TO CORRECT" in retry_prompt
+
+
+def test_provenance_retry_receives_field_and_exact_trigger_phrase():
+    leaking = json.loads(cluster_json(1))
+    leaking["cards"][0]["expalanation"] = (
+        "Perception interprets and organizes sensory input, which aligns with "
+        "the provided definition."
+    )
+    responses = [plan_json(), json.dumps(leaking), cluster_json(1)]
+    responses.extend(cluster_json(index) for index in range(2, 21))
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+        progress=lambda _message: None,
+    )
+
+    pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    retry_prompt = backend.calls[2][1]
+    assert "card 1 expalanation exposes provenance metadata" in retry_prompt
+    assert 'triggering phrase "provided definition"' in retry_prompt
 
 
 def test_truncated_cluster_retries_without_embedding_partial_output():

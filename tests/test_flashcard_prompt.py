@@ -67,6 +67,8 @@ def test_system_prompt_requires_approach_labels_to_match_actual_reasoning():
         for name in ("multiple-choice", "identification", "true-false")
     )
     assert "expalanation" in SYSTEM_PROMPT
+    assert "unresolved question" in lowered
+    assert "never infer is_true" in lowered
     assert "approaches may repeat" in lowered
     assert "no planned approach is required to appear" in lowered
     assert "the assessment_approach label must describe the reasoning" in lowered
@@ -325,6 +327,75 @@ def test_cluster_retry_omits_unusable_partial_output_after_truncation():
 
     assert "REJECTED JSON TO CORRECT" not in prompt
     assert "truncated before completing" in prompt
+
+
+def test_cluster_retry_names_answer_text_forbidden_in_identification_stem():
+    candidate = json.dumps(
+        {
+            "cards": [
+                {
+                    "type": "identification",
+                    "question": (
+                        "What term describes this role according to the "
+                        "human factors view?"
+                    ),
+                    "correct_option": "Human factors view",
+                }
+            ]
+        }
+    )
+
+    prompt = build_cluster_retry_prompt(
+        ModuleIdentity("CCS0005", "3"),
+        concept(),
+        (GraphFact("e1", "The view connects an operator with controls."),),
+        (),
+        (),
+        candidate,
+        ["card 1 question reveals the identification answer"],
+    )
+
+    assert "ANSWER TEXT FORBIDDEN" in prompt
+    assert 'answer text "Human factors view"' in prompt
+    assert "REJECTED JSON TO CORRECT" in prompt
+
+
+def test_cluster_retry_gives_targeted_true_false_question_correction():
+    candidate = json.dumps(
+        {
+            "cards": [
+                {
+                    "type": "true-false",
+                    "question": "Should every failed task be reported?",
+                    "correct_option": "",
+                    "wrong_option_1": "",
+                    "wrong_option_2": "",
+                    "wrong_option_3": "",
+                    "is_true": 0,
+                    "expalanation": "The source raises this as an issue.",
+                    "hint": "Consider the reporting choice.",
+                    "difficulty": 2,
+                    "assessment_approach": "conditions",
+                }
+            ]
+        }
+    )
+
+    prompt = build_cluster_retry_prompt(
+        ModuleIdentity("GEN101", "1"),
+        concept(),
+        (GraphFact("e1", "Should every failed task be reported?"),),
+        (),
+        (),
+        candidate,
+        ["card 1 true-false question must be a declarative statement only"],
+    )
+
+    lowered = prompt.casefold()
+    assert "true-false declarative correction" in lowered
+    assert "do not infer is_true" in lowered
+    assert "change this card to multiple-choice or" in lowered
+    assert "identification when another true-false card remains" in lowered
 
 
 def test_grounding_review_includes_evidence_and_card_content():

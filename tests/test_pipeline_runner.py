@@ -82,27 +82,39 @@ def graph_content():
     )
 
 
+def checked_graph_content():
+    graph = json.loads(graph_content())
+    graph["metadata"]["graph_checker"] = {"status": "checked", "model": "test"}
+    return json.dumps(graph)
+
+
 def materialize(stage, paths):
     if stage == "pdf-to-text":
         paths.structured_text.parent.mkdir(parents=True, exist_ok=True)
         paths.structured_text.write_text(structured_content(), encoding="utf-8")
     elif stage == "knowledge-graph":
-        paths.graph_dir.mkdir(parents=True, exist_ok=True)
-        paths.graph_json.write_text(graph_content(), encoding="utf-8")
-        paths.triples_csv.write_text("subject,relation,object\n", encoding="utf-8")
+        paths.unchecked_graph_dir.mkdir(parents=True, exist_ok=True)
+        paths.unchecked_graph_json.write_text(graph_content(), encoding="utf-8")
+        paths.unchecked_triples_csv.write_text(
+            "subject,relation,object\n", encoding="utf-8"
+        )
     elif stage == "flashcards":
+        paths.graph_dir.mkdir(parents=True, exist_ok=True)
+        paths.graph_json.write_text(checked_graph_content(), encoding="utf-8")
         paths.flashcards.parent.mkdir(parents=True, exist_ok=True)
         paths.flashcards.write_text(flashcard_content(), encoding="utf-8")
 
 
 def test_pipeline_paths_use_a_sanitized_per_pdf_workspace(tmp_path):
     source = tmp_path / "Module: 1?.pdf"
-    paths = pipeline.pipeline_paths(source, tmp_path / "outputs")
+    paths = pipeline.pipeline_paths(source, tmp_path / "outputs", "CPE0021", "01")
 
-    assert paths.workspace == tmp_path / "outputs" / "Module_1"
+    assert paths.workspace == tmp_path / "outputs" / "CPE0021" / "Module_1"
     assert paths.structured_text == paths.workspace / "structured_module.txt"
     assert paths.graph_json == paths.workspace / "knowledge_graph" / "knowledge_graph.json"
-    assert paths.flashcards == paths.workspace / "flashcards.csv"
+    assert paths.flashcards == (
+        tmp_path / "flashcards" / "CPE0021" / "CPE0021_M1.csv"
+    )
 
 
 def test_build_stage_commands_use_current_python_and_absolute_artifacts(tmp_path):
@@ -117,7 +129,9 @@ def test_build_stage_commands_use_current_python_and_absolute_artifacts(tmp_path
         "--kg-num-beams",
         "1",
     )
-    paths = pipeline.pipeline_paths(args.pdf, args.output_root)
+    paths = pipeline.pipeline_paths(
+        args.pdf, args.output_root, args.course_code, args.module_number
+    )
 
     commands = pipeline.build_stage_commands(args, paths)
 
@@ -132,6 +146,7 @@ def test_build_stage_commands_use_current_python_and_absolute_artifacts(tmp_path
     assert "--course-code" in commands[0].command
     assert "CPE0021" in commands[0].command
     assert Path(commands[1].command[1]).name == "text-extractor.py"
+    assert str(paths.unchecked_graph_dir.resolve()) in commands[1].command
     assert "cpu" in commands[1].command
     assert "--batch-size" in commands[1].command
     assert commands[1].command[commands[1].command.index("--batch-size") + 1] == "1"
@@ -139,15 +154,21 @@ def test_build_stage_commands_use_current_python_and_absolute_artifacts(tmp_path
     assert commands[1].command[commands[1].command.index("--num-beams") + 1] == "1"
     assert Path(commands[2].command[1]).name == "main.py"
     assert str(paths.graph_json.resolve()) in commands[2].command
+    unchecked_index = commands[2].command.index("--unchecked-graph") + 1
+    assert commands[2].command[unchecked_index] == str(
+        paths.unchecked_graph_json.resolve()
+    )
     corpus_index = commands[2].command.index("--course-corpus") + 1
     assert commands[2].command[corpus_index] == str(
-        (paths.workspace.parent / "course_corpus.json").resolve()
+        (paths.flashcards.parent / "course_corpus.json").resolve()
     )
 
 
 def test_run_executes_all_stages_in_order_when_artifacts_are_missing(tmp_path):
     args = make_args(tmp_path)
-    paths = pipeline.pipeline_paths(args.pdf, args.output_root)
+    paths = pipeline.pipeline_paths(
+        args.pdf, args.output_root, args.course_code, args.module_number
+    )
     calls = []
 
     def command_runner(command, **kwargs):
@@ -168,7 +189,9 @@ def test_run_executes_all_stages_in_order_when_artifacts_are_missing(tmp_path):
 
 def test_zero_timeout_does_not_pass_subprocess_timeout(tmp_path):
     args = make_args(tmp_path)
-    paths = pipeline.pipeline_paths(args.pdf, args.output_root)
+    paths = pipeline.pipeline_paths(
+        args.pdf, args.output_root, args.course_code, args.module_number
+    )
     calls = []
 
     def runner(command, **kwargs):
@@ -190,7 +213,9 @@ def test_positive_timeout_passes_the_remaining_budget_to_each_subprocess(
     tmp_path, monkeypatch
 ):
     args = make_args(tmp_path, "--timeout", "5")
-    paths = pipeline.pipeline_paths(args.pdf, args.output_root)
+    paths = pipeline.pipeline_paths(
+        args.pdf, args.output_root, args.course_code, args.module_number
+    )
     clock_values = iter((100.0, 101.0, 102.0, 103.0))
     timeouts = []
 
@@ -233,7 +258,9 @@ def test_negative_timeout_fails_before_running_stages(tmp_path):
 
 def test_run_reuses_all_valid_artifacts_without_subprocesses(tmp_path):
     args = make_args(tmp_path)
-    paths = pipeline.pipeline_paths(args.pdf, args.output_root)
+    paths = pipeline.pipeline_paths(
+        args.pdf, args.output_root, args.course_code, args.module_number
+    )
     for stage in ("pdf-to-text", "knowledge-graph", "flashcards"):
         materialize(stage, paths)
 
@@ -247,7 +274,9 @@ def test_run_reuses_all_valid_artifacts_without_subprocesses(tmp_path):
 
 def test_force_recomputes_every_stage(tmp_path):
     args = make_args(tmp_path, "--force")
-    paths = pipeline.pipeline_paths(args.pdf, args.output_root)
+    paths = pipeline.pipeline_paths(
+        args.pdf, args.output_root, args.course_code, args.module_number
+    )
     for stage in ("pdf-to-text", "knowledge-graph", "flashcards"):
         materialize(stage, paths)
     calls = []
@@ -272,7 +301,9 @@ def test_partial_upstream_failure_invalidates_stale_downstream_artifacts(
     tmp_path, force
 ):
     args = make_args(tmp_path, *("--force",) if force else ())
-    paths = pipeline.pipeline_paths(args.pdf, args.output_root)
+    paths = pipeline.pipeline_paths(
+        args.pdf, args.output_root, args.course_code, args.module_number
+    )
     for stage in ("pdf-to-text", "knowledge-graph", "flashcards"):
         materialize(stage, paths)
     if not force:
@@ -397,6 +428,6 @@ def test_help_documents_artifacts_resume_and_force(capsys):
     assert "--module-number" in help_text
     assert "structured_module.txt" in help_text
     assert "knowledge_graph.json" in help_text
-    assert "flashcards.csv" in help_text
+    assert "<course>_M<module>.csv" in help_text
     assert "resume" in help_text.casefold()
     assert "--force" in help_text

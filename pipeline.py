@@ -9,9 +9,11 @@ import sys
 import time
 from typing import Callable, Sequence
 
+from artifact_paths import flashcard_output_path, safe_path_component
 from flashcard_csv import parse_rendered_module
 from flashcard_types import ModuleIdentity
 from graph_input import GraphInputError, extract_graph_facts, load_graph
+from knowledge_graph_checker import is_checked_graph
 from local_qwen import DEFAULT_N_CTX
 from structured_module import graph_ready_text, parse_module_metadata
 
@@ -28,6 +30,9 @@ class PipelineRunError(RuntimeError):
 class PipelinePaths:
     workspace: Path
     structured_text: Path
+    unchecked_graph_dir: Path
+    unchecked_graph_json: Path
+    unchecked_triples_csv: Path
     graph_dir: Path
     graph_json: Path
     triples_csv: Path
@@ -46,16 +51,36 @@ def _safe_stem(path: Path) -> str:
     return stem or "module"
 
 
-def pipeline_paths(pdf: Path, output_root: Path) -> PipelinePaths:
-    workspace = Path(output_root) / _safe_stem(Path(pdf))
+def pipeline_paths(
+    pdf: Path,
+    output_root: Path,
+    course_code: str | None = None,
+    module_number: str | None = None,
+) -> PipelinePaths:
+    output_root = Path(output_root)
+    workspace_root = output_root
+    if course_code is not None:
+        workspace_root /= safe_path_component(course_code, fallback="course")
+    workspace = workspace_root / _safe_stem(Path(pdf))
+    unchecked_graph_dir = workspace / "unchecked_knowledge_graph"
     graph_dir = workspace / "knowledge_graph"
+    flashcards = workspace / "flashcards.csv"
+    if course_code is not None and module_number is not None:
+        flashcards = flashcard_output_path(
+            output_root.parent / "flashcards",
+            course_code,
+            module_number,
+        )
     return PipelinePaths(
         workspace=workspace,
         structured_text=workspace / "structured_module.txt",
+        unchecked_graph_dir=unchecked_graph_dir,
+        unchecked_graph_json=unchecked_graph_dir / "knowledge_graph.json",
+        unchecked_triples_csv=unchecked_graph_dir / "triples.csv",
         graph_dir=graph_dir,
         graph_json=graph_dir / "knowledge_graph.json",
         triples_csv=graph_dir / "triples.csv",
-        flashcards=workspace / "flashcards.csv",
+        flashcards=flashcards,
     )
 
 
@@ -66,8 +91,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "flashcards as a resumable local sequence."
         ),
         epilog=(
-            "Each per-PDF workspace contains structured_module.txt, "
-            "knowledge_graph/knowledge_graph.json, and flashcards.csv. "
+            "Each per-PDF workspace contains structured_module.txt and the "
+            "checked knowledge_graph/knowledge_graph.json. CSV output is written to "
+            "flashcards/<course>/<course>_M<module>.csv. "
             "Valid completed stages are reused when the sequence resumes."
         ),
     )
@@ -164,7 +190,7 @@ def build_stage_commands(
         str((PROJECT_DIR / "text-extractor.py").resolve()),
         str(paths.structured_text.resolve()),
         "--output-dir",
-        str(paths.graph_dir.resolve()),
+        str(paths.unchecked_graph_dir.resolve()),
         "--device",
         args.kg_device,
         "--batch-size",
@@ -176,6 +202,8 @@ def build_stage_commands(
         sys.executable,
         str((PROJECT_DIR / "main.py").resolve()),
         str(paths.graph_json.resolve()),
+        "--unchecked-graph",
+        str(paths.unchecked_graph_json.resolve()),
         "--course-code",
         args.course_code,
         "--module-number",
@@ -183,7 +211,7 @@ def build_stage_commands(
         "--output",
         str(paths.flashcards.resolve()),
         "--course-corpus",
-        str((paths.workspace.parent / "course_corpus.json").resolve()),
+        str((paths.flashcards.parent / "course_corpus.json").resolve()),
         "--model-dir",
         model_dir,
         "--max-retries",
@@ -200,7 +228,9 @@ def build_stage_commands(
 
     return (
         StageCommand("pdf-to-text", tuple(stage_one), paths.structured_text),
-        StageCommand("knowledge-graph", tuple(stage_two), paths.graph_json),
+        StageCommand(
+            "knowledge-graph", tuple(stage_two), paths.unchecked_graph_json
+        ),
         StageCommand("flashcards", tuple(stage_three), paths.flashcards),
     )
 
@@ -223,6 +253,15 @@ def _valid_graph(path: Path) -> bool:
     except (GraphInputError, OSError, ValueError):
         return False
     return True
+
+
+def _valid_checked_graph(path: Path) -> bool:
+    try:
+        graph = load_graph(path)
+        extract_graph_facts(graph)
+    except (GraphInputError, OSError, ValueError):
+        return False
+    return is_checked_graph(graph)
 
 
 def _valid_flashcards(
@@ -263,10 +302,19 @@ def _invalidate_downstream_for_stage(stage_name: str, paths: PipelinePaths) -> N
     manifest = paths.workspace / _BATCH_REUSE_MANIFEST_NAME
     if stage_name == "pdf-to-text":
         _invalidate_artifacts(
-            (paths.graph_json, paths.triples_csv, paths.flashcards, manifest)
+            (
+                paths.unchecked_graph_json,
+                paths.unchecked_triples_csv,
+                paths.graph_json,
+                paths.triples_csv,
+                paths.flashcards,
+                manifest,
+            )
         )
     elif stage_name == "knowledge-graph":
-        _invalidate_artifacts((paths.flashcards, manifest))
+        _invalidate_artifacts(
+            (paths.graph_json, paths.triples_csv, paths.flashcards, manifest)
+        )
     elif stage_name == "flashcards":
         _invalidate_artifacts((manifest,))
 
@@ -294,14 +342,22 @@ def run(
         raise PipelineRunError("module timeout must not be negative")
     if effective_timeout == 0:
         effective_timeout = None
-    paths = pipeline_paths(source, args.output_root)
+    paths = pipeline_paths(
+        source,
+        args.output_root,
+        args.course_code,
+        args.module_number,
+    )
     paths.workspace.mkdir(parents=True, exist_ok=True)
     commands = build_stage_commands(args, paths)
     validators = {
         "pdf-to-text": _valid_structured_text,
-        "knowledge-graph": _valid_graph,
-        "flashcards": lambda path: _valid_flashcards(
-            path, args.module_number, args.course_code
+        "knowledge-graph": lambda path: (
+            _valid_checked_graph(paths.graph_json) or _valid_graph(path)
+        ),
+        "flashcards": lambda path: (
+            _valid_checked_graph(paths.graph_json)
+            and _valid_flashcards(path, args.module_number, args.course_code)
         ),
     }
     deadline = (

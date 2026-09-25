@@ -584,32 +584,20 @@ def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
     return tuple(results)
 
 
-def _named_text_fields(card: FlashcardDraft) -> tuple[tuple[str, str], ...]:
+def _text_fields(card: FlashcardDraft) -> tuple[str, ...]:
     return (
-        ("question", card.question),
-        ("correct_option", card.correct_option),
-        ("wrong_option_1", card.wrong_option_1),
-        ("wrong_option_2", card.wrong_option_2),
-        ("wrong_option_3", card.wrong_option_3),
-        ("expalanation", card.expalanation),
-        ("hint", card.hint),
+        card.question,
+        card.correct_option,
+        card.wrong_option_1,
+        card.wrong_option_2,
+        card.wrong_option_3,
+        card.expalanation,
+        card.hint,
     )
 
 
-def _text_fields(card: FlashcardDraft) -> tuple[str, ...]:
-    return tuple(value for _field, value in _named_text_fields(card))
-
-
-def _provenance_trigger(value: str) -> str | None:
-    for pattern in PROVENANCE_PATTERNS:
-        match = re.search(pattern, value, flags=re.I)
-        if match is not None:
-            return match.group(0)
-    return None
-
-
 def _contains_provenance(value: str) -> bool:
-    return _provenance_trigger(value) is not None
+    return any(re.search(pattern, value, flags=re.I) for pattern in PROVENANCE_PATTERNS)
 
 
 # Narrower than PROVENANCE_PATTERNS/_contains_provenance on purpose. That
@@ -832,14 +820,8 @@ def validate_cluster(
             phrase.casefold() in card.question.casefold() for phrase in BANNED_FRAMING
         ):
             errors.append(f"{prefix} question contains banned framing")
-        for field, value in _named_text_fields(card):
-            trigger = _provenance_trigger(value) if value else None
-            if trigger is not None:
-                errors.append(
-                    f"{prefix} {field} exposes provenance metadata; "
-                    "triggering phrase "
-                    + json.dumps(trigger, ensure_ascii=False)
-                )
+        if any(_contains_provenance(value) for value in _text_fields(card) if value):
+            errors.append(f"{prefix} exposes provenance metadata")
         if GENERIC_EXPLANATION.fullmatch(card.expalanation.strip()):
             errors.append(f"{prefix} expalanation must explain the answer")
 

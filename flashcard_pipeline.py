@@ -17,6 +17,7 @@ from flashcard_contract import (
 )
 from flashcard_prompt import (
     SYSTEM_PROMPT,
+    _rejected_question_texts,
     build_cluster_prompt,
     build_cluster_retry_prompt,
     build_concept_plan_prompt,
@@ -822,6 +823,21 @@ class FlashcardPipeline:
                 if errors:
                     raise ValidationError(errors)
                 return candidate
+            retry_state = {"attempt": 1, "rejected": []}
+
+            def duplicate_retry(original, rejected, errors):
+                retry_state["attempt"] += 1
+                retry_state["rejected"].extend(
+                    _rejected_question_texts(rejected, errors)
+                )
+                return build_duplicate_card_retry_prompt(
+                    original,
+                    rejected,
+                    errors,
+                    original_card,
+                    attempt=retry_state["attempt"],
+                    rejected_questions=tuple(retry_state["rejected"]),
+                )
 
             repaired_card = self._complete_with_retries(
                 prompt,
@@ -832,14 +848,7 @@ class FlashcardPipeline:
                     f"{item.card_index + 1} ({old.concept.name})"
                 ),
                 response_schema=build_single_card_schema(original_card),
-                retry_prompt_builder=lambda original, rejected, errors: (
-                    build_duplicate_card_retry_prompt(
-                        original,
-                        rejected,
-                        errors,
-                        original_card,
-                    )
-                ),
+                retry_prompt_builder=duplicate_retry,
             )
             updated_cards = list(old.cards)
             updated_cards[item.card_index] = repaired_card

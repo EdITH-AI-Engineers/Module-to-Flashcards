@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import time
 from typing import Sequence
 
 from artifact_paths import flashcard_output_path
@@ -24,6 +25,60 @@ from knowledge_graph_checker import (
     is_checked_graph,
 )
 from text_extractor import save_outputs
+
+
+def format_duration(seconds: float) -> str:
+    total_seconds = int(round(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}h {minutes:02d}m {secs:02d}s"
+    if minutes:
+        return f"{minutes:d}m {secs:02d}s"
+    return f"{secs:d}s"
+
+
+def load_course_elapsed_seconds(course_dir: Path) -> float:
+    path = Path(course_dir) / "course_timing.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            return 0.0
+        total = value.get("total_elapsed_seconds", 0.0)
+        return float(total) if isinstance(total, (int, float)) else 0.0
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return 0.0
+
+
+def append_course_elapsed_seconds(course_dir: Path, module_elapsed_seconds: float) -> float:
+    course_dir = Path(course_dir)
+    updated_total = load_course_elapsed_seconds(course_dir) + module_elapsed_seconds
+    path = course_dir / "course_timing.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            delete=False,
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        ) as handle:
+            temporary_path = Path(handle.name)
+            json.dump(
+                {"total_elapsed_seconds": updated_total},
+                handle,
+                ensure_ascii=False,
+                indent=2,
+            )
+            handle.write("\n")
+        temporary_path.replace(path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+    return updated_total
 
 
 def load_course_corpus(course_dir: Path) -> tuple[list[str], list[str]]:
@@ -153,6 +208,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path | None:
+    pipeline_start_time = time.monotonic()
     graph_path = Path(args.graph)
     unchecked_path = getattr(args, "unchecked_graph", None)
     checked_graph = None
@@ -231,7 +287,7 @@ def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path
     course_dir = (
         Path(args.course_corpus).parent
         if getattr(args, "course_corpus", None)
-        else output.parent.parent
+        else output.parent
     )
     prior_concept_names, prior_questions = load_course_corpus(course_dir)
     print(
@@ -271,6 +327,16 @@ def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path
     print(
         f"[flashcard-pipeline] updated course corpus: "
         f"{len(updated_concepts)} concepts, {len(updated_questions)} questions",
+        file=sys.stderr,
+        flush=True,
+    )
+
+    module_elapsed_seconds = time.monotonic() - pipeline_start_time
+    course_elapsed_seconds = append_course_elapsed_seconds(course_dir, module_elapsed_seconds)
+    print(
+        f"[flashcard-pipeline] module runtime for {identity.course_code} "
+        f"module {identity.module_number}: {format_duration(module_elapsed_seconds)} "
+        f"(course total so far: {format_duration(course_elapsed_seconds)})",
         file=sys.stderr,
         flush=True,
     )

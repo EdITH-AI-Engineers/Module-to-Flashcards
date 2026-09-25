@@ -208,7 +208,11 @@ def check_knowledge_graph(
     removed_positions: dict[str, set[int]] = {"facts": set(), "edges": set()}
     unreviewed = {"facts": 0, "edges": 0}
     for collection_name, item_kind in (("facts", "fact"), ("edges", "relationship")):
+        if collection_name not in checked:
+            continue
+
         values = checked.get(collection_name, [])
+
         if not isinstance(values, list):
             raise KnowledgeGraphCheckError(
                 f"knowledge graph {collection_name} must be a list"
@@ -262,7 +266,7 @@ def check_knowledge_graph(
         ]
 
     original_facts = graph.get("facts", [])
-    if isinstance(original_facts, list) and original_facts and not checked["facts"]:
+    if isinstance(original_facts, list) and original_facts and not checked.get("facts", []):
         raise KnowledgeGraphCheckError(
             "Qwen marked every lesson fact irrelevant; refusing to save an empty graph"
         )
@@ -271,7 +275,7 @@ def check_knowledge_graph(
         not original_facts
         and isinstance(original_edges, list)
         and original_edges
-        and not checked["edges"]
+        and not checked.get("edges", [])
     ):
         raise KnowledgeGraphCheckError(
             "Qwen marked every relationship irrelevant; refusing to save an empty graph"
@@ -279,7 +283,7 @@ def check_knowledge_graph(
 
     referenced_nodes = {
         str(edge.get(key))
-        for edge in checked["edges"]
+        for edge in checked.get("edges", [])
         if isinstance(edge, Mapping)
         for key in ("source", "target")
         if edge.get(key) is not None
@@ -296,8 +300,8 @@ def check_knowledge_graph(
     metadata.update(
         {
             "node_count": len(checked["nodes"]),
-            "edge_count": len(checked["edges"]),
-            "fact_count": len(checked["facts"]),
+            "edge_count": len(checked.get("edges", [])),
+            "fact_count": len(checked.get("facts", [])),
             "graph_checker": {
                 "model": "Qwen3-8B-Q5_K_M",
                 "status": "checked",

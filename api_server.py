@@ -205,18 +205,26 @@ async def process_files(
                     item_indexes: dict[str, int] = {}
                     seen_filenames: set[str] = set()
                     seen_workspaces: set[str] = set()
+                    seen_outputs: set[str] = set()
                     output_root = OUTPUT_ROOT
                     for index, upload in enumerate(files):
                         filename = upload.filename or "(unnamed)"
                         try:
                             filename_component = safe_filename(upload.filename or "")
                             filename_key = filename_component.casefold()
-                            workspace_key = pipeline_paths(
+                            candidate_paths = pipeline_paths(
                                 Path(filename_component),
                                 output_root,
                                 course_code,
                                 module_number_from_filename(filename),
-                            ).workspace.name.casefold()
+                            )
+                            workspace_key = candidate_paths.workspace.name.casefold()
+                            output_key = str(candidate_paths.flashcards).casefold()
+                            if output_key in seen_outputs:
+                                raise ValueError(
+                                    "module number collides with an earlier upload: "
+                                    f"{candidate_paths.flashcards.name}"
+                                )
                             if filename_key in seen_filenames:
                                 raise ValueError(
                                     "sanitized filename collides with an earlier "
@@ -229,6 +237,7 @@ async def process_files(
                                 )
                             seen_filenames.add(filename_key)
                             seen_workspaces.add(workspace_key)
+                            seen_outputs.add(output_key)
                             pdf = await save_upload(upload, course_code)
                             args = pipeline_args(
                                 pdf, course_code, module_number_from_filename(filename)

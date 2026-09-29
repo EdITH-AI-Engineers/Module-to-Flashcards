@@ -1,5 +1,7 @@
 # Validation and Retry Resilience Design
 
+> Later correction: the eight-fact-per-concept cap described below was removed after user feedback. The current concept schema and parser permit any number of known fact IDs; prompt compaction remains in place.
+
 ## Purpose
 
 Make flashcard generation recover reliably from validation failures across

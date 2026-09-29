@@ -8,7 +8,6 @@ from typing import Iterable, Sequence
 from flashcard_contract import (
     CARDS_PER_CLUSTER,
     CONCEPTS_PER_MODULE,
-    MAX_FACT_IDS_PER_CONCEPT,
 )
 from flashcard_types import (
     ConceptPlan,
@@ -248,7 +247,7 @@ def build_concept_plan_prompt(
         )
     return f"""Plan exactly {CONCEPTS_PER_MODULE} distinct, assessable concepts.
 Use only the supplied statements. Names must describe lesson content, not presentation metadata.
-Each concept needs a unique name, at least one and up to {MAX_FACT_IDS_PER_CONCEPT} exact fact_ids, and exactly {CARDS_PER_CLUSTER} distinct assessment_approaches chosen from recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning. Concepts may share fact_ids; do not invent exclusive ownership. Use the JSON schema exactly. If fewer than {CONCEPTS_PER_MODULE} genuinely distinct concepts are supported, return only insufficient_content with the supportable count and reason.
+Each concept needs a unique name, the exact fact_ids needed to support it, and exactly {CARDS_PER_CLUSTER} distinct assessment_approaches chosen from recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning. Include at least one fact_id per concept; there is no fixed maximum. Concepts may share fact_ids. Use the JSON schema exactly. If fewer than {CONCEPTS_PER_MODULE} genuinely distinct concepts are supported, return only insufficient_content with the supportable count and reason.
 {overlap_guidance.strip()}
 INPUT JSON:
 {_json(payload)}"""
@@ -317,7 +316,7 @@ def build_concept_plan_retry_prompt(
     {rejected_json}"""
 
     return f"""Regenerate the concept plan. Errors: {"; ".join(condensed)}
-Use only supplied statements; do not invent. Return exactly {CONCEPTS_PER_MODULE} distinct assessable concepts (or insufficient_content with count and reason). Each concept needs a unique name, at least one and up to {MAX_FACT_IDS_PER_CONCEPT} exact fact_ids, and exactly {CARDS_PER_CLUSTER} distinct allowed approaches. Concepts may share facts. Do not use presentation-only facts as concepts.{unusable_guidance.strip()}
+Use only supplied statements; do not invent. Return exactly {CONCEPTS_PER_MODULE} distinct assessable concepts (or insufficient_content with count and reason). Each concept needs a unique name, the exact fact_ids needed to support it (at least one, with no fixed maximum), and exactly {CARDS_PER_CLUSTER} distinct allowed approaches. Concepts may share facts. Do not use presentation-only facts as concepts.{unusable_guidance.strip()}
 Return JSON only matching the schema.
 
 INPUT JSON:

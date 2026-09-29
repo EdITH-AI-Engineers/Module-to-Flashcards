@@ -173,7 +173,7 @@ def test_plan_prompt_serializes_relationships_without_provenance():
     assert "slide" not in prompt.casefold()
     assert "exactly 20" in prompt.casefold()
     assert "fact_ids" in prompt
-    assert "up to 8" in prompt.casefold()
+    assert "there is no fixed maximum" in prompt
     assert "recall, comparison, classification, application" in prompt.casefold()
     assert "1, 2, 3, 4, 5, 6" not in prompt
 

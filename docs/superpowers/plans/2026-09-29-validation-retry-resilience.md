@@ -1,5 +1,7 @@
 # Validation and Retry Resilience Implementation Plan
 
+> Later correction: the eight-fact-per-concept limit in Task 5 was removed after user feedback. The current planner permits any number of known fact IDs per concept and keeps the compact prompt.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make flashcard generation preserve meaningful notation, explain exact validation collisions, avoid false cross-type duplicates, repair repeated invalid cards directly, keep truncation retries independent, and reliably fit a grounded 20-concept plan inside the existing 8,192-token context.

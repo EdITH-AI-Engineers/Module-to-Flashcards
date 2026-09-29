@@ -143,6 +143,24 @@ Confirm that the server is ready before using the extension:
 Invoke-WebRequest http://localhost:8000/health
 ```
 
+### Flashcard generation retries
+
+`--max-retries` sets the number of parseable responses allowed for validation
+and content corrections. `--max-truncation-retries` separately allows retries
+when the model response ends before its JSON is complete; it defaults to `2`.
+For example:
+
+```powershell
+.\.venv\Scripts\python.exe main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --max-retries 3 --max-truncation-retries 2
+```
+
+If the model repeats the same valid five-card JSON and validation errors point
+to specific cards, the generator can retry those cards individually while
+preserving the other cards. This targeted repair is limited to cases where the
+validator can identify the affected card positions safely; it is not a promise
+that every invalid response can be repaired. These retry settings do not
+change the default 8,192-token context or the CSV format and output location.
+
 The server accepts multiple selected PDFs in one request. Intermediate artifacts
 and checked graphs are stored under `pipeline_output/<course>/<pdf-name>/`; final
 CSV files are stored under `flashcards/<course>/<course>_M<module>.csv`. Keep the

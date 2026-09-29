@@ -1,9 +1,11 @@
 import json
 
+import pytest
+
 from flashcard_contract import MAX_FACT_IDS_PER_CONCEPT
 from flashcard_schema import build_concept_plan_schema
 from flashcard_types import GraphFact
-from flashcard_validator import parse_concept_plan
+from flashcard_validator import ValidationError, parse_concept_plan
 from tests.test_flashcard_validator import APPROACHES
 
 
@@ -59,9 +61,5 @@ def test_concept_plan_parser_rejects_more_than_eight_fact_ids():
         ]
     }
 
-    try:
+    with pytest.raises(ValidationError, match="at most 8"):
         parse_concept_plan(json.dumps(payload), facts)
-    except Exception as exc:
-        assert "at most 8" in str(exc)
-    else:
-        raise AssertionError("parser accepted nine fact IDs for one concept")

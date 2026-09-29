@@ -426,6 +426,46 @@ def test_prior_question_is_checked_without_current_module_clusters():
     )
 
 
+def test_prior_question_with_only_fuzzy_overlap_is_not_rejected_without_type():
+    card = replace(
+        make_cards(1)[1],
+        question="What term names the instruction cycle correctly?",
+    )
+
+    errors = FlashcardPipeline._duplicate_errors(
+        (card,),
+        (),
+        ("What term names the instruction cycle?",),
+    )
+
+    assert errors == ()
+
+
+def test_cluster_allows_fuzzy_overlap_across_different_card_types():
+    cards = list(make_cards(1))
+    cards[0] = replace(
+        cards[0],
+        question="Which classification applies to topic1 alpha1 beta1 revision0?",
+    )
+    cards[2] = replace(
+        cards[2],
+        question="The classification applies to topic1 alpha1 beta1 revision0.",
+    )
+
+    errors = FlashcardPipeline._duplicate_errors(tuple(cards), ())
+
+    assert not any("cards 1 and 3 are near duplicates" in error for error in errors)
+
+
+def test_cluster_rejects_exact_normalized_question_across_card_types():
+    cards = list(make_cards(1))
+    cards[2] = replace(cards[2], question=cards[0].question)
+
+    errors = FlashcardPipeline._duplicate_errors(tuple(cards), ())
+
+    assert "cards 1 and 3 are near duplicates" in errors
+
+
 def test_duplicate_question_against_an_earlier_cluster_is_deferred_to_review():
     earlier = FlashcardCluster(
         cluster="00000000-0000-4000-8000-000000000001",

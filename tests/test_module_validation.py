@@ -74,6 +74,44 @@ def test_module_detects_cross_cluster_near_duplicate():
     assert any("near-duplicate questions" in error for error in errors)
 
 
+def test_module_allows_fuzzy_subject_overlap_across_different_card_types():
+    clusters = list(valid_clusters())
+    first_cards = list(clusters[0].cards)
+    second_cards = list(clusters[1].cards)
+    first_cards[0] = replace(
+        first_cards[0],
+        question="Which classification applies to topic1 alpha1 beta1 revision0?",
+    )
+    second_cards[2] = replace(
+        second_cards[2],
+        question="The classification applies to topic1 alpha1 beta1 revision0.",
+    )
+    clusters[0] = replace(clusters[0], cards=tuple(first_cards))
+    clusters[1] = replace(clusters[1], cards=tuple(second_cards))
+
+    errors = validate_module(tuple(clusters))
+
+    assert not any(
+        "cluster 1 card 1 and cluster 2 card 3" in error
+        for error in errors
+    )
+
+
+def test_module_rejects_exact_normalized_question_across_card_types():
+    clusters = list(valid_clusters())
+    exact_question = clusters[0].cards[0].question
+    second_cards = list(clusters[1].cards)
+    second_cards[2] = replace(second_cards[2], question=exact_question)
+    clusters[1] = replace(clusters[1], cards=tuple(second_cards))
+
+    errors = validate_module(tuple(clusters))
+
+    assert any(
+        "cluster 1 card 1 and cluster 2 card 3" in error
+        for error in errors
+    )
+
+
 def test_module_can_defer_cross_cluster_duplicates_until_global_review():
     original = valid_clusters()[0].cards[0].question
     clusters = with_question(valid_clusters(), 1, 0, original + " correctly")

@@ -1137,6 +1137,25 @@ def are_near_duplicates(left: str, right: str) -> bool:
     )
 
 
+def is_exact_question_duplicate(left: str, right: str) -> bool:
+    """Compare question text when card-type metadata is unavailable."""
+
+    return normalize_stem(left) == normalize_stem(right)
+
+
+def are_card_questions_duplicates(
+    left: FlashcardDraft,
+    right: FlashcardDraft,
+) -> bool:
+    """Apply exact comparison across types and fuzzy comparison within a type."""
+
+    if is_exact_question_duplicate(left.question, right.question):
+        return True
+    if left.type != right.type:
+        return False
+    return are_near_duplicates(left.question, right.question)
+
+
 def validate_module(
     clusters: Sequence[FlashcardCluster],
     source_facts: Sequence[GraphFact] = (),
@@ -1191,7 +1210,7 @@ def validate_module(
     if check_question_duplicates:
         for left_index, (left_cluster, left_card, left) in enumerate(indexed_cards):
             for right_cluster, right_card, right in indexed_cards[left_index + 1 :]:
-                if are_near_duplicates(left.question, right.question):
+                if are_card_questions_duplicates(left, right):
                     errors.append(
                         "near-duplicate questions at "
                         f"cluster {left_cluster} card {left_card} and "

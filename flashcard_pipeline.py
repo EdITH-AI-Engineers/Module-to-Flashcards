@@ -49,7 +49,8 @@ from flashcard_types import (
 from flashcard_validator import (
     InsufficientContentError,
     ValidationError,
-    are_near_duplicates,
+    are_card_questions_duplicates,
+    is_exact_question_duplicate,
     parse_cards,
     parse_concept_plan,
     parse_review_issues,
@@ -427,7 +428,7 @@ class FlashcardPipeline:
             for right_index, right in enumerate(
                 cards[left_index + 1 :], start=left_index + 1
             ):
-                if are_near_duplicates(left.question, right.question):
+                if are_card_questions_duplicates(left, right):
                     errors.append(
                         f"cards {left_index + 1} and {right_index + 1} are near duplicates"
                     )
@@ -444,7 +445,7 @@ class FlashcardPipeline:
             # checks above for duplicates inside this cluster and below for
             # questions already used in an earlier module.
             for prior_question in prior_questions:
-                if are_near_duplicates(left.question, prior_question):
+                if is_exact_question_duplicate(left.question, prior_question):
                     errors.append(
                         f"card {left_index + 1} duplicates a question from a "
                         "previously generated module in this course"
@@ -792,7 +793,7 @@ class FlashcardPipeline:
                     expalanation=original_card.expalanation,
                     hint=original_card.hint,
                 )
-                if are_near_duplicates(candidate.question, original_card.question):
+                if are_card_questions_duplicates(candidate, original_card):
                     errors.append(
                         "replacement question is still a near-duplicate of the "
                         "original flagged question"
@@ -811,14 +812,16 @@ class FlashcardPipeline:
                             and card_index == item.card_index
                         ):
                             continue
-                        if are_near_duplicates(candidate.question, card.question):
+                        if are_card_questions_duplicates(candidate, card):
                             errors.append(
                                 "replacement question near-duplicates cluster "
                                 f"{cluster_index + 1} card {card_index + 1}: "
                                 f"{card.question!r}"
                             )
                 for prior_question in prior_questions:
-                    if are_near_duplicates(candidate.question, prior_question):
+                    if is_exact_question_duplicate(
+                        candidate.question, prior_question
+                    ):
                         errors.append(
                             "replacement question duplicates a previously generated "
                             f"module question: {prior_question!r}"

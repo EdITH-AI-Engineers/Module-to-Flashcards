@@ -164,7 +164,8 @@ def pipeline_args(pdf: Path, course_code: str, module_number: str) -> Namespace:
         kg_device=KG_DEVICE,
         kg_batch_size=1,
         kg_num_beams=1,
-        skip_final_review=True,
+        skip_final_review=False,
+        validate_flashcards=True,
         force=False,
     )
 

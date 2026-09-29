@@ -131,17 +131,21 @@ def extract_graph_facts(graph: Mapping[str, Any]) -> tuple[GraphFact, ...]:
                     kind=kind or None,
                 )
             )
-    if lesson_facts:
-        return tuple(lesson_facts)
-    if has_lesson_facts:
-        raise GraphInputError("graph contains no usable lesson facts")
-
     edges = graph.get("edges")
     if not isinstance(edges, list):
         raise GraphInputError("knowledge graph must contain an edges list")
 
-    facts: list[GraphFact] = []
-    used_ids: set[str] = set()
+    # Lesson facts preserve the fullest source wording, while graph edges add
+    # explicit relationships that are often needed for comparison, mechanism,
+    # and cause/effect targets. Previously, the presence of even one lesson
+    # fact caused every edge to be discarded, reducing card generation to a
+    # flat definition list. Combine both representations and remove only exact
+    # statement duplicates.
+    facts: list[GraphFact] = list(lesson_facts)
+    used_ids: set[str] = {fact.fact_id for fact in facts}
+    used_fact_statements: set[str] = {
+        " ".join(fact.statement.casefold().split()) for fact in facts
+    }
     for index, edge in enumerate(edges, start=1):
         if not isinstance(edge, Mapping):
             continue
@@ -158,10 +162,14 @@ def extract_graph_facts(graph: Mapping[str, Any]) -> tuple[GraphFact, ...]:
         if not filtered:
             continue
         statement = str(filtered[0]["statement"])
+        statement_key = " ".join(statement.casefold().split())
+        if statement_key in used_fact_statements:
+            continue
         fact_id = str(edge.get("id") or f"e{index}")
         if fact_id in used_ids:
             fact_id = f"{fact_id}#{index}"
         used_ids.add(fact_id)
+        used_fact_statements.add(statement_key)
         slide_numbers: set[int] = set()
         evidence = edge.get("evidence")
         if isinstance(evidence, list):
@@ -184,5 +192,7 @@ def extract_graph_facts(graph: Mapping[str, Any]) -> tuple[GraphFact, ...]:
         )
 
     if not facts:
+        if has_lesson_facts:
+            raise GraphInputError("graph contains no usable lesson facts or relationships")
         raise GraphInputError("graph contains no usable relationship facts")
     return tuple(facts)

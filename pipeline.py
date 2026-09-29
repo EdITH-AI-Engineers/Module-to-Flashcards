@@ -147,8 +147,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--validate-flashcards",
         action="store_true",
-        help="enable flashcard validation and final reviews",
+        help="enable flashcard validation and final reviews (default)",
     )
+    parser.add_argument(
+        "--skip-flashcard-validation",
+        action="store_false",
+        dest="validate_flashcards",
+        help="skip flashcard validation and final reviews",
+    )
+    parser.set_defaults(validate_flashcards=True)
     parser.add_argument(
         "--force",
         action="store_true",
@@ -235,6 +242,8 @@ def build_stage_commands(
         stage_three.append("--skip-final-review")
     if args.validate_flashcards:
         stage_three.append("--validate-flashcards")
+    else:
+        stage_three.append("--skip-flashcard-validation")
 
     return (
         StageCommand("pdf-to-text", tuple(stage_one), paths.structured_text),

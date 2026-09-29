@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from flashcard_types import ConceptPlan, FlashcardDraft, GraphFact
+from flashcard_types import CardTarget, ConceptPlan, FlashcardDraft, GraphFact
 from flashcard_validator import (
     InsufficientContentError,
     ValidationError,
@@ -183,6 +183,14 @@ def test_cards_parser_rejects_using_distractor_pool_as_answer_authority():
         ),
         (
             "According to the document, which outcome is supported?",
+            "Which outcome is supported?",
+        ),
+        (
+            "According to the evidence, which outcome is supported?",
+            "Which outcome is supported?",
+        ),
+        (
+            "Which outcome is supported based on the evidence?",
             "Which outcome is supported?",
         ),
         (
@@ -407,6 +415,42 @@ def test_cluster_rejects_generic_explanation_filler(explanation):
     assert "card 1 expalanation must explain the answer" in errors
 
 
+def test_cards_parser_removes_generic_true_false_explanation_prefix():
+    payload = json.loads(cards_json())
+    payload["cards"][2]["expalanation"] = (
+        "This statement is true. The relationship connects binary with base 2."
+    )
+
+    card = parse_cards(json.dumps(payload))[2]
+
+    assert card.expalanation == "The relationship connects binary with base 2."
+
+
+def test_cluster_binds_assessment_approaches_to_ordered_card_targets():
+    concept = valid_concept()
+    targeted = replace(
+        concept,
+        card_targets=tuple(
+            CardTarget(
+                learning_point=f"Learning point {position}",
+                fact_ids=("e1",),
+                facts=concept.facts,
+                assessment_approach=approach,
+            )
+            for position, approach in enumerate(APPROACHES, start=1)
+        ),
+    )
+    cards = list(valid_cards())
+    cards[0] = replace(cards[0], assessment_approach="comparison")
+
+    errors = validate_cluster(tuple(cards), targeted)
+
+    assert (
+        "card 1 assessment_approach must match its assigned card target: recall"
+        in errors
+    )
+
+
 @pytest.mark.parametrize(
     "question",
     (
@@ -542,6 +586,67 @@ def test_concept_plan_attaches_exact_fact_text_from_known_ids():
 
     assert concepts[0].fact_ids == ("e1",)
     assert concepts[0].facts == ("subject 1 | relates to | object 1",)
+
+
+def test_concept_plan_builds_five_ordered_supported_card_targets():
+    _raw, known = plan_json()
+    payload = {
+        "concepts": [
+            {
+                "name": f"Concept {index}",
+                "card_targets": [
+                    {
+                        "learning_point": (
+                            f"Concept {index} distinct learning point {position}"
+                        ),
+                        "fact_ids": [f"e{index}"],
+                        "assessment_approach": approach,
+                    }
+                    for position, approach in enumerate(APPROACHES, start=1)
+                ],
+            }
+            for index in range(1, 21)
+        ]
+    }
+
+    concepts = parse_concept_plan(json.dumps(payload), known)
+
+    assert concepts[0].fact_ids == ("e1",)
+    assert concepts[0].assessment_approaches == APPROACHES
+    assert len(concepts[0].card_targets) == 5
+    assert concepts[0].card_targets[0] == CardTarget(
+        learning_point="Concept 1 distinct learning point 1",
+        fact_ids=("e1",),
+        facts=("subject 1 | relates to | object 1",),
+        assessment_approach="recall",
+    )
+
+
+def test_concept_plan_rejects_duplicate_card_target_learning_points():
+    _raw, known = plan_json()
+    payload = {
+        "concepts": [
+            {
+                "name": f"Concept {index}",
+                "card_targets": [
+                    {
+                        "learning_point": (
+                            "Repeated definition"
+                            if position < 3
+                            else f"Learning point {index}-{position}"
+                        ),
+                        "fact_ids": [f"e{index}"],
+                        "assessment_approach": approach,
+                    }
+                    for position, approach in enumerate(APPROACHES, start=1)
+                ],
+            }
+            for index in range(1, 21)
+        ]
+    }
+
+    with pytest.raises(ValidationError, match="duplicates another card target"):
+        parse_concept_plan(json.dumps(payload), known)
 
 
 def test_concept_plan_rejects_a_numbered_module_title_as_a_concept():

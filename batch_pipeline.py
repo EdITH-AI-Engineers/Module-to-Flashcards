@@ -117,7 +117,7 @@ def _manifest_settings(args: argparse.Namespace) -> dict[str, object]:
         "kg_batch_size": args.kg_batch_size,
         "kg_num_beams": args.kg_num_beams,
         "skip_final_review": args.skip_final_review,
-        "validate_flashcards": getattr(args, "validate_flashcards", False),
+        "validate_flashcards": getattr(args, "validate_flashcards", True),
         "normalize_max_tokens": getattr(args, "max_tokens", 2048),
         "graph_chunk_tokens": getattr(args, "chunk_tokens", 384),
         "graph_overlap_tokens": getattr(args, "overlap_tokens", 64),

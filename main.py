@@ -208,8 +208,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--validate-flashcards",
         action="store_true",
-        help="enable flashcard content checks and final reviews",
+        help="enable flashcard content checks and final reviews (default)",
     )
+    parser.add_argument(
+        "--skip-flashcard-validation",
+        action="store_false",
+        dest="validate_flashcards",
+        help="skip flashcard content checks and final reviews",
+    )
+    parser.set_defaults(validate_flashcards=True)
     parser.add_argument(
         "--smoke-test",
         action="store_true",
@@ -314,7 +321,7 @@ def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path
             max_retries=args.max_retries,
             max_truncation_retries=getattr(args, "max_truncation_retries", 2),
             final_review=args.final_review,
-            validation_enabled=getattr(args, "validate_flashcards", False),
+            validation_enabled=getattr(args, "validate_flashcards", True),
         ),
         progress=lambda message: print(message, file=sys.stderr, flush=True),
     )
@@ -327,7 +334,7 @@ def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path
     content = render_module(
         identity,
         clusters,
-        validate_cards=getattr(args, "validate_flashcards", False),
+        validate_cards=getattr(args, "validate_flashcards", True),
     )
     write_module_output(output, content)
     print(

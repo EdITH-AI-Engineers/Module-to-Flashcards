@@ -35,7 +35,7 @@ CARD FIELD CONTRACT
 Every card, with no exceptions, must include all eleven fields: type, question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, is_true, expalanation, hint, difficulty, assessment_approach. Before returning JSON, verify every card object has exactly these eleven keys. If any card is missing a key, add it before responding.
 
 QUESTION QUALITY
-Write clear, authentic college-level assessment items. Assess terminology, distinctions, relationships, mechanisms, processes, causes, effects, classifications, applications, implications, conditions, limitations, or technical reasoning only when the supplied facts support them. Difficulty must come from the required thinking, never confusing wording. Do not mechanically convert a fact into a stem or reveal an answer through its full definition. The question must not be framed with reference to the metadata of the source (ex: module, source, lesson, page, and etc). References to evidence, such as "according to the evidence" or "based on the evidence", are allowed because evidence is part of the subject matter. The five cards must be meaningfully distinct learning checks. They may assess the same concept from supported angles, but changing only the card type, opening phrase, or a single word does not create a different question. Asking the negated form (the exception instead of the member) does. Assign each card whichever planned assessment approach accurately describes the reasoning it requires. Approaches may repeat, and no planned approach is required to appear. Prefer useful variety when the facts support it, but never mislabel a question merely to cover every approach.
+Write clear, authentic college-level assessment items. Assess terminology, distinctions, relationships, mechanisms, processes, causes, effects, classifications, applications, implications, conditions, limitations, or technical reasoning only when the supplied facts support them. Difficulty must come from the required thinking, never confusing wording. Do not mechanically convert a fact into a stem or reveal an answer through its full definition. Never frame a question by referring to evidence or source metadata. The five cards must assess the five assigned learning points in order. Changing only the card type, polarity, opening phrase, or wording does not create a different learning point; a positive definition and its negated restatement are duplicates. Copy the assessment_approach assigned to each card target and make the question genuinely use that reasoning.
 
 ASSESSMENT APPROACH SEMANTICS
 - recall: directly retrieve an explicitly supported term, property, relationship, or fact.
@@ -95,7 +95,7 @@ Scenario analysis assessment approach rules:
 - Set assessment_approach to "scenario analysis" and never set type to "scenario analysis".
 
 DIRECT STEMS
-For identification, use a natural direct form beginning with What, Which, Who, Where, When, Why, How, or What term. Multiple-choice may use the same direct form or put a concrete context or scenario before the question. Both types must ask a clear, answerable question ending in a question mark. Do not open a question with a wrapper such as The material states, The following claim, Consider this statement, Evaluate this statement, Identify the concept associated with, or an "According to" / "Based on" phrase that names a source container (module, lesson, document, material, slide, page). Openings that name the evidence itself, such as "According to the evidence" or "Based on the evidence", are allowed, but a direct stem without them is preferred. The framings "Which of the following", "Which best describes", and "Which most accurately" are allowed when they produce a clear, answerable question. Avoid only vague or subjective wording that cannot be resolved from the supplied facts.
+For identification, use a natural direct form beginning with What, Which, Who, Where, When, Why, How, or What term. Multiple-choice may use the same direct form or put a concrete context or scenario before the question. Both types must ask a clear, answerable question ending in a question mark. Do not open a question with a wrapper such as The material states, The following claim, Consider this statement, Evaluate this statement, Identify the concept associated with, or any "According to" / "Based on" source or evidence phrase. The framings "Which of the following", "Which best describes", and "Which most accurately" are allowed when they produce a clear, answerable question. Avoid only vague or subjective wording that cannot be resolved from the supplied facts.
 
 DIFFICULTY
 Use integer 1 only for recall or straightforward understanding. Use integer 2 for interpretation, comparison, classification, application, or distinction. Use integer 3 for analysis, complex application, multi-step reasoning, competing explanations, or an unfamiliar but fully supported scenario.
@@ -115,12 +115,23 @@ def _json(value: object) -> str:
 
 
 def _concept_payload(concept: ConceptPlan) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "name": concept.name,
         "fact_ids": list(concept.fact_ids),
         "facts": list(concept.facts),
         "assessment_approaches": list(concept.assessment_approaches),
     }
+    if concept.card_targets:
+        payload["card_targets"] = [
+            {
+                "learning_point": target.learning_point,
+                "fact_ids": list(target.fact_ids),
+                "facts": list(target.facts),
+                "assessment_approach": target.assessment_approach,
+            }
+            for target in concept.card_targets
+        ]
+    return payload
 
 
 PRIOR_QUESTION_LIMIT = 50
@@ -248,7 +259,7 @@ def build_concept_plan_prompt(
         )
     return f"""Plan exactly {CONCEPTS_PER_MODULE} distinct, assessable concepts.
 Use only the supplied statements. Names must describe lesson content, not presentation metadata.
-Each concept needs a unique name, the exact fact_ids needed to support it, and exactly {CARDS_PER_CLUSTER} distinct assessment_approaches chosen from recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning. Include at least one fact_id per concept; there is no fixed maximum. Concepts may share fact_ids. Use the JSON schema exactly. If fewer than {CONCEPTS_PER_MODULE} genuinely distinct concepts are supported, return only insufficient_content with the supportable count and reason.
+Each concept must contain exactly {CARDS_PER_CLUSTER} ordered card_targets. Every target must name one specific, independently assessable learning_point, copy every fact_id needed to support that point, and choose one assessment_approach from recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning. The five learning points and approaches within a concept must be distinct. A definition, its negated restatement, and a differently worded definition are one learning point, not three. A comparison target requires facts about both things being compared. Never invent a relationship merely to fill a target. Concepts and targets may share fact_ids only when those facts genuinely support different learning points. Use the JSON schema exactly. If the supplied facts cannot support {CARDS_PER_CLUSTER} distinct learning points for each of {CONCEPTS_PER_MODULE} concepts, return only insufficient_content with the supportable count and reason.
 {overlap_guidance.strip()}
 INPUT JSON:
 {_json(payload)}"""
@@ -317,7 +328,7 @@ def build_concept_plan_retry_prompt(
     {rejected_json}"""
 
     return f"""Regenerate the concept plan. Errors: {"; ".join(condensed)}
-Use only supplied statements; do not invent. Return exactly {CONCEPTS_PER_MODULE} distinct assessable concepts (or insufficient_content with count and reason). Each concept needs a unique name, the exact fact_ids needed to support it (at least one, with no fixed maximum), and exactly {CARDS_PER_CLUSTER} distinct allowed approaches. Concepts may share facts. Do not use presentation-only facts as concepts.{unusable_guidance.strip()}
+Use only supplied statements; do not invent. Return exactly {CONCEPTS_PER_MODULE} distinct assessable concepts (or insufficient_content with count and reason). Each concept needs a unique name and exactly {CARDS_PER_CLUSTER} ordered card_targets. Every target needs a distinct learning_point, its exact supporting fact_ids, and a distinct allowed assessment_approach. A positive definition, a negated definition, and a paraphrased definition are the same learning point. A comparison needs explicit support for both sides. Do not use presentation-only facts as concepts or invent a target to fill the array.{unusable_guidance.strip()}
 Return JSON only matching the schema.
 
 INPUT JSON:
@@ -338,26 +349,32 @@ def build_cluster_prompt(
         distractor_facts,
         prior_signals,
     )
-    approach_list = "\n".join(
-        f'- "{approach}"' for approach in concept.assessment_approaches
-    )
+    if concept.card_targets:
+        approach_list = "\n".join(
+            f'- Card {position}: "{target.assessment_approach}" — '
+            f"{target.learning_point}"
+            for position, target in enumerate(concept.card_targets, start=1)
+        )
+    else:
+        approach_list = "\n".join(
+            f'- "{approach}"' for approach in concept.assessment_approaches
+        )
     return f"""Generate exactly {CARDS_PER_CLUSTER} cards for this concept.
 
-    PLANNED ASSESSMENT APPROACHES
+    ORDERED CARD TARGETS
     {approach_list}
-    For each card, select whichever listed approach best describes the actual
-    reasoning required. Approaches may repeat, and a listed approach does not
-    have to appear. The list order is not the card order, and no approach is
-    tied to a numbered card position. Do not mislabel a recall or definition
-    question merely to force approach coverage.
+    Card 1 must assess target 1, card 2 target 2, and so on. Copy each target's
+    assessment_approach exactly. Do not substitute, combine, reorder, or repeat
+    targets. The question must assess the target's learning point rather than
+    merely mentioning the broader topic.
 
     EVIDENCE SCOPE
     - Questions, correct answers, explanations, and hints must be supported by
       evidence.
     - The five cards must be meaningfully distinct learning checks. They may
       assess the same concept from supported angles, but changing only the card
-      type, opening phrase, or one word is not a different question. A negated
-      form of a question is a different question.
+      type, polarity, opening phrase, or wording is not a different learning
+      check. A definition and its negated restatement are duplicates.
     - Each multiple-choice wrong_option must be plausible, unambiguously
       incorrect, and relevant to the question and subject domain. It must use
       the same semantic category and answer shape as the correct option. A
@@ -386,9 +403,8 @@ def build_cluster_prompt(
     - True-false: use a declarative statement, keep all option fields "", and
       set is_true to integer 0 or 1.
     - Every question must be clear and end in ? except true-false statements.
-      Do not begin with source-container wrappers such as "According to the
-      module" or "Based on the lesson". "According to the evidence" and
-      "Based on the evidence" are allowed, but a direct stem is preferred.
+      Do not begin with "According to", "Based on", or any other source or
+      evidence wrapper. Ask about the subject matter directly.
     - Never expose fact IDs, JSON key names, or source-container wording
       (module, lesson, document, material, page). Explanations and hints must
       not refer to "the evidence". Ordinary domain uses of words such as
@@ -424,11 +440,27 @@ def _cluster_payload(
     """Return only card-writing evidence, without model-visible control data."""
 
     del identity, distractor_facts, prior_signals
-    return {
+    fact_by_id = {fact.fact_id: fact.statement for fact in concept_facts}
+    payload: dict[str, object] = {
         "topic": concept.name,
         "assessment_approaches": list(concept.assessment_approaches),
         "evidence": [fact.statement for fact in concept_facts],
     }
+    if concept.card_targets:
+        payload["card_targets"] = [
+            {
+                "card": position,
+                "learning_point": target.learning_point,
+                "assessment_approach": target.assessment_approach,
+                "evidence": [
+                    fact_by_id[fact_id]
+                    for fact_id in target.fact_ids
+                    if fact_id in fact_by_id
+                ],
+            }
+            for position, target in enumerate(concept.card_targets, start=1)
+        ]
+    return payload
 
 
 MAX_RETRY_ERROR_COUNT = 12
@@ -490,14 +522,12 @@ VALIDATION ERRORS:
 
 MANDATORY CORRECTIONS:
 - When a validation error names a card number, correct that exact card.
-- Set each assessment_approach to one of the planned values and make the label
-  match the question's actual reasoning. Approaches may repeat.
+- Keep every card in its original position and copy that position's assigned
+  assessment_approach. Make the question genuinely assess its assigned target.
 - For identification, wrong_option_1, wrong_option_2, and wrong_option_3 must be all exactly "".
 - For multiple-choice, the correct option and three wrong options must be four different strings.
-- Rewrite any multiple-choice or identification question that begins with a
-  source-container wrapper such as "According to the module", "Based on the
-  material", or another wrapper. "According to the evidence" and "Based on
-  the evidence" are acceptable.
+- Rewrite any question that begins with "According to", "Based on", or another
+  source or evidence wrapper. Ask about the subject matter directly.
 - Identification must begin directly with What, Which, Who, Where, When, Why, or How. Multiple-choice may instead begin with a concrete context or scenario and then ask the question.
 - Example:
   Invalid: "According to the module, which measure assesses effectiveness?"
@@ -689,9 +719,9 @@ def build_cluster_retry_prompt(
     {error_bullets}
 
     CORRECTIONS
-    - Return exactly {CARDS_PER_CLUSTER} complete cards. Set each
-      assessment_approach to a planned value that matches the question's actual
-      reasoning. Approaches may repeat; no planned value is required to appear.{preserve_bullet}{answer_leak_guidance}{true_false_guidance}
+    - Return exactly {CARDS_PER_CLUSTER} complete cards. Keep card positions
+      aligned with the ordered card_targets and copy each target's assigned
+      assessment_approach exactly. Never substitute or repeat a target.{preserve_bullet}{answer_leak_guidance}{true_false_guidance}
     - Use only multiple-choice, identification, and true-false types, including
       at least one of each. Scenario analysis is an approach, never a type.
     - Identification and true-false option fields must be "". Multiple-choice
@@ -708,9 +738,9 @@ def build_cluster_retry_prompt(
     - Do not invent a scenario merely to use a scenario-analysis label. You may
       change an approach label when another planned value describes the actual
       reasoning more accurately.
-    - Make all five cards meaningfully distinct learning checks. They may assess
-      the same concept from supported angles, but do not repeat a question by
-      changing only its type, opening phrase, or one word.
+    - Make all five cards meaningfully distinct learning checks. Do not repeat
+      one learning point by changing only its type, polarity, opening phrase,
+      or wording. A definition and its negated restatement are duplicates.
     - Remove provenance wording and keep the answer out of identification stems.
       Never mention fact IDs, JSON key names, prior subjects, or other internal
       generation details. Do not refer to "the evidence" in an expalanation or
@@ -1044,7 +1074,7 @@ def build_grounding_review_prompt(
             for cluster in clusters
         ]
     }
-    return f"""Review these generated clusters against only their supplied facts. Questions, correct answers, true-false decisions, explanations, and hints must be supported by those facts. Flag a cluster if any card contains an unsupported claim, answer leakage, an invalid distractor, or a misleading explanation. Also flag a cluster when two cards ask the same question with at most one word different; cards that test the same fact in differently worded questions, in a different type, or in negated form are not duplicates. Do not infer duplication merely from the same answer-bearing relationship when there is a different type, polarity, or wording.
+    return f"""Review these generated clusters against only their supplied facts and ordered card targets. Questions, correct answers, true-false decisions, explanations, and hints must be supported by the facts assigned to that card target. Flag a cluster if any card assesses the wrong numbered target, mislabels its assessment approach, contains an unsupported claim, leaks an answer, uses an invalid distractor, or gives a misleading explanation. Also flag a cluster when two cards test the same answer-bearing relationship or learning point, even when they use different wording, types, or polarity. A definition and its negated restatement are duplicates.
 
     A wrong option is not invalid merely because its wording does not appear in the supplied facts. It may use a familiar related term, but it must be plausible, unambiguously incorrect, in the same semantic category and answer shape as the correct option, and relevant to the question and module domain. Flag a distractor only when it is correct or arguably correct, duplicates another option, is nonsensical, mismatches the answer category, or is unrelated to the question or module domain. Do not rewrite cards.
 
@@ -1070,7 +1100,7 @@ def build_duplicate_review_prompt(
             for cluster in clusters
         ]
     }
-    return """Compare all question stems for near duplication. Flag only a question that is the same sentence as another question with at most one filler, modifier, or synonym word added, removed, or swapped. Do not flag questions that merely assess the same fact or concept in differently worded questions, questions of different types, or a question and its negated form (for example \"is a component\" versus \"is NOT a component\"). Under this surface-only rule, a definition and its negated restatement are not duplicates unless the stems otherwise differ by at most one word. A swapped key term that changes what is asked (for example binary versus octal) makes a different question. Report each duplicate pair once: put the later cluster/card in the issue's cluster field and at the start of its reason, and identify the earlier card after the word cluster. Every reason must use exactly the form "card <number> duplicates cluster <uuid> card <number>". Do not judge factual correctness in this pass and do not rewrite questions.
+    return """Compare all question stems for semantic duplication. Flag questions that test the same answer-bearing relationship or learning point, including paraphrases, different structural card types, and positive/negative restatements of one definition. Shared vocabulary alone is not duplication when the questions require different supported relationships or reasoning. Report each duplicate pair once: put the later cluster/card in the issue's cluster field and at the start of its reason, and identify the earlier card after the word cluster. Every reason must use exactly the form "card <number> duplicates cluster <uuid> card <number>". Do not judge factual correctness in this pass and do not rewrite questions.
 
     Return only this JSON shape. Use an empty issues list when no duplicate exists:
     {"issues":[{"cluster":"valid UUID copied from input","reasons":["card 2 duplicates cluster <uuid> card 4"]}]}

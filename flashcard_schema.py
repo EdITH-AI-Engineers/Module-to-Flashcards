@@ -25,25 +25,32 @@ def _strict_object(
 def build_concept_plan_schema(fact_ids: Sequence[str]) -> dict[str, object]:
     """Constrain planning output to either a complete plan or one refusal."""
 
-    concept = _strict_object(
+    card_target = _strict_object(
         {
-            "name": {"type": "string", "minLength": 1},
+            "learning_point": {"type": "string", "minLength": 1},
             "fact_ids": {
                 "type": "array",
                 "items": {"type": "string", "enum": list(fact_ids)},
                 "minItems": 1,
             },
-            "assessment_approaches": {
+            "assessment_approach": {
+                "type": "string",
+                "enum": sorted(ALLOWED_APPROACHES),
+            },
+        },
+        ("learning_point", "fact_ids", "assessment_approach"),
+    )
+    concept = _strict_object(
+        {
+            "name": {"type": "string", "minLength": 1},
+            "card_targets": {
                 "type": "array",
-                "items": {
-                    "type": "string",
-                    "enum": sorted(ALLOWED_APPROACHES),
-                },
+                "items": card_target,
                 "minItems": CARDS_PER_CLUSTER,
                 "maxItems": CARDS_PER_CLUSTER,
             },
         },
-        ("name", "fact_ids", "assessment_approaches"),
+        ("name", "card_targets"),
     )
     plan = _strict_object(
         {

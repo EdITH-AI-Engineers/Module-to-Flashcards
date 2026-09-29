@@ -173,7 +173,8 @@ def test_pipeline_args_use_low_resource_api_defaults():
     assert args.kg_batch_size == 1
     assert args.kg_num_beams == 1
     assert args.max_truncation_retries == 2
-    assert args.skip_final_review is True
+    assert args.skip_final_review is False
+    assert args.validate_flashcards is True
     assert args.timeout == 0
 
 

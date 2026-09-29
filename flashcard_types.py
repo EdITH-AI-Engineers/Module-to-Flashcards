@@ -41,11 +41,20 @@ class GraphFact:
 
 
 @dataclass(frozen=True)
+class CardTarget:
+    learning_point: str
+    fact_ids: tuple[str, ...]
+    facts: tuple[str, ...]
+    assessment_approach: str
+
+
+@dataclass(frozen=True)
 class ConceptPlan:
     name: str
     fact_ids: tuple[str, ...]
     facts: tuple[str, ...]
     assessment_approaches: tuple[str, ...]
+    card_targets: tuple[CardTarget, ...] = ()
 
 
 @dataclass(frozen=True)

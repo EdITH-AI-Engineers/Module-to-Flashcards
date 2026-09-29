@@ -83,11 +83,11 @@ class _RepairableClusterValidationError(ValidationError):
 class PipelineConfig:
     max_retries: int = 3
     max_truncation_retries: int = 2
-    plan_max_tokens: int = 3072
+    plan_max_tokens: int = 4096
     cluster_max_tokens: int = 1536
     review_max_tokens: int = 1024
     final_review: bool = True
-    validation_enabled: bool = False
+    validation_enabled: bool = True
 
     def __post_init__(self) -> None:
         if self.max_retries < 1:

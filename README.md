@@ -94,8 +94,9 @@ The complete local sequence is:
    their slide/topic context, while REBEL adds relationship nodes and edges.
 5. Qwen conservatively removes presentation noise and irrelevant graph items,
    then publishes the checked graph.
-6. Qwen generates and validates flashcards from a balanced set of grounded lesson
-   facts covering the readable slides.
+6. Qwen combines normalized lesson facts with checked relationship edges, plans
+   five separately supported learning targets for every concept, and generates
+   one card for each ordered target.
 
 No PDF or extracted document content is uploaded to Mistral or another API. The selected Qwen model is text-only: Tesseract recovers visible labels from slide images, but Qwen does not perform visual interpretation of diagrams or photographs.
 
@@ -112,7 +113,7 @@ The matching annotated Git release tag for version 1.1.0 should be `v1.1.0`.
 - Several gigabytes of free disk space
 - Internet access for initial dependency and model downloads
 
-GPU offload is enabled by default with `n_gpu_layers=-1`, and REBEL selects CUDA automatically when PyTorch can access it. GPU acceleration requires a GPU-enabled `llama-cpp-python` build compatible with the installed GPU runtime. CPU-only inference remains supported but can be slow because a complete module requires concept planning, 20 cluster-generation calls, validation retries, and, in full-quality CLI mode, six optional final review calls. API fast mode skips those optional reviews.
+GPU offload is enabled by default with `n_gpu_layers=-1`, and REBEL selects CUDA automatically when PyTorch can access it. GPU acceleration requires a GPU-enabled `llama-cpp-python` build compatible with the installed GPU runtime. CPU-only inference remains supported but can be slow because a complete module requires concept planning, 20 cluster-generation calls, validation retries, and six final review calls.
 
 ## Quick start with the browser extension
 
@@ -145,14 +146,13 @@ Invoke-WebRequest http://localhost:8000/health
 
 ### Flashcard generation retries
 
-Flashcard content validation and final Qwen reviews are temporarily disabled
-for normal generation runs so the complete CSV can be produced and inspected.
-JSON parsing, the 20-concept/five-card structure, and CSV layout checks still
-run because the exporter needs them. Pass `--validate-flashcards` to `main.py`
-or `pipeline.py` to enable the content checks again.
+Flashcard content validation and final Qwen reviews are enabled by default.
+Every concept plan must contain five ordered card targets, each with a distinct
+learning point, supporting fact IDs, and assessment approach. The generated
+cards must keep that order and approach assignment. Use
+`--skip-flashcard-validation` only when deliberately inspecting raw model output.
 
-`--max-retries` sets the number of attempts for JSON and layout errors; it also
-covers content corrections when validation is enabled.
+`--max-retries` sets the number of attempts for JSON, layout, and content errors.
 `--max-truncation-retries` separately allows retries when the model response
 ends before its JSON is complete; it defaults to `2`.
 For example:

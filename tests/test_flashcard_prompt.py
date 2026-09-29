@@ -13,6 +13,7 @@ from flashcard_prompt import (
     build_retry_prompt,
 )
 from flashcard_types import (
+    CardTarget,
     ConceptPlan,
     FlashcardCluster,
     FlashcardDraft,
@@ -22,16 +23,26 @@ from flashcard_types import (
 
 
 def concept():
+    approaches = (
+        "recall",
+        "comparison",
+        "application",
+        "misconception detection",
+        "reversed reasoning",
+    )
     return ConceptPlan(
         "Binary base",
         ("e1",),
         ("binary | uses | base 2",),
-        (
-            "recall",
-            "comparison",
-            "application",
-            "misconception detection",
-            "reversed reasoning",
+        approaches,
+        tuple(
+            CardTarget(
+                learning_point=f"Binary base learning point {position}",
+                fact_ids=("e1",),
+                facts=("binary | uses | base 2",),
+                assessment_approach=approach,
+            )
+            for position, approach in enumerate(approaches, start=1)
         ),
     )
 
@@ -72,8 +83,8 @@ def test_system_prompt_requires_approach_labels_to_match_actual_reasoning():
     assert "expalanation" in SYSTEM_PROMPT
     assert "unresolved question" in lowered
     assert "never infer is_true" in lowered
-    assert "approaches may repeat" in lowered
-    assert "no planned approach is required to appear" in lowered
+    assert "five assigned learning points in order" in lowered
+    assert "copy the assessment_approach assigned" in lowered
     assert "the assessment_approach label must describe the reasoning" in lowered
     assert '"what term refers to..." is recall or classification' in lowered
 
@@ -173,7 +184,8 @@ def test_plan_prompt_serializes_relationships_without_provenance():
     assert "slide" not in prompt.casefold()
     assert "exactly 20" in prompt.casefold()
     assert "fact_ids" in prompt
-    assert "there is no fixed maximum" in prompt
+    assert "card_targets" in prompt
+    assert "five learning points and approaches" in prompt
     assert "recall, comparison, classification, application" in prompt.casefold()
     assert "1, 2, 3, 4, 5, 6" not in prompt
 
@@ -258,7 +270,7 @@ def test_concept_plan_uses_a_dedicated_short_system_prompt():
     assert len(CONCEPT_PLAN_SYSTEM_PROMPT) < len(SYSTEM_PROMPT)
 
 
-def test_cluster_prompt_allows_planned_approaches_in_any_card_order():
+def test_cluster_prompt_binds_each_card_to_its_ordered_target():
     prompt = build_cluster_prompt(
         ModuleIdentity("CPE0021", "1"),
         concept(),
@@ -283,18 +295,25 @@ def test_cluster_prompt_allows_planned_approaches_in_any_card_order():
     assert payload["assessment_approaches"] == list(
         concept().assessment_approaches
     )
-    for approach in concept().assessment_approaches:
-        assert f'- "{approach}"' in prompt
+    assert len(payload["card_targets"]) == 5
+    for position, target in enumerate(concept().card_targets, start=1):
+        assert payload["card_targets"][position - 1]["card"] == position
+        assert payload["card_targets"][position - 1]["learning_point"] == (
+            target.learning_point
+        )
+        assert f'- Card {position}: "{target.assessment_approach}"' in prompt
     normalized_prompt = " ".join(prompt.split())
-    assert "Approaches may repeat" in prompt
-    assert "a listed approach does not have to appear" in normalized_prompt
-    assert "no approach is tied to a numbered card position" in normalized_prompt
+    assert "card 1 must assess target 1" in normalized_prompt.casefold()
+    assert (
+        "do not substitute, combine, reorder, or repeat"
+        in normalized_prompt.casefold()
+    )
     assert "POSITIONAL ASSESSMENT APPROACHES" not in prompt
     assert "Card 1: assessment_approach" not in prompt
     assert "REPEATED CRITICAL RULES" in prompt
     assert 'must literally be ""' in prompt
     assert "no wrong_option may repeat" in prompt
-    assert "internal generation details" in prompt
+    assert "source or evidence wrapper" in normalized_prompt.casefold()
 
 
 def test_cluster_prompt_prioritizes_distinct_supported_learning_checks():
@@ -340,8 +359,7 @@ def test_retry_prompt_targets_named_cards_and_repeats_critical_checks():
     assert "complete replacement" in prompt.casefold()
     assert "correct that exact card" in prompt.casefold()
     assert "card 2 identification wrong options must be empty" in prompt
-    assert "one of the planned values" in prompt
-    assert "Approaches may repeat" in prompt
+    assert "assigned assessment_approach" in " ".join(prompt.split())
     assert 'all exactly ""' in prompt
     assert "four different strings" in prompt
     assert "ORIGINAL" in prompt
@@ -394,7 +412,7 @@ def test_cluster_retry_is_compact_and_does_not_nest_original_prompt():
     assert "ORIGINAL REQUEST" not in prompt
     assert prompt.count("Design rule fact 1 with enough supporting detail") == 1
     assert "PARTIAL_CANDIDATE" in prompt
-    assert "Approaches may repeat" in prompt
+    assert "ordered card_targets" in prompt
     assert "positional assessment_approach order" not in prompt
     assert "do not invent a scenario" in prompt.casefold()
     assert "suggested_wrong_option_terms" not in prompt
@@ -496,7 +514,7 @@ def test_grounding_review_includes_evidence_and_card_content():
     assert "same semantic category" in prompt
     assert "unrelated to the question or module domain" in prompt
     assert "same answer-bearing relationship" in prompt
-    assert "different type, polarity, or wording" in prompt
+    assert "different wording, types, or polarity" in prompt
 
 
 def test_duplicate_review_excludes_answers_and_evidence():
@@ -506,4 +524,4 @@ def test_duplicate_review_excludes_answers_and_evidence():
     assert "Binary uses base 2" not in prompt
     assert "binary | uses | base 2" not in prompt
     assert '"issues"' in prompt
-    assert "definition and its negated restatement" in prompt
+    assert "positive/negative restatements" in prompt

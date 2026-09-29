@@ -16,6 +16,7 @@ from flashcard_contract import (
     CONCEPTS_PER_MODULE,
 )
 from flashcard_types import (
+    CardTarget,
     ConceptPlan,
     FlashcardCluster,
     FlashcardDraft,
@@ -53,7 +54,7 @@ BANNED_FRAMING = (
 )
 _PROVENANCE_SOURCE_TERM = (
     r"(?:knowledge\s+graph|concept\s+facts?|facts?|source(?:\s+material)?|"
-    r"material|information|text|module(?:\s+content)?|document|lesson|"
+    r"evidence|material|information|text|module(?:\s+content)?|document|lesson|"
     r"slides?|file|chunk|citation|url|definition|vocabulary)"
 )
 PROVENANCE_PATTERNS = (
@@ -93,6 +94,10 @@ GENERIC_EXPLANATION = re.compile(
     r"^(?:.+?\s+is\s+the\s+correct\s+answer(?:\s+here)?|"
     r"this\s+is\s+the\s+correct\s+answer(?:\s+for\s+this\s+question)?|"
     r"this\s+statement\s+is\s+(?:true|false))\.?$",
+    re.I,
+)
+GENERIC_EXPLANATION_PREFIX = re.compile(
+    r"^this\s+statement\s+is\s+(?:true|false)\s*[.!:]?\s*",
     re.I,
 )
 CARD_FIELDS = {
@@ -432,15 +437,95 @@ def parse_concept_plan(
                     "instead of naming an assessable topic"
                 )
 
-        try:
-            fact_ids = _tolerant_string_list(item.get("fact_ids"), f"{prefix} fact_ids")
-            approaches = _tolerant_string_list(
-                item.get("assessment_approaches"),
-                f"{prefix} assessment_approaches",
+        card_targets: list[CardTarget] = []
+        target_values = item.get("card_targets")
+        if target_values is not None:
+            if not isinstance(target_values, list):
+                errors.append(f"{prefix} card_targets must be a JSON array")
+                continue
+            if validate_content and len(target_values) != CARDS_PER_CLUSTER:
+                errors.append(
+                    f"{prefix} must contain exactly {CARDS_PER_CLUSTER} card targets"
+                )
+            seen_learning_points: set[str] = set()
+            for target_position, target in enumerate(target_values, start=1):
+                target_prefix = f"{prefix} card target {target_position}"
+                if not isinstance(target, Mapping):
+                    errors.append(f"{target_prefix} must be an object")
+                    continue
+                learning_point = target.get("learning_point")
+                if not isinstance(learning_point, str) or not learning_point.strip():
+                    errors.append(
+                        f"{target_prefix} learning_point must be a non-empty string"
+                    )
+                    continue
+                try:
+                    target_fact_ids = _tolerant_string_list(
+                        target.get("fact_ids"), f"{target_prefix} fact_ids"
+                    )
+                except ValidationError as exc:
+                    errors.extend(exc.errors)
+                    continue
+                approach = target.get("assessment_approach")
+                if not isinstance(approach, str) or not approach.strip():
+                    errors.append(
+                        f"{target_prefix} assessment_approach must be a non-empty string"
+                    )
+                    continue
+                target_facts: list[str] = []
+                for fact_id in target_fact_ids:
+                    if fact_id not in known:
+                        if validate_content:
+                            errors.append(
+                                f"{target_prefix} uses unknown fact id {fact_id!r}"
+                            )
+                    else:
+                        target_facts.append(known[fact_id])
+                normalized_learning_point = _normalized(learning_point)
+                if validate_content and normalized_learning_point in seen_learning_points:
+                    errors.append(
+                        f"{target_prefix} duplicates another card target learning point"
+                    )
+                seen_learning_points.add(normalized_learning_point)
+                if validate_content and approach not in ALLOWED_APPROACHES:
+                    errors.append(
+                        f"{target_prefix} contains unsupported assessment approach: "
+                        f"{approach}"
+                    )
+                card_targets.append(
+                    CardTarget(
+                        learning_point=learning_point,
+                        fact_ids=target_fact_ids,
+                        facts=tuple(target_facts),
+                        assessment_approach=approach,
+                    )
+                )
+
+            fact_ids = tuple(
+                dict.fromkeys(
+                    fact_id
+                    for target in card_targets
+                    for fact_id in target.fact_ids
+                )
             )
-        except ValidationError as exc:
-            errors.extend(exc.errors)
-            continue
+            approaches = tuple(
+                target.assessment_approach for target in card_targets
+            )
+        else:
+            # Read legacy plans produced before card_targets existed. Production
+            # structured output uses the new schema; this path keeps saved plans,
+            # tests, and third-party backends readable during migration.
+            try:
+                fact_ids = _tolerant_string_list(
+                    item.get("fact_ids"), f"{prefix} fact_ids"
+                )
+                approaches = _tolerant_string_list(
+                    item.get("assessment_approaches"),
+                    f"{prefix} assessment_approaches",
+                )
+            except ValidationError as exc:
+                errors.extend(exc.errors)
+                continue
 
         resolved_facts: list[str] = []
         for fact_id in fact_ids:
@@ -478,6 +563,7 @@ def parse_concept_plan(
                 fact_ids=fact_ids,
                 facts=tuple(resolved_facts),
                 assessment_approaches=approaches,
+                card_targets=tuple(card_targets),
             )
         )
 
@@ -849,6 +935,13 @@ def _sanitize_explanation(
         cleaned = _definition_statement(correct_option, term_definition.group(1))
     else:
         cleaned = _strip_citation_phrasing(text)
+    without_generic_prefix = GENERIC_EXPLANATION_PREFIX.sub("", cleaned).strip()
+    if without_generic_prefix:
+        cleaned = without_generic_prefix
+        if cleaned and not cleaned.endswith((".", "!", "?")):
+            cleaned += "."
+        if cleaned:
+            cleaned = cleaned[0].upper() + cleaned[1:]
     words = re.findall(r"[A-Za-z0-9]+", cleaned)
     # After stripping the citation clause there may be nothing substantive
     # left (e.g. "X is explicitly stated in the provided fact." carried no
@@ -911,6 +1004,13 @@ def validate_cluster(
                 f"card {position} assessment_approach must be one of the planned "
                 f"approaches: {', '.join(sorted(expected_approaches))}"
             )
+        if position <= len(concept.card_targets):
+            assigned = concept.card_targets[position - 1].assessment_approach
+            if card.assessment_approach != assigned:
+                errors.append(
+                    f"card {position} assessment_approach must match its assigned "
+                    f"card target: {assigned}"
+                )
 
     for position, card in enumerate(cards, start=1):
         prefix = f"card {position}"
@@ -1039,9 +1139,9 @@ def validate_cluster(
     return tuple(errors)
 
 
-# Negation and polarity words. A question and its negated form ask for
-# different things (the members of a set versus the exception), so a polarity
-# difference means the questions are NOT duplicates.
+# Negation and polarity words. They are removed before comparing the remaining
+# content so a positive statement and its mechanically negated restatement are
+# treated as one learning check.
 _NEGATION_TOKENS = frozenset(
     {
         "not",
@@ -1084,12 +1184,19 @@ def _negation_markers(value: str) -> tuple[str, ...]:
 
 
 def _polarity_variant(left: str, right: str) -> bool:
-    """Kept for callers compiled against the old API.
+    """Return whether two stems differ mainly by positive/negative polarity."""
 
-    Negation is no longer treated as duplication, so this always returns False.
-    """
-    del left, right
-    return False
+    if _negation_markers(left) == _negation_markers(right):
+        return False
+    left_sequence = _polarity_content_tokens(left)
+    right_sequence = _polarity_content_tokens(right)
+    if not left_sequence or not right_sequence:
+        return False
+    return _within_one_word_edit(
+        left_sequence,
+        right_sequence,
+        allow_substitution=False,
+    )
 
 
 _QUESTION_FRAME_TOKENS = {
@@ -1103,6 +1210,25 @@ _QUESTION_FRAME_TOKENS = {
     "whose",
     "why",
 }
+
+
+def _polarity_content_tokens(value: str) -> tuple[str, ...]:
+    """Normalize the small grammatical changes introduced by negation.
+
+    English often changes ``describes`` to ``does not describe``. The regular
+    near-duplicate tokenizer intentionally stays conservative, but polarity
+    comparison can safely discard the do-support auxiliary and a terminal
+    ``e`` because it runs only after one stem has an explicit negation marker.
+    """
+
+    tokens: list[str] = []
+    for token in _question_content_tokens(value):
+        if token in {"do", "doe", "did"}:
+            continue
+        if len(token) > 4 and token.endswith("e"):
+            token = token[:-1]
+        tokens.append(token)
+    return tuple(tokens)
 
 
 def _question_content_tokens(value: str) -> tuple[str, ...]:
@@ -1135,16 +1261,16 @@ def _within_one_word_edit(
 
 
 def are_near_duplicates(left: str, right: str) -> bool:
-    """Same question with at most one word different, ignoring negation.
+    """Same question with at most one word different, including polarity flips.
 
     This is a surface check, not a same-idea check: two questions about the
-    same fact are fine as long as they are worded differently. Questions whose
-    negation differs (NOT / EXCEPT / least / most) are never duplicates.
+    same fact still need the model-assisted semantic review when they are
+    worded differently.
     """
     if normalize_stem(left) == normalize_stem(right):
         return True
     if _negation_markers(left) != _negation_markers(right):
-        return False
+        return _polarity_variant(left, right)
 
     left_sequence = _question_content_tokens(left)
     right_sequence = _question_content_tokens(right)

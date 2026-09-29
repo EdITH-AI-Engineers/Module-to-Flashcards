@@ -169,9 +169,9 @@ def test_unvalidated_generation_returns_raw_cards_without_reviews(monkeypatch):
 def test_pipeline_defaults_use_practical_local_token_budgets():
     config = PipelineConfig()
 
-    assert config.validation_enabled is False
+    assert config.validation_enabled is True
     assert config.max_truncation_retries == 2
-    assert config.plan_max_tokens == 3072
+    assert config.plan_max_tokens == 4096
     assert config.cluster_max_tokens == 1536
     assert config.review_max_tokens == 1024
 

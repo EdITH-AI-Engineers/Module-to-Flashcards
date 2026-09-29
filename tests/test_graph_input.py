@@ -59,7 +59,7 @@ def test_extract_facts_excludes_provenance_text():
     assert "do not expose" not in facts[0].statement
 
 
-def test_extract_facts_prefers_normalized_lesson_facts_with_context():
+def test_extract_facts_combines_normalized_lesson_facts_and_relationships():
     value = graph()
     value["facts"] = [
         {
@@ -73,7 +73,7 @@ def test_extract_facts_prefers_normalized_lesson_facts_with_context():
 
     facts = extract_graph_facts(value)
 
-    assert len(facts) == 1
+    assert len(facts) == 2
     assert facts[0].fact_id == "f1"
     assert facts[0].statement == "A project is a temporary endeavor."
     assert facts[0].slides == (4,)
@@ -95,7 +95,7 @@ def test_extract_facts_drops_unresolved_question_shaped_lesson_facts():
 
     facts = extract_graph_facts(value)
 
-    assert [fact.fact_id for fact in facts] == ["f2"]
+    assert [fact.fact_id for fact in facts] == ["f2", "e1"]
 
 
 def test_extract_facts_collapses_existing_cumulative_fact_ids():
@@ -125,7 +125,7 @@ def test_extract_facts_collapses_existing_cumulative_fact_ids():
 
     facts = extract_graph_facts(value)
 
-    assert len(facts) == 1
+    assert len(facts) == 2
     assert facts[0].fact_id == "f84"
     assert facts[0].slides == (30, 31)
 
@@ -162,10 +162,11 @@ def test_extract_facts_drops_only_slide_self_referential_statements():
 
     facts = extract_graph_facts(value)
 
-    assert [fact.fact_id for fact in facts] == ["f3", "f4"]
+    assert [fact.fact_id for fact in facts] == ["f3", "f4", "e1"]
     assert [fact.statement for fact in facts] == [
         "A digital portfolio is a document containing selected work.",
         "A portfolio page can present a learner's reflection.",
+        "binary | uses | base 2",
     ]
 
 
@@ -204,11 +205,11 @@ def test_extract_facts_filters_noise_from_existing_graph_without_a_minimum():
 
     facts = extract_graph_facts(value)
 
-    assert [fact.fact_id for fact in facts] == ["f4"]
+    assert [fact.fact_id for fact in facts] == ["f4", "e1"]
     assert facts[0].statement == "Energy cannot be created or destroyed."
 
 
-def test_extract_facts_does_not_fall_back_to_edges_when_facts_are_all_metadata():
+def test_extract_facts_uses_relationships_when_lesson_facts_are_all_metadata():
     value = graph()
     value["facts"] = [
         {
@@ -218,8 +219,9 @@ def test_extract_facts_does_not_fall_back_to_edges_when_facts_are_all_metadata()
         }
     ]
 
-    with pytest.raises(GraphInputError, match="no usable lesson facts"):
-        extract_graph_facts(value)
+    facts = extract_graph_facts(value)
+
+    assert [fact.fact_id for fact in facts] == ["e1"]
 
 
 def test_extract_facts_filters_presentation_metadata_from_legacy_edges():

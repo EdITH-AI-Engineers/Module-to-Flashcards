@@ -37,6 +37,13 @@ def test_near_duplicate_ignores_question_word_variation_for_the_same_content():
     )
 
 
+def test_near_duplicate_rejects_a_mechanical_polarity_flip():
+    assert are_near_duplicates(
+        "Social process describes patterns of interaction among groups.",
+        "Social process does not describe patterns of interaction among groups.",
+    )
+
+
 def test_module_accepts_twenty_valid_clusters():
     assert validate_module(valid_clusters()) == ()
 

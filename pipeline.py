@@ -87,7 +87,7 @@ def pipeline_paths(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run PDF slides -> structured TXT -> knowledge graph -> validated "
+            "Run PDF slides -> structured TXT -> knowledge graph -> "
             "flashcards as a resumable local sequence."
         ),
         epilog=(
@@ -143,6 +143,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--skip-final-review",
         action="store_true",
         help="skip Qwen's final flashcard review calls",
+    )
+    parser.add_argument(
+        "--validate-flashcards",
+        action="store_true",
+        help="enable flashcard validation and final reviews",
     )
     parser.add_argument(
         "--force",
@@ -228,6 +233,8 @@ def build_stage_commands(
     ]
     if args.skip_final_review:
         stage_three.append("--skip-final-review")
+    if args.validate_flashcards:
+        stage_three.append("--validate-flashcards")
 
     return (
         StageCommand("pdf-to-text", tuple(stage_one), paths.structured_text),

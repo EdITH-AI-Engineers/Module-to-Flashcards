@@ -1,6 +1,6 @@
 # Module to Flashcards
 
-This project turns slide PDFs into structured text, extracts a relationship graph, and uses a local Qwen model to generate validated, copy-paste-ready assessment CSV.
+This project turns slide PDFs into structured text, extracts a relationship graph, and uses a local Qwen model to generate assessment CSV.
 
 Current release: 1.1.0
 
@@ -145,9 +145,16 @@ Invoke-WebRequest http://localhost:8000/health
 
 ### Flashcard generation retries
 
-`--max-retries` sets the number of parseable responses allowed for validation
-and content corrections. `--max-truncation-retries` separately allows retries
-when the model response ends before its JSON is complete; it defaults to `2`.
+Flashcard content validation and final Qwen reviews are temporarily disabled
+for normal generation runs so the complete CSV can be produced and inspected.
+JSON parsing, the 20-concept/five-card structure, and CSV layout checks still
+run because the exporter needs them. Pass `--validate-flashcards` to `main.py`
+or `pipeline.py` to enable the content checks again.
+
+`--max-retries` sets the number of attempts for JSON and layout errors; it also
+covers content corrections when validation is enabled.
+`--max-truncation-retries` separately allows retries when the model response
+ends before its JSON is complete; it defaults to `2`.
 For example:
 
 ```powershell

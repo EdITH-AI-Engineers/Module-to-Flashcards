@@ -159,10 +159,13 @@ def _render_csv(
 def render_module(
     identity: ModuleIdentity,
     clusters: Sequence[FlashcardCluster],
+    *,
+    validate_cards: bool = False,
 ) -> str:
-    errors = validate_module(clusters)
-    if errors:
-        raise ValueError("cannot render invalid module: " + "; ".join(errors))
+    if validate_cards:
+        errors = validate_module(clusters)
+        if errors:
+            raise ValueError("cannot render invalid module: " + "; ".join(errors))
 
     first = _render_csv(identity, clusters[:CLUSTERS_PER_BLOCK])
     second = _render_csv(identity, clusters[CLUSTERS_PER_BLOCK:])

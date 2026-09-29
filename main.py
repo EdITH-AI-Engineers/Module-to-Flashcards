@@ -206,6 +206,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.set_defaults(final_review=True)
     parser.add_argument(
+        "--validate-flashcards",
+        action="store_true",
+        help="enable flashcard content checks and final reviews",
+    )
+    parser.add_argument(
         "--smoke-test",
         action="store_true",
         help="load the model and run a tiny JSON response check only",
@@ -309,6 +314,7 @@ def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path
             max_retries=args.max_retries,
             max_truncation_retries=getattr(args, "max_truncation_retries", 2),
             final_review=args.final_review,
+            validation_enabled=getattr(args, "validate_flashcards", False),
         ),
         progress=lambda message: print(message, file=sys.stderr, flush=True),
     )
@@ -318,7 +324,11 @@ def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path
         prior_concept_names=prior_concept_names,
         prior_questions=prior_questions,
     )
-    content = render_module(identity, clusters)
+    content = render_module(
+        identity,
+        clusters,
+        validate_cards=getattr(args, "validate_flashcards", False),
+    )
     write_module_output(output, content)
     print(
         f"[flashcard-pipeline] generated module output: {output.resolve()}\n{content}",

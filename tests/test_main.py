@@ -39,6 +39,10 @@ def test_parse_args_defaults_to_two_independent_truncation_retries():
     assert args.max_truncation_retries == 2
 
 
+def test_flashcard_validation_is_disabled_for_normal_generation():
+    assert main.parse_args(["graph.json"]).validate_flashcards is False
+
+
 def test_parse_args_preserves_identity_strings():
     args = main.parse_args(
         [
@@ -82,9 +86,11 @@ def test_run_writes_pipeline_result(tmp_path, monkeypatch, valid_clusters):
     monkeypatch.setattr(main, "ensure_model", lambda path: tmp_path / "model.gguf")
     monkeypatch.setattr(main, "LocalQwenBackend", lambda *args, **kwargs: object())
 
+    captured_config = []
+
     class FakePipeline:
         def __init__(self, backend, config, **kwargs):
-            pass
+            captured_config.append(config)
 
         def run(self, identity, facts, **kwargs):
             return valid_clusters
@@ -105,6 +111,7 @@ def test_run_writes_pipeline_result(tmp_path, monkeypatch, valid_clusters):
     result = main.run(args)
 
     assert result == output_path
+    assert captured_config[0].validation_enabled is False
     assert output_path.read_text(encoding="utf-8-sig").startswith("Module 1.1\n")
 
 

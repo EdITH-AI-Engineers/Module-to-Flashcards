@@ -377,6 +377,8 @@ def _normalized(value: str) -> str:
 def parse_concept_plan(
     raw: str,
     known_facts: Sequence[GraphFact],
+    *,
+    validate_content: bool = True,
 ) -> tuple[ConceptPlan, ...]:
     value = _parse_json_object(raw)
     if "insufficient_content" in value:
@@ -416,15 +418,16 @@ def parse_concept_plan(
         if not isinstance(name, str) or not name.strip():
             errors.append(f"{prefix} name must be a non-empty string")
             continue
-        normalized_name = _normalized(name)
-        if normalized_name in seen_names:
-            errors.append(f"{prefix} duplicates another concept name")
-        seen_names.add(normalized_name)
-        if _contains_metadata_artifact(name):
-            errors.append(
-                f"{prefix} name exposes presentation/provenance metadata "
-                "instead of naming an assessable topic"
-            )
+        if validate_content:
+            normalized_name = _normalized(name)
+            if normalized_name in seen_names:
+                errors.append(f"{prefix} duplicates another concept name")
+            seen_names.add(normalized_name)
+            if _contains_metadata_artifact(name):
+                errors.append(
+                    f"{prefix} name exposes presentation/provenance metadata "
+                    "instead of naming an assessable topic"
+                )
 
         try:
             fact_ids = _tolerant_string_list(item.get("fact_ids"), f"{prefix} fact_ids")
@@ -439,10 +442,11 @@ def parse_concept_plan(
         resolved_facts: list[str] = []
         for fact_id in fact_ids:
             if fact_id not in known:
-                errors.append(f"{prefix} uses unknown fact id {fact_id!r}")
+                if validate_content:
+                    errors.append(f"{prefix} uses unknown fact id {fact_id!r}")
             else:
                 resolved_facts.append(known[fact_id])
-        if resolved_facts and all(
+        if validate_content and resolved_facts and all(
             _contains_metadata_artifact(fact) for fact in resolved_facts
         ):
             errors.append(
@@ -450,7 +454,7 @@ def parse_concept_plan(
                 "content (e.g. a title or header) and has no assessable "
                 "content to write cards from"
             )
-        if (
+        if validate_content and (
             len(approaches) != CARDS_PER_CLUSTER
             or len(set(approaches)) != CARDS_PER_CLUSTER
         ):
@@ -458,12 +462,13 @@ def parse_concept_plan(
                 f"{prefix} must contain exactly {CARDS_PER_CLUSTER} "
                 "distinct assessment approaches"
             )
-        invalid_approaches = sorted(set(approaches) - ALLOWED_APPROACHES)
-        if invalid_approaches:
-            errors.append(
-                f"{prefix} contains unsupported assessment approaches: "
-                f"{', '.join(invalid_approaches)}"
-            )
+        if validate_content:
+            invalid_approaches = sorted(set(approaches) - ALLOWED_APPROACHES)
+            if invalid_approaches:
+                errors.append(
+                    f"{prefix} contains unsupported assessment approaches: "
+                    f"{', '.join(invalid_approaches)}"
+                )
         results.append(
             ConceptPlan(
                 name=name,
@@ -530,7 +535,11 @@ def _option_value(
     return value
 
 
-def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
+def parse_cards(
+    raw: str,
+    *,
+    validate_content: bool = True,
+) -> tuple[FlashcardDraft, ...]:
     value = _parse_json_object(raw)
     cards_value = value.get("cards")
     if not isinstance(cards_value, list):
@@ -559,7 +568,7 @@ def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
             raise ValidationError(
                 f"card {position} is missing fields: {', '.join(missing)}"
             )
-        if any(
+        if validate_content and any(
             isinstance(field_value, str)
             and re.search(
                 r"\b(?:distractor pool|allowed[_\s]wrong[_\s]option[_\s]terms)\b",
@@ -614,16 +623,24 @@ def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
         results.append(
             FlashcardDraft(
                 type=card_type,
-                question=_sanitize_question(raw_question),
+                question=(
+                    _sanitize_question(raw_question)
+                    if validate_content
+                    else raw_question
+                ),
                 correct_option=correct_option,
                 wrong_option_1=wrong_option_1,
                 wrong_option_2=wrong_option_2,
                 wrong_option_3=wrong_option_3,
                 is_true=is_true,
-                expalanation=_sanitize_explanation(
-                    raw_expalanation, card_type, correct_option, is_true
+                expalanation=(
+                    _sanitize_explanation(
+                        raw_expalanation, card_type, correct_option, is_true
+                    )
+                    if validate_content
+                    else raw_expalanation
                 ),
-                hint=_sanitize_hint(raw_hint),
+                hint=_sanitize_hint(raw_hint) if validate_content else raw_hint,
                 difficulty=difficulty,
                 assessment_approach=_required_string_value(
                     assessment_approach, "assessment_approach", position

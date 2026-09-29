@@ -147,8 +147,40 @@ def test_true_false_rows_use_zero_or_one_and_empty_options():
 
 
 def test_render_module_rejects_unvalidated_cluster_count():
-    with pytest.raises(ValueError, match="exactly 20 clusters"):
+    with pytest.raises(ValueError, match="exactly 50 flashcards"):
         render_module(ModuleIdentity("CPE0021", "1"), valid_clusters()[:19])
+
+
+def test_render_module_can_write_structural_csv_without_card_validation(monkeypatch):
+    import flashcard_csv
+
+    def fail_validation(*_args, **_kwargs):
+        raise AssertionError("module validation must not run")
+
+    monkeypatch.setattr(flashcard_csv, "validate_module", fail_validation)
+
+    content = render_module(
+        ModuleIdentity("CPE0021", "1"),
+        valid_clusters(),
+    )
+
+    assert content.startswith("Module 1.1\n")
+
+
+def test_render_module_can_restore_card_validation():
+    clusters = with_question(
+        valid_clusters(),
+        1,
+        0,
+        valid_clusters()[0].cards[0].question,
+    )
+
+    with pytest.raises(ValueError, match="near-duplicate questions"):
+        render_module(
+            ModuleIdentity("CPE0021", "1"),
+            clusters,
+            validate_cards=True,
+        )
 
 
 def test_write_module_output_replaces_target_without_temp_files(tmp_path: Path):

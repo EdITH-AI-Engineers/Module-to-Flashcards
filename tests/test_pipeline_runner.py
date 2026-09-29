@@ -26,6 +26,17 @@ def test_truncation_retries_default_to_two(tmp_path):
     assert make_args(tmp_path).max_truncation_retries == 2
 
 
+def test_flashcard_validation_can_be_enabled_for_pipeline_run(tmp_path):
+    args = make_args(tmp_path, "--validate-flashcards")
+    paths = pipeline.pipeline_paths(
+        args.pdf, args.output_root, args.course_code, args.module_number
+    )
+
+    assert "--validate-flashcards" in pipeline.build_stage_commands(args, paths)[
+        2
+    ].command
+
+
 def make_args(tmp_path, *extra):
     source = tmp_path / "Module One.pdf"
     source.write_bytes(b"pdf")

@@ -87,6 +87,7 @@ class PipelineConfig:
     cluster_max_tokens: int = 1536
     review_max_tokens: int = 1024
     final_review: bool = True
+    validation_enabled: bool = False
 
     def __post_init__(self) -> None:
         if self.max_retries < 1:
@@ -797,7 +798,10 @@ class FlashcardPipeline:
             base_prompt = build_cluster_retry(base_prompt, rejected, feedback)
 
         def parse_and_validate(raw: str) -> tuple[FlashcardDraft, ...]:
-            cards = parse_cards(raw)
+            cards = parse_cards(
+                raw,
+                validate_content=self.config.validation_enabled,
+            )
             if len(cards) != CARDS_PER_CLUSTER:
                 raise ValidationError(
                     f"expected exactly {CARDS_PER_CLUSTER} cards, received "
@@ -808,6 +812,8 @@ class FlashcardPipeline:
                     f"[{label}] card {card_position}/{len(cards)} generated: "
                     + json.dumps(asdict(card), ensure_ascii=False)
                 )
+            if not self.config.validation_enabled:
+                return cards
             grounding_facts = (
                 tuple(module_facts)
                 if module_facts
@@ -1220,7 +1226,11 @@ class FlashcardPipeline:
 
         concepts = self._complete_with_retries(
             plan_prompt,
-            lambda raw: parse_concept_plan(raw, plan_facts),
+            lambda raw: parse_concept_plan(
+                raw,
+                plan_facts,
+                validate_content=self.config.validation_enabled,
+            ),
             max_tokens=self.config.plan_max_tokens,
             label="concept plan",
             system_prompt=CONCEPT_PLAN_SYSTEM_PROMPT,
@@ -1259,6 +1269,17 @@ class FlashcardPipeline:
                     cards=cards,
                 )
             )
+
+        if not self.config.validation_enabled:
+            self._progress(
+                "Flashcard validation and review are disabled for this run."
+            )
+            self._report_rejection_stats()
+            self._progress(
+                f"{CARDS_PER_MODULE} flashcards generated "
+                f"({CARDS_PER_BLOCK} + {CARDS_PER_BLOCK})."
+            )
+            return tuple(clusters)
 
         # Cross-cluster similarity belongs to the global review below. Running
         # it here would abort after generation but before the reviewer could

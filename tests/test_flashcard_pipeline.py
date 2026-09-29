@@ -54,7 +54,7 @@ def test_pipeline_excludes_question_shaped_facts_from_factual_authority():
     )
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(final_review=False),
+        PipelineConfig(validation_enabled=True, final_review=False),
         progress=lambda _message: None,
     )
     question = GraphFact(
@@ -102,7 +102,9 @@ def test_pipeline_generates_twenty_valid_clusters_without_review():
     backend = FakeBackend(
         [plan_json()] + [cluster_json(index) for index in range(1, 21)]
     )
-    pipeline = FlashcardPipeline(backend, PipelineConfig(final_review=False))
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(validation_enabled=True, final_review=False)
+    )
 
     clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
 
@@ -130,9 +132,44 @@ def test_pipeline_generates_twenty_valid_clusters_without_review():
     assert card_item["additionalProperties"] is False
 
 
+def test_unvalidated_generation_returns_raw_cards_without_reviews(monkeypatch):
+    def fail_validation(*_args, **_kwargs):
+        raise AssertionError("flashcard validation must not run")
+
+    monkeypatch.setattr(flashcard_pipeline_module, "validate_cluster", fail_validation)
+    monkeypatch.setattr(flashcard_pipeline_module, "validate_module", fail_validation)
+    monkeypatch.setattr(
+        FlashcardPipeline, "_collect_review_issues", fail_validation
+    )
+    plan = json.loads(plan_json())
+    plan["concepts"][0]["name"] = "Module 1 Title"
+    plan["concepts"][1]["name"] = "Module 1 Title"
+    plan["concepts"][0]["fact_ids"] = ["unknown-id"]
+    raw_cluster = json.loads(cluster_json(1))
+    raw_cluster["cards"][0]["question"] = (
+        "According to the provided facts, which category applies?"
+    )
+    backend = FakeBackend(
+        [json.dumps(plan)] + [json.dumps(raw_cluster) for _ in range(20)]
+    )
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(validation_enabled=False, final_review=True),
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert len(clusters) == 20
+    assert len(backend.calls) == 21
+    assert clusters[0].concept.fact_ids == ("unknown-id",)
+    assert clusters[0].cards == clusters[1].cards
+    assert clusters[0].cards[0].question == raw_cluster["cards"][0]["question"]
+
+
 def test_pipeline_defaults_use_practical_local_token_budgets():
     config = PipelineConfig()
 
+    assert config.validation_enabled is False
     assert config.max_truncation_retries == 2
     assert config.plan_max_tokens == 3072
     assert config.cluster_max_tokens == 1536
@@ -146,7 +183,7 @@ def test_pipeline_reports_major_generation_stages():
     messages = []
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(final_review=False),
+        PipelineConfig(validation_enabled=True, final_review=False),
         progress=messages.append,
     )
 
@@ -175,7 +212,7 @@ def test_pipeline_balances_large_fact_set_across_slides_and_bounds_prompt():
     messages = []
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(final_review=False),
+        PipelineConfig(validation_enabled=True, final_review=False),
         progress=messages.append,
     )
 
@@ -193,7 +230,7 @@ def test_invalid_cluster_is_retried_with_validator_feedback():
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(max_retries=3, final_review=False),
+        PipelineConfig(validation_enabled=True, max_retries=3, final_review=False),
     )
 
     pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
@@ -216,7 +253,7 @@ def test_identification_answer_leak_retry_receives_exact_rejected_card():
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(max_retries=3, final_review=False),
+        PipelineConfig(validation_enabled=True, max_retries=3, final_review=False),
     )
 
     pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
@@ -244,7 +281,7 @@ def test_pipeline_repairs_mixed_source_wrappers_and_hint_leak_without_retry():
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(max_retries=3, final_review=False),
+        PipelineConfig(validation_enabled=True, max_retries=3, final_review=False),
         progress=lambda _message: None,
     )
 
@@ -276,7 +313,7 @@ def test_truncated_cluster_retries_without_embedding_partial_output():
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(max_retries=3, final_review=False),
+        PipelineConfig(validation_enabled=True, max_retries=3, final_review=False),
     )
 
     clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
@@ -300,6 +337,7 @@ def test_truncations_do_not_consume_parseable_validation_attempts():
     pipeline = FlashcardPipeline(
         backend,
         PipelineConfig(
+            validation_enabled=True,
             max_retries=2,
             max_truncation_retries=2,
             final_review=False,
@@ -344,7 +382,7 @@ def test_concept_planning_uses_compact_prompt_after_truncations():
     )
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(final_review=False),
+        PipelineConfig(validation_enabled=True, final_review=False),
         progress=lambda _message: None,
     )
 
@@ -366,6 +404,7 @@ def test_truncation_allowance_exhaustion_reports_truncation_cause():
     pipeline = FlashcardPipeline(
         backend,
         PipelineConfig(
+            validation_enabled=True,
             max_retries=2,
             max_truncation_retries=2,
             final_review=False,
@@ -389,6 +428,7 @@ def test_validation_exhaustion_reports_validation_cause():
     pipeline = FlashcardPipeline(
         backend,
         PipelineConfig(
+            validation_enabled=True,
             max_retries=2,
             max_truncation_retries=2,
             final_review=False,
@@ -442,7 +482,7 @@ def test_identical_invalid_cluster_switches_to_single_card_repair():
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(max_retries=3, final_review=False),
+        PipelineConfig(validation_enabled=True, max_retries=3, final_review=False),
         progress=lambda _message: None,
     )
 
@@ -473,7 +513,7 @@ def test_targeted_repair_stack_restores_multiple_cards_to_original_positions():
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(max_retries=3, final_review=False),
+        PipelineConfig(validation_enabled=True, max_retries=3, final_review=False),
         progress=lambda _message: None,
     )
 
@@ -490,7 +530,7 @@ def test_repeated_malformed_cluster_never_enters_single_card_repair():
     backend = FakeBackend((plan_json(), '{"cards":[', '{"cards":['))
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(max_retries=2, final_review=False),
+        PipelineConfig(validation_enabled=True, max_retries=2, final_review=False),
         progress=lambda _message: None,
     )
 
@@ -524,7 +564,7 @@ def test_targeted_repair_rejects_a_new_full_cluster_conflict():
     )
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(max_retries=2, final_review=False),
+        PipelineConfig(validation_enabled=True, max_retries=2, final_review=False),
         progress=lambda _message: None,
     )
 
@@ -567,7 +607,7 @@ def test_overfull_cluster_is_retried_and_never_reaches_pipeline_result():
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(max_retries=3, final_review=False),
+        PipelineConfig(validation_enabled=True, max_retries=3, final_review=False),
     )
 
     clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
@@ -583,7 +623,7 @@ def test_invalid_plan_retry_omits_rejected_bulk_response():
     )
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(max_retries=3, final_review=False),
+        PipelineConfig(validation_enabled=True, max_retries=3, final_review=False),
     )
 
     pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
@@ -599,7 +639,7 @@ def test_exhausted_retries_do_not_return_partial_results():
     )
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(max_retries=3, final_review=False),
+        PipelineConfig(validation_enabled=True, max_retries=3, final_review=False),
     )
 
     with pytest.raises(GenerationError, match="concept 1"):
@@ -612,7 +652,9 @@ def test_explicit_insufficient_content_stops_without_retries():
     backend = FakeBackend(
         [json.dumps({"insufficient_content": "only ten concepts are supported"})]
     )
-    pipeline = FlashcardPipeline(backend, PipelineConfig(final_review=False))
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(validation_enabled=True, final_review=False)
+    )
 
     with pytest.raises(GenerationError, match="more content is required"):
         pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
@@ -638,7 +680,9 @@ def flag_duplicate_without_card_location(system, user, max_tokens):
             ]
         }
     )
-    pipeline = FlashcardPipeline(backend, PipelineConfig(final_review=False))
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(validation_enabled=True, final_review=False)
+    )
     facts = graph_facts()[:19]
 
     with pytest.raises(GenerationError, match="more content is required"):
@@ -733,7 +777,7 @@ def test_pipeline_threads_prior_concepts_and_retries_prior_question_duplicate():
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(max_retries=3, final_review=False),
+        PipelineConfig(validation_enabled=True, max_retries=3, final_review=False),
     )
     duplicate_question = json.loads(cluster_json(1))["cards"][0]["question"]
 
@@ -756,7 +800,9 @@ def test_final_review_uses_five_groups_and_one_global_pass():
     responses.extend(cluster_json(index) for index in range(1, 21))
     responses.extend(empty_review() for _ in range(6))
     backend = FakeBackend(responses)
-    pipeline = FlashcardPipeline(backend, PipelineConfig(final_review=True))
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(validation_enabled=True, final_review=True)
+    )
 
     pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
 
@@ -783,7 +829,9 @@ def test_final_review_repairs_only_flagged_card_and_preserves_uuid():
     responses.append(flag_second_cluster_duplicate)
     responses.append(single_card_json(make_cards(2, revision=1)[0]))
     backend = FakeBackend(responses)
-    pipeline = FlashcardPipeline(backend, PipelineConfig(final_review=True))
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(validation_enabled=True, final_review=True)
+    )
 
     clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
 
@@ -809,7 +857,7 @@ def test_global_duplicate_review_retries_when_card_location_is_missing():
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(max_retries=2, final_review=True),
+        PipelineConfig(validation_enabled=True, max_retries=2, final_review=True),
         progress=lambda message: None,
     )
 
@@ -843,7 +891,7 @@ def test_final_duplicate_validation_paraphrases_instead_of_failing():
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(final_review=False),
+        PipelineConfig(validation_enabled=True, final_review=False),
         progress=lambda message: None,
     )
 
@@ -877,7 +925,7 @@ def test_duplicate_stack_combines_conflicts_for_one_card_location():
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(final_review=False),
+        PipelineConfig(validation_enabled=True, final_review=False),
         progress=lambda message: None,
     )
 
@@ -914,7 +962,7 @@ def test_duplicate_card_retry_includes_rejected_card_and_exact_conflict():
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(max_retries=2, final_review=False),
+        PipelineConfig(validation_enabled=True, max_retries=2, final_review=False),
         progress=lambda message: None,
     )
 
@@ -960,7 +1008,7 @@ def test_true_false_duplicate_repair_restores_locked_prose_outside_schema():
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(max_retries=2, final_review=False),
+        PipelineConfig(validation_enabled=True, max_retries=2, final_review=False),
         progress=lambda message: None,
     )
 
@@ -987,7 +1035,7 @@ def test_cluster_accepts_relevant_distractor_without_full_module_token_match():
     backend = FakeBackend([response])
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(final_review=False),
+        PipelineConfig(validation_enabled=True, final_review=False),
         progress=lambda message: None,
     )
     concept_fact = GraphFact("e1", "subject1 relates to object1")
@@ -1027,7 +1075,7 @@ def test_provenance_wrappers_are_stripped_before_local_hint_repair():
     )
     pipeline = FlashcardPipeline(
         backend,
-        PipelineConfig(final_review=False),
+        PipelineConfig(validation_enabled=True, final_review=False),
         progress=lambda message: None,
     )
 

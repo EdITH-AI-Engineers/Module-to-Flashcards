@@ -42,6 +42,9 @@ BANNED_FRAMING = (
     "The following claim",
     "According to the graph",
     "According to the material",
+    "According to the module",
+    "According to the lesson",
+    "According to the document",
     "Based on the material",
     "The material/module/lesson/document states",
     "Identify the concept associated with",
@@ -837,8 +840,7 @@ def validate_cluster(
             if trigger is not None:
                 errors.append(
                     f"{prefix} {field} exposes provenance metadata; "
-                    "triggering phrase "
-                    + json.dumps(trigger, ensure_ascii=False)
+                    "triggering phrase " + json.dumps(trigger, ensure_ascii=False)
                 )
         if GENERIC_EXPLANATION.fullmatch(card.expalanation.strip()):
             errors.append(f"{prefix} expalanation must explain the answer")

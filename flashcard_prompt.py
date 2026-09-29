@@ -27,7 +27,7 @@ CARD FIELD CONTRACT
 Every card, with no exceptions, must include all eleven fields: type, question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3, is_true, expalanation, hint, difficulty, assessment_approach. Before returning JSON, verify every card object has exactly these eleven keys. If any card is missing a key, add it before responding.
 
 QUESTION QUALITY
-Write clear, authentic college-level assessment items. Assess terminology, distinctions, relationships, mechanisms, processes, causes, effects, classifications, applications, implications, conditions, limitations, or technical reasoning only when the supplied facts support them. Difficulty must come from the required thinking, never confusing wording. Do not mechanically convert a fact into a stem or reveal an answer through its full definition. The five cards must be meaningfully distinct learning checks. They may assess the same concept from supported angles, but changing only the card type, opening phrase, or a single word does not create a different question. Asking the negated form (the exception instead of the member) does. Assign each card whichever planned assessment approach accurately describes the reasoning it requires. Approaches may repeat, and no planned approach is required to appear. Prefer useful variety when the facts support it, but never mislabel a question merely to cover every approach.
+Write clear, authentic college-level assessment items. Assess terminology, distinctions, relationships, mechanisms, processes, causes, effects, classifications, applications, implications, conditions, limitations, or technical reasoning only when the supplied facts support them. Difficulty must come from the required thinking, never confusing wording. Do not mechanically convert a fact into a stem or reveal an answer through its full definition. The question must not be framed with reference to the metadata of the source (ex: module, source, lesson, page, and etc). References to evidence, such as "according to the evidence" or "based on the evidence", are allowed because evidence is part of the subject matter. The five cards must be meaningfully distinct learning checks. They may assess the same concept from supported angles, but changing only the card type, opening phrase, or a single word does not create a different question. Asking the negated form (the exception instead of the member) does. Assign each card whichever planned assessment approach accurately describes the reasoning it requires. Approaches may repeat, and no planned approach is required to appear. Prefer useful variety when the facts support it, but never mislabel a question merely to cover every approach.
 
 ASSESSMENT APPROACH SEMANTICS
 - recall: directly retrieve an explicitly supported term, property, relationship, or fact.
@@ -45,7 +45,7 @@ The assessment_approach label must describe the reasoning actually required by t
 EQUATION-BASED PROBLEM SOLVING
 When the supplied facts contain an equation, formula, numerical relationship, or clearly defined quantities, include problem-solving questions when the selected assessment approach supports them. A problem-solving question may use a realistic, concrete scenario such as selecting a valid value, calculating an outcome, comparing results, or determining what changes when one supported quantity changes. Use only variables, units, relationships, and operations explicitly supplied by the facts; do not introduce outside constants, assumptions, or formulas. State every needed value in the question or supplied facts, use plain-text equation syntax, and ensure the answer follows deterministically from the available information. A scenario must test the equation or relationship, not add decorative context. Do not force a numerical problem when the source does not provide enough information.
 
-Never mention internal generation details or cite the evidence container in a question, answer, explanation, or hint. Do not write phrases such as "fact f13," "concept facts," "provided vocabulary," "already covered subjects," "according to the module," or "as stated in the document." Ordinary subject-matter uses of words such as module, document, file, slide, source, citation, and URL are allowed. Refer to the topic itself, never to where the information appeared.
+Never mention internal generation details or cite the source container in a question, answer, explanation, or hint. Do not write phrases such as "fact f13," "concept facts," "provided vocabulary," "already covered subjects," "according to the module," or "as stated in the document." Ordinary subject-matter uses of words such as module, document, file, slide, source, citation, and URL are allowed. Refer to the topic itself, never to where the information appeared.
 
 ALLOWED TYPES
 Use only multiple-choice, identification, and true-false. Vary the mix of these types from cluster to cluster; do not repeat the same type distribution in every cluster. Every cluster needs at least one multiple-choice, one identification, and one true-false card.
@@ -65,7 +65,7 @@ Multiple-choice rules:
 Identification rules:
 - Supply one concise identifiable term, name, concept, classification, principle, process, figure, or title as correct_option.
 - The answer must be a short phrase, not a sentence or explanation.
-- Set wrong_option_1, wrong_option_2, wrong_option_3 to empty strings and is_true to null. These three fields must literally be "" â€” do not place any distractor words, related terms, or partial answers there, even though that pattern is normal for multiple-choice.
+- Set wrong_option_1, wrong_option_2, wrong_option_3 to empty strings and is_true to null. These three fields must literally be "" -- do not place any distractor words, related terms, or partial answers there, even though that pattern is normal for multiple-choice.
 - Ask directly without embedding the answer or its full definition in the stem.
 - Neither the complete answer nor its abbreviation may appear anywhere in the question, even as part of a longer phrase. Describe the concept by its function, purpose, defining trait, or relationships, never by restating its name. Use this content-neutral pattern: a question is invalid when it contains the exact correct_option text or its abbreviation. A valid question asks for the term through a supported function, purpose, defining trait, or relationship. If the supplied fact defining the concept restates the concept's own name, paraphrase around the name instead of quoting the fact.
 
@@ -87,13 +87,13 @@ Scenario analysis assessment approach rules:
 - Set assessment_approach to "scenario analysis" and never set type to "scenario analysis".
 
 DIRECT STEMS
-For identification, use a natural direct form beginning with What, Which, Who, Where, When, Why, How, or What term. Multiple-choice may use the same direct form or put a concrete context or scenario before the question. Both types must ask a clear, answerable question ending in a question mark. Do not use wrappers such as According to, Based on, The material states, The following claim, Consider this statement, Evaluate this statement, Identify the concept associated with, or equivalents. The framings "Which of the following", "Which best describes", and "Which most accurately" are allowed when they produce a clear, answerable question. Avoid only vague or subjective wording that cannot be resolved from the supplied facts.
+For identification, use a natural direct form beginning with What, Which, Who, Where, When, Why, How, or What term. Multiple-choice may use the same direct form or put a concrete context or scenario before the question. Both types must ask a clear, answerable question ending in a question mark. Do not open a question with a wrapper such as The material states, The following claim, Consider this statement, Evaluate this statement, Identify the concept associated with, or an "According to" / "Based on" phrase that names a source container (module, lesson, document, material, slide, page). Openings that name the evidence itself, such as "According to the evidence" or "Based on the evidence", are allowed, but a direct stem without them is preferred. The framings "Which of the following", "Which best describes", and "Which most accurately" are allowed when they produce a clear, answerable question. Avoid only vague or subjective wording that cannot be resolved from the supplied facts.
 
 DIFFICULTY
 Use integer 1 only for recall or straightforward understanding. Use integer 2 for interpretation, comparison, classification, application, or distinction. Use integer 3 for analysis, complex application, multi-step reasoning, competing explanations, or an unfamiliar but fully supported scenario.
 
 EXPLANATION AND HINT
-In expalanation, state the supported relationship or distinction that makes the answer correct. Never write generic filler such as "X is the correct answer here," "This statement is true," or "This statement is false." For a false statement, identify or correct the error when useful. In hint, give a useful clue about the relevant relationship, distinction, process, condition, or reasoning path without stating the answer. Neither field may mention provenance or presentation metadata.
+In expalanation, state the supported relationship or distinction that makes the answer correct. Never write generic filler such as "X is the correct answer here," "This statement is true," or "This statement is false." For a false statement, identify or correct the error when useful. In hint, give a useful clue about the relevant relationship, distinction, process, condition, or reasoning path without stating the answer. Neither field may mention provenance or presentation metadata, and neither should refer to "the evidence" (for example, "as shown in the evidence"). State the relationship directly instead.
 
 EQUATIONS
 Use plain text only: + - * / ^ = < > <= >= sqrt(...) ( ). Do not use LaTeX, MathJax, HTML math, images, superscript glyphs, or unsupported notation.
@@ -124,9 +124,10 @@ _LEADING_QUESTION_WORDS = re.compile(
     r"(?:\s+(?:is|are|was|were|does|do|did|best\s+describes?|most\s+accurately\s+describes?))?\s*",
     re.I,
 )
+
 _TRAILING_PROVENANCE = re.compile(
     r"\s*(?:according to|based on|as\s+(?:stated|described)\s+in)\s+the\s+"
-    r"(?:provided|supplied|given)?\s*(?:facts?|material|module|content|text|information)\s*\.?\s*$",
+    r"(?:provided|supplied|given)?\s*(?:facts?|material|module|content|text|information|evidence)\s*\.?\s*$",
     re.I,
 )
 
@@ -431,10 +432,13 @@ def build_cluster_prompt(
     - True-false: use a declarative statement, keep all option fields "", and
       set is_true to integer 0 or 1.
     - Every question must be clear and end in ? except true-false statements.
-      Do not begin with provenance wrappers such as "According to" or "Based on".
-    - Never expose internal generation details, evidence labels, fact IDs, or
-      source-reference wording. Ordinary domain uses of words such as module,
-      document, file, slide, source, citation, and URL are allowed.
+      Do not begin with source-container wrappers such as "According to the
+      module" or "Based on the lesson". "According to the evidence" and
+      "Based on the evidence" are allowed, but a direct stem is preferred.
+    - Never expose fact IDs, JSON key names, or source-container wording
+      (module, lesson, document, material, page). Explanations and hints must
+      not refer to "the evidence". Ordinary domain uses of words such as
+      module, document, file, slide, source, citation, and URL are allowed.
     - Every expalanation must state the relationship or distinction that makes
       the answer correct. Never write "X is the correct answer here," "This statement is true,"
       or "This statement is false."
@@ -536,11 +540,13 @@ MANDATORY CORRECTIONS:
   match the question's actual reasoning. Approaches may repeat.
 - For identification, wrong_option_1, wrong_option_2, and wrong_option_3 must be all exactly "".
 - For multiple-choice, the correct option and three wrong options must be four different strings.
-- Rewrite any multiple-choice or identification question that begins with
-  "According to", "Based on", or another wrapper.
+- Rewrite any multiple-choice or identification question that begins with a
+  source-container wrapper such as "According to the module", "Based on the
+  material", or another wrapper. "According to the evidence" and "Based on
+  the evidence" are acceptable.
 - Identification must begin directly with What, Which, Who, Where, When, Why, or How. Multiple-choice may instead begin with a concrete context or scenario and then ask the question.
 - Example:
-  Invalid: "According to the design rules, which measure assesses effectiveness?"
+  Invalid: "According to the module, which measure assesses effectiveness?"
   Valid: "Which measure assesses effectiveness?"
 - Preserve valid cards.
 - Return a complete replacement as the full cards JSON only.
@@ -664,8 +670,8 @@ def build_cluster_retry_prompt(
             answer = card.get("correct_option")
             if isinstance(answer, str) and answer.strip():
                 forbidden_answers.append(
-                    f'    - Card {card_number}: the question must not contain '
-                    f'the answer text {json.dumps(answer.strip(), ensure_ascii=False)} '
+                    f"    - Card {card_number}: the question must not contain "
+                    f"the answer text {json.dumps(answer.strip(), ensure_ascii=False)} "
                     "or its abbreviation. Keep that correct_option and describe "
                     "its supported function or defining relationship instead."
                 )
@@ -751,8 +757,9 @@ def build_cluster_retry_prompt(
       the same concept from supported angles, but do not repeat a question by
       changing only its type, opening phrase, or one word.
     - Remove provenance wording and keep the answer out of identification stems.
-      Never mention fact IDs, evidence labels, prior subjects, or other internal
-      generation details. If an error says a question "reveals the
+      Never mention fact IDs, JSON key names, prior subjects, or other internal
+      generation details. Do not refer to "the evidence" in an expalanation or
+      hint. If an error says a question "reveals the
       identification answer", the question text repeats correct_option's
       exact wording (or its abbreviation) somewhere inside it. Rewrite only
       the question so it asks for the term by its function, purpose,

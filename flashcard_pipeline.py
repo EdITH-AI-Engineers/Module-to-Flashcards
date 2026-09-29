@@ -16,6 +16,7 @@ from flashcard_contract import (
     CONCEPTS_PER_MODULE,
 )
 from flashcard_prompt import (
+    CONCEPT_PLAN_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
     _rejected_question_texts,
     build_cluster_prompt,
@@ -480,6 +481,7 @@ class FlashcardPipeline:
         *,
         max_tokens: int,
         label: str,
+        system_prompt: str = SYSTEM_PROMPT,
         response_schema: Mapping[str, object] | None = None,
         include_rejected_candidate: bool = True,
         retry_prompt_builder: (
@@ -499,7 +501,7 @@ class FlashcardPipeline:
             self._attempt_count += 1
             try:
                 candidate = self.backend.complete(
-                    SYSTEM_PROMPT,
+                    system_prompt,
                     prompt,
                     max_tokens=max_tokens,
                     schema=response_schema,
@@ -1221,6 +1223,7 @@ class FlashcardPipeline:
             lambda raw: parse_concept_plan(raw, plan_facts),
             max_tokens=self.config.plan_max_tokens,
             label="concept plan",
+            system_prompt=CONCEPT_PLAN_SYSTEM_PROMPT,
             response_schema=build_concept_plan_schema(
                 tuple(fact.fact_id for fact in plan_facts)
             ),

@@ -14,6 +14,7 @@ from flashcard_contract import (
     CARDS_PER_MODULE,
     CLUSTERS_PER_MODULE,
     CONCEPTS_PER_MODULE,
+    MAX_FACT_IDS_PER_CONCEPT,
 )
 from flashcard_types import (
     ConceptPlan,
@@ -435,6 +436,12 @@ def parse_concept_plan(
         except ValidationError as exc:
             errors.extend(exc.errors)
             continue
+
+        if len(fact_ids) > MAX_FACT_IDS_PER_CONCEPT:
+            errors.append(
+                f"{prefix} fact_ids must contain at most "
+                f"{MAX_FACT_IDS_PER_CONCEPT} entries"
+            )
 
         resolved_facts: list[str] = []
         for fact_id in fact_ids:

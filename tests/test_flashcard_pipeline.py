@@ -11,6 +11,7 @@ from flashcard_pipeline import (
     PipelineConfig,
     _repair_grounding_errors,
 )
+from flashcard_prompt import CONCEPT_PLAN_SYSTEM_PROMPT, SYSTEM_PROMPT
 from flashcard_types import (
     CompletionTruncatedError,
     FlashcardCluster,
@@ -182,7 +183,7 @@ def test_pipeline_balances_large_fact_set_across_slides_and_bounds_prompt():
 
     payload = json.loads(backend.calls[0][1].split("INPUT JSON:\n", 1)[1])
     assert len(payload["graph_facts"]) == 50
-    assert {item["slides"][0] for item in payload["graph_facts"]} == {1, 2, 3}
+    assert all(set(item) == {"fact_id", "statement"} for item in payload["graph_facts"])
     assert messages[0] == "Planning 20 concepts from 50 grounded lesson facts..."
 
 
@@ -320,6 +321,41 @@ def test_truncations_do_not_consume_parseable_validation_attempts():
 
     assert result == "valid"
     assert len(backend.calls) == 4
+
+
+def test_concept_planning_uses_compact_prompt_after_truncations():
+    facts = tuple(
+        GraphFact(
+            f"e{index}",
+            f"測定値 {index}: voltage ΔV is 3.3 V; l’énergie remains exact — Ω.",
+            slides=(index,),
+            topic=f"Topic {index}",
+        )
+        for index in range(1, 21)
+    )
+
+    def truncated(system, user, max_tokens):
+        raise CompletionTruncatedError(
+            "length limit", prompt_tokens=6000, completion_tokens=2192
+        )
+
+    backend = FakeBackend(
+        (truncated, truncated, plan_json(), *(cluster_json(i) for i in range(1, 21)))
+    )
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(final_review=False),
+        progress=lambda _message: None,
+    )
+
+    clusters = pipeline.run(ModuleIdentity("ENG101", "2"), facts)
+
+    assert len(clusters) == 20
+    assert all(call[0] == CONCEPT_PLAN_SYSTEM_PROMPT for call in backend.calls[:3])
+    assert all(call[0] == SYSTEM_PROMPT for call in backend.calls[3:])
+    assert all(fact.statement in call[1] for call in backend.calls[:3] for fact in facts)
+    assert "REJECTED JSON TO CORRECT" not in backend.calls[1][1]
+    assert "REJECTED JSON TO CORRECT" not in backend.calls[2][1]
 
 
 def test_truncation_allowance_exhaustion_reports_truncation_cause():

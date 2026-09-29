@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from flashcard_contract import CARDS_PER_CLUSTER, CONCEPTS_PER_MODULE
+from flashcard_contract import (
+    CARDS_PER_CLUSTER,
+    CONCEPTS_PER_MODULE,
+    MAX_FACT_IDS_PER_CONCEPT,
+)
 from flashcard_types import FlashcardDraft
 from flashcard_validator import ALLOWED_APPROACHES, ALLOWED_TYPES
 
@@ -29,6 +33,7 @@ def build_concept_plan_schema(fact_ids: Sequence[str]) -> dict[str, object]:
                 "type": "array",
                 "items": {"type": "string", "enum": list(fact_ids)},
                 "minItems": 1,
+                "maxItems": MAX_FACT_IDS_PER_CONCEPT,
             },
             "assessment_approaches": {
                 "type": "array",

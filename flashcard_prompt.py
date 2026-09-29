@@ -5,7 +5,11 @@ import re
 from dataclasses import asdict
 from typing import Iterable, Sequence
 
-from flashcard_contract import CARDS_PER_CLUSTER, CONCEPTS_PER_MODULE
+from flashcard_contract import (
+    CARDS_PER_CLUSTER,
+    CONCEPTS_PER_MODULE,
+    MAX_FACT_IDS_PER_CONCEPT,
+)
 from flashcard_types import (
     ConceptPlan,
     FlashcardCluster,
@@ -14,6 +18,11 @@ from flashcard_types import (
     ModuleIdentity,
 )
 from flashcard_validator import _contains_metadata_artifact
+
+CONCEPT_PLAN_SYSTEM_PROMPT = (
+    "Choose concepts using only the supplied fact statements. Do not invent or "
+    "use outside knowledge. Return JSON only, exactly matching the requested schema."
+)
 
 SYSTEM_PROMPT = f"""You are a college-level educational assessment generator.
 
@@ -225,22 +234,11 @@ def build_concept_plan_prompt(
         "course_code": identity.course_code,
         "module_number": identity.module_number,
         "graph_facts": [
-            {
-                "fact_id": fact.fact_id,
-                "statement": fact.statement,
-                **({"topic": fact.topic} if fact.topic else {}),
-                **({"slides": list(fact.slides)} if fact.slides else {}),
-            }
+            {"fact_id": fact.fact_id, "statement": fact.statement}
             for fact in facts
         ],
     }
     overlap_guidance = ""
-    context_guidance = ""
-    if any(fact.topic or fact.slides for fact in facts):
-        context_guidance = (
-            " The optional topic and slides fields provide context and provenance, "
-            "not additional facts."
-        )
     if prior_concept_names:
         payload["previously_covered_concepts"] = list(prior_concept_names)
         overlap_guidance = (
@@ -248,27 +246,12 @@ def build_concept_plan_prompt(
             "point as any entry in previously_covered_concepts, even if phrased "
             "differently. Prefer concepts distinctive to this module's own facts.\n"
         )
-    return (
-        f"""Select exactly {CONCEPTS_PER_MODULE} distinct, explicitly supported concepts for this module.
-    Each concept must be assessable in {CARDS_PER_CLUSTER} genuinely different ways. Keep concepts semantically distinct and do not use presentation or provenance details as concepts.
-
-    For each concept, copy one or more fact_ids exactly from the input. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements.{context_guidance} Choose exactly {CARDS_PER_CLUSTER} distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
-
-    Return one JSON object whose top-level key is "concepts" and whose value is an array. The array must contain exactly {CONCEPTS_PER_MODULE} concept objects before its closing bracket. Every concept object has these keys: name (string), fact_ids (non-empty string array), and assessment_approaches (array of exactly {CARDS_PER_CLUSTER} distinct allowed approaches). Do not treat a one-object shape illustration as a complete answer.
-
-    Fill all {CONCEPTS_PER_MODULE} positions in this checklist before closing the concepts array:
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20.
-    Do not stop after 11 or 12 objects. Do not add a 21st object. Each position must have a unique concept name.
-    Use the JSON key "fact_ids" literally, with a normal underscore and no backslash. Every concept must copy at least one exact fact_id from graph_facts.
-
-    Only if fewer than {CONCEPTS_PER_MODULE} distinct concepts are genuinely supported, return an object with the single key insufficient_content. Its value must specifically state how many concepts are supportable and why, using at least five words. Never copy generic placeholder wording into that field.
-    """
-        + overlap_guidance
-        + """
-    INPUT JSON:
-    """
-        + _json(payload)
-    )
+    return f"""Plan exactly {CONCEPTS_PER_MODULE} distinct, assessable concepts.
+Use only the supplied statements. Names must describe lesson content, not presentation metadata.
+Each concept needs a unique name, at least one and up to {MAX_FACT_IDS_PER_CONCEPT} exact fact_ids, and exactly {CARDS_PER_CLUSTER} distinct assessment_approaches chosen from recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning. Concepts may share fact_ids; do not invent exclusive ownership. Use the JSON schema exactly. If fewer than {CONCEPTS_PER_MODULE} genuinely distinct concepts are supported, return only insufficient_content with the supportable count and reason.
+{overlap_guidance.strip()}
+INPUT JSON:
+{_json(payload)}"""
 
 
 def build_concept_plan_retry_prompt(
@@ -297,11 +280,7 @@ def build_concept_plan_retry_prompt(
     """
 
     error_list = [str(error) for error in errors]
-    condensed, omitted = _condensed_errors(error_list)
-    error_bullets = "\n".join(f"- {error}" for error in condensed)
-    if omitted:
-        error_bullets += f"\n- (+{omitted} similar errors omitted)"
-
+    condensed, _ = _condensed_errors(error_list)
     unusable_ids = sorted(
         {fact.fact_id for fact in facts if _contains_metadata_artifact(fact.statement)}
     )
@@ -320,12 +299,7 @@ def build_concept_plan_retry_prompt(
         "course_code": identity.course_code,
         "module_number": identity.module_number,
         "graph_facts": [
-            {
-                "fact_id": fact.fact_id,
-                "statement": fact.statement,
-                **({"topic": fact.topic} if fact.topic else {}),
-                **({"slides": list(fact.slides)} if fact.slides else {}),
-            }
+            {"fact_id": fact.fact_id, "statement": fact.statement}
             for fact in facts
         ],
     }
@@ -342,31 +316,12 @@ def build_concept_plan_retry_prompt(
     REJECTED JSON TO CORRECT:
     {rejected_json}"""
 
-    return f"""Regenerate one complete replacement concept plan.
+    return f"""Regenerate the concept plan. Errors: {"; ".join(condensed)}
+Use only supplied statements; do not invent. Return exactly {CONCEPTS_PER_MODULE} distinct assessable concepts (or insufficient_content with count and reason). Each concept needs a unique name, at least one and up to {MAX_FACT_IDS_PER_CONCEPT} exact fact_ids, and exactly {CARDS_PER_CLUSTER} distinct allowed approaches. Concepts may share facts. Do not use presentation-only facts as concepts.{unusable_guidance.strip()}
+Return JSON only matching the schema.
 
-    VALIDATION ERRORS
-    {error_bullets}
-
-    CORRECTIONS
-    - Return exactly {CONCEPTS_PER_MODULE} concept objects, each with a
-      unique name, fact_ids (copied exactly from graph_facts, never rewritten
-      or invented), and exactly {CARDS_PER_CLUSTER} distinct assessment
-      approaches from the allowed list.
-    - A concept name must name an assessable topic. Never use a title,
-      header, section, or slide label as a concept name.{unusable_guidance}
-    - If two concepts would assess the same underlying learning point, keep
-      one and replace the other with a concept grounded in different
-      fact_ids.
-    - Every fact_id must be copied exactly from graph_facts; do not alter or
-      fabricate one.
-    - Only return insufficient_content if fewer than {CONCEPTS_PER_MODULE}
-      concepts are genuinely supportable once the unusable fact_ids above are
-      set aside; state specifically how many are supportable and why.
-    - Return JSON only, with no Markdown or surrounding text.
-
-    INPUT JSON:
-    {_json(payload)}{rejected_block}
-    """
+INPUT JSON:
+{_json(payload)}{rejected_block}"""
 
 
 def build_cluster_prompt(

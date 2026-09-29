@@ -2,10 +2,12 @@ import json
 
 import flashcard_prompt
 from flashcard_prompt import (
+    CONCEPT_PLAN_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
     build_cluster_prompt,
     build_cluster_retry_prompt,
     build_concept_plan_prompt,
+    build_concept_plan_retry_prompt,
     build_duplicate_review_prompt,
     build_grounding_review_prompt,
     build_retry_prompt,
@@ -169,11 +171,11 @@ def test_plan_prompt_serializes_relationships_without_provenance():
         "graph_facts": [{"fact_id": "e1", "statement": "binary | uses | base 2"}],
     }
     assert "slide" not in prompt.casefold()
-    assert "array must contain exactly 20 concept objects" in prompt.casefold()
-    assert 'key "fact_ids" literally' in prompt
-    assert "choose exactly 5 distinct approaches" in prompt.casefold()
-    assert "array of exactly 5 distinct allowed approaches" in prompt.casefold()
-    assert "labels may repeat" not in prompt.casefold()
+    assert "exactly 20" in prompt.casefold()
+    assert "fact_ids" in prompt
+    assert "up to 8" in prompt.casefold()
+    assert "recall, comparison, classification, application" in prompt.casefold()
+    assert "1, 2, 3, 4, 5, 6" not in prompt
 
 
 def test_plan_prompt_does_not_require_exclusive_fact_ownership():
@@ -196,6 +198,64 @@ def test_plan_prompt_includes_prior_concepts_when_supplied():
     payload = json.loads(prompt.split("INPUT JSON:\n", 1)[1])
     assert payload["previously_covered_concepts"] == ["Binary base"]
     assert "same underlying learning point" in prompt
+
+
+def test_concept_plan_prompt_keeps_full_unicode_facts_and_omits_metadata():
+    facts = tuple(
+        GraphFact(
+            f"f{index}",
+            f"測定値 {index}: voltage ΔV is 3.3 V; l’énergie remains exact — Ω.",
+            slides=(index,),
+            topic=f"Topic {index}",
+        )
+        for index in range(1, 51)
+    )
+
+    prompt = build_concept_plan_prompt(ModuleIdentity("ENG101", "2"), facts)
+    payload = json.loads(prompt.split("INPUT JSON:\n", 1)[1])
+
+    assert payload["graph_facts"] == [
+        {"fact_id": fact.fact_id, "statement": fact.statement} for fact in facts
+    ]
+    assert "topic" not in prompt.casefold()
+    assert "slides" not in prompt.casefold()
+    assert len(prompt) < 18_000
+
+
+def test_concept_plan_truncation_retry_is_compact_and_keeps_unicode_evidence():
+    facts = tuple(
+        GraphFact(
+            f"f{index}",
+            f"測定値 {index}: voltage ΔV is 3.3 V; l’énergie remains exact — Ω.",
+            slides=(index,),
+            topic=f"Topic {index}",
+        )
+        for index in range(1, 51)
+    )
+
+    prompt = build_concept_plan_retry_prompt(
+        ModuleIdentity("ENG101", "2"),
+        facts,
+        (),
+        None,
+        ("response was truncated before completing the JSON",),
+    )
+    payload = json.loads(prompt.split("INPUT JSON:\n", 1)[1])
+
+    assert len(payload["graph_facts"]) == 50
+    assert payload["graph_facts"][0]["statement"] == facts[0].statement
+    assert "REJECTED JSON TO CORRECT" not in prompt
+    assert "topic" not in prompt.casefold()
+    assert "slides" not in prompt.casefold()
+    assert len(prompt) < 20_000
+
+
+def test_concept_plan_uses_a_dedicated_short_system_prompt():
+    assert len(CONCEPT_PLAN_SYSTEM_PROMPT) < 700
+    assert "supplied fact statements" in CONCEPT_PLAN_SYSTEM_PROMPT.casefold()
+    assert "invent" in CONCEPT_PLAN_SYSTEM_PROMPT.casefold()
+    assert "json only" in CONCEPT_PLAN_SYSTEM_PROMPT.casefold()
+    assert len(CONCEPT_PLAN_SYSTEM_PROMPT) < len(SYSTEM_PROMPT)
 
 
 def test_cluster_prompt_allows_planned_approaches_in_any_card_order():

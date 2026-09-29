@@ -45,7 +45,7 @@ The assessment_approach label must describe the reasoning actually required by t
 EQUATION-BASED PROBLEM SOLVING
 When the supplied facts contain an equation, formula, numerical relationship, or clearly defined quantities, include problem-solving questions when the selected assessment approach supports them. A problem-solving question may use a realistic, concrete scenario such as selecting a valid value, calculating an outcome, comparing results, or determining what changes when one supported quantity changes. Use only variables, units, relationships, and operations explicitly supplied by the facts; do not introduce outside constants, assumptions, or formulas. State every needed value in the question or supplied facts, use plain-text equation syntax, and ensure the answer follows deterministically from the available information. A scenario must test the equation or relationship, not add decorative context. Do not force a numerical problem when the source does not provide enough information.
 
-Never mention internal generation details or cite the evidence container in a question, answer, explanation, or hint. Do not write phrases such as "fact f13," "concept facts," "provided vocabulary," "already covered subjects," "according to the module," or "as stated in the document." Ordinary subject-matter uses of words such as module, document, file, slide, source, citation, and URL are allowed. Refer to the topic itself, never to where the information appeared.
+Never mention internal generation details or cite the input container in a question, answer, explanation, or hint. Do not write phrases such as "fact f13," "concept facts," "provided vocabulary," "already covered subjects," "according to the module," or "as stated in the document." Ordinary subject-matter uses of words such as module, document, file, slide, source, citation, and URL are allowed. Refer to the topic itself, never to where the information appeared.
 
 ALLOWED TYPES
 Use only multiple-choice, identification, and true-false. Vary the mix of these types from cluster to cluster; do not repeat the same type distribution in every cluster. Every cluster needs at least one multiple-choice, one identification, and one true-false card.
@@ -71,10 +71,10 @@ Identification rules:
 
 True-false rules:
 - Write only a declarative statement in question.
-- Build a true-false decision only from evidence that explicitly asserts a
-  claim. An unresolved question, unanswered choice, or evidence text ending in
+- Build a true-false decision only from a lesson statement that explicitly asserts a
+  claim. An unresolved question, unanswered choice, or lesson statement ending in
   a question mark cannot establish truth or falsity. Never infer is_true from
-  the wording of such material; use different assertive evidence or use a
+  the wording of such material; use a different assertive lesson statement or use a
   multiple-choice or identification card instead.
 - For true-false cards, correct_option, wrong_option_1, wrong_option_2, and wrong_option_3 must ALL be empty strings. The only fields that carry the answer are is_true (0 or 1) and expalanation.
 - Set is_true to integer 1 for true or integer 0 for false.
@@ -396,9 +396,9 @@ def build_cluster_prompt(
     tied to a numbered card position. Do not mislabel a recall or definition
     question merely to force approach coverage.
 
-    EVIDENCE SCOPE
+    LESSON STATEMENT SCOPE
     - Questions, correct answers, explanations, and hints must be supported by
-      evidence.
+      the supplied lesson statements.
     - The five cards must be meaningfully distinct learning checks. They may
       assess the same concept from supported angles, but changing only the card
       type, opening phrase, or one word is not a different question. A negated
@@ -406,7 +406,7 @@ def build_cluster_prompt(
     - Each multiple-choice wrong_option must be plausible, unambiguously
       incorrect, and relevant to the question and subject domain. It must use
       the same semantic category and answer shape as the correct option. A
-      closely related distractor need not appear in the evidence.
+      closely related distractor need not appear in the lesson statements.
     - Exactly one option may satisfy a multiple-choice question; never use
       another supported or arguably correct claim as a wrong option.
     - Never use another valid member of the requested category as a distractor.
@@ -414,7 +414,7 @@ def build_cluster_prompt(
       supported distinguishing property or choose clearly invalid alternatives.
     - Prefer positive questions. Do not use NOT or EXCEPT to make an invented
       claim the correct answer.
-    - When the evidence supplies an equation or numerical relationship, an
+    - When the lesson statements supply an equation or numerical relationship, an
       assigned application or scenario approach may test it using only supplied
       variables, values, units, and operations.
 
@@ -432,7 +432,7 @@ def build_cluster_prompt(
       set is_true to integer 0 or 1.
     - Every question must be clear and end in ? except true-false statements.
       Do not begin with provenance wrappers such as "According to" or "Based on".
-    - Never expose internal generation details, evidence labels, fact IDs, or
+    - Never expose internal generation details, input labels, fact IDs, or
       source-reference wording. Ordinary domain uses of words such as module,
       document, file, slide, source, citation, and URL are allowed.
     - Every expalanation must state the relationship or distinction that makes
@@ -463,13 +463,13 @@ def _cluster_payload(
     distractor_facts: Sequence[GraphFact],
     prior_signals: Sequence[str] = (),
 ) -> dict[str, object]:
-    """Return only card-writing evidence, without model-visible control data."""
+    """Return only card-writing lesson statements and their topic."""
 
     del identity, distractor_facts, prior_signals
     return {
         "topic": concept.name,
         "assessment_approaches": list(concept.assessment_approaches),
-        "evidence": [fact.statement for fact in concept_facts],
+        "lesson_statements": [fact.statement for fact in concept_facts],
     }
 
 
@@ -635,11 +635,11 @@ def build_cluster_retry_prompt(
       period, never an interrogative beginning with Does, Do, Is, Are, Can,
       Could, Should, Would, Will, What, Which, Who, Where, When, Why, or How.
     - Do not infer is_true from an unresolved question, an unanswered choice,
-      or the mere fact that an issue was raised. If the evidence does not
+      or the mere fact that an issue was raised. If the lesson statements do not
       explicitly settle the claim, change this card to multiple-choice or
       identification when another true-false card remains in the cluster.
       Otherwise, replace it with a declarative true-false statement grounded
-      in a different explicit assertion from the evidence.
+      in a different explicit assertion from the lesson statements.
     """
     if candidate is not None:
         try:
@@ -740,7 +740,7 @@ def build_cluster_retry_prompt(
       options, use a closely related plausible term from outside the facts
       rather than paraphrasing correct_option three times.
     - Questions, correct answers, true-false decisions, explanations, and hints
-      must use evidence. Multiple-choice distractors may use a familiar
+      must use the supplied lesson statements. Multiple-choice distractors may use a familiar
       closely related term absent from the facts, but must remain relevant,
       plausible, in the same semantic category, and unambiguously incorrect.
       Exactly one multiple-choice option may satisfy its question.
@@ -751,7 +751,7 @@ def build_cluster_retry_prompt(
       the same concept from supported angles, but do not repeat a question by
       changing only its type, opening phrase, or one word.
     - Remove provenance wording and keep the answer out of identification stems.
-      Never mention fact IDs, evidence labels, prior subjects, or other internal
+      Never mention fact IDs, input labels, prior subjects, or other internal
       generation details. If an error says a question "reveals the
       identification answer", the question text repeats correct_option's
       exact wording (or its abbreviation) somewhere inside it. Rewrite only

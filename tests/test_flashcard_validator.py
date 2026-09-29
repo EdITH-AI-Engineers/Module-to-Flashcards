@@ -186,6 +186,10 @@ def test_cards_parser_rejects_using_distractor_pool_as_answer_authority():
             "Which outcome is supported?",
         ),
         (
+            "According to the evidence, which statement accurately reflects the impact?",
+            "Which statement accurately reflects the impact?",
+        ),
+        (
             "Which outcome is supported according to the source material?",
             "Which outcome is supported?",
         ),
@@ -289,6 +293,7 @@ def test_cards_parser_does_not_partially_strip_possessive_provenance_modifier():
         "Recall the main topic mentioned in the module's description.",
         "Refer to the provided fact about the history of HCI.",
         "This follows, as indicated by the provided facts.",
+        "Consider the evidence's emphasis on role distinctions.",
     ),
 )
 def test_cards_parser_falls_back_instead_of_damaging_provenance_hints(hint):
@@ -323,6 +328,17 @@ def test_cards_parser_removes_a_fact_id_wrapper_without_losing_the_explanation()
     card = parse_cards(json.dumps(payload))[0]
 
     assert card.expalanation == "Binary uses base 2 rather than base 10."
+
+
+def test_cards_parser_removes_an_evidence_wrapper_from_an_explanation():
+    payload = json.loads(cards_json())
+    payload["cards"][0]["expalanation"] = (
+        "The evidence explicitly states that role distinctions impact communication."
+    )
+
+    card = parse_cards(json.dumps(payload))[0]
+
+    assert card.expalanation == "Role distinctions impact communication."
 
 
 @pytest.mark.parametrize(

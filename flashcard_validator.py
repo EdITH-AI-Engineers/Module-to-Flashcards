@@ -49,7 +49,7 @@ BANNED_FRAMING = (
     "Evaluate this statement",
 )
 _PROVENANCE_SOURCE_TERM = (
-    r"(?:knowledge\s+graph|concept\s+facts?|facts?|source(?:\s+material)?|"
+    r"(?:knowledge\s+graph|concept\s+facts?|facts?|evidence|source(?:\s+material)?|"
     r"material|information|text|module(?:\s+content)?|document|lesson|"
     r"slides?|file|chunk|citation|url|definition|vocabulary)"
 )
@@ -60,6 +60,7 @@ PROVENANCE_PATTERNS = (
     r"\b(?:allowed|suggested)[_\s]+wrong[_\s]+option[_\s]+terms\b",
     r"\b(?:already covered subjects|previously covered concepts)\b",
     r"\bprovided vocabulary\b",
+    r"\bthe\s+evidence(?:'s|’s)\s+(?:emphasis|focus|assertion)\b",
     r"\bfact(?:[_\s]+id)?\s*[:#-]?\s*[a-z]\d+\b",
     # Ambiguous words such as module, document, slide, and file are metadata
     # only when they participate in a source-reference construction.

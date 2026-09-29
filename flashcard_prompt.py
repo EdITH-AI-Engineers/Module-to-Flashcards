@@ -87,7 +87,7 @@ Scenario analysis assessment approach rules:
 - Set assessment_approach to "scenario analysis" and never set type to "scenario analysis".
 
 DIRECT STEMS
-For identification, use a natural direct form beginning with What, Which, Who, Where, When, Why, How, or What term. Multiple-choice may use the same direct form or put a concrete context or scenario before the question. Both types must ask a clear, answerable question ending in a question mark. Do not use wrappers such as According to, Based on, The material states, The following claim, Consider this statement, Evaluate this statement, Identify the concept associated with, or equivalents. The framings "Which of the following", "Which best describes", and "Which most accurately" are allowed when they produce a clear, answerable question. Avoid only vague or subjective wording that cannot be resolved from the supplied facts.
+For identification, use a natural direct form beginning with What, Which, Who, Where, When, Why, How, or What term. Multiple-choice may use the same direct form or put a concrete context or scenario before the question. Both types must ask a clear, answerable question ending in a question mark. Do not cite the input container with wrappers such as According to the facts, Based on the material, The material states, The following claim, Consider this statement, Evaluate this statement, Identify the concept associated with, or equivalents. A named theory, law, standard, organization, or subject-matter rule may provide necessary context. The framings "Which of the following", "Which best describes", and "Which most accurately" are allowed when they produce a clear, answerable question. Avoid only vague or subjective wording that cannot be resolved from the supplied facts.
 
 DIFFICULTY
 Use integer 1 only for recall or straightforward understanding. Use integer 2 for interpretation, comparison, classification, application, or distinction. Use integer 3 for analysis, complex application, multi-step reasoning, competing explanations, or an unfamiliar but fully supported scenario.
@@ -431,7 +431,7 @@ def build_cluster_prompt(
     - True-false: use a declarative statement, keep all option fields "", and
       set is_true to integer 0 or 1.
     - Every question must be clear and end in ? except true-false statements.
-      Do not begin with provenance wrappers such as "According to" or "Based on".
+      Do not cite the input with provenance wrappers such as "According to the facts" or "Based on the supplied material". Named subject-matter authorities and rules are allowed when relevant.
     - Never expose internal generation details, input labels, fact IDs, or
       source-reference wording. Ordinary domain uses of words such as module,
       document, file, slide, source, citation, and URL are allowed.
@@ -536,11 +536,12 @@ MANDATORY CORRECTIONS:
   match the question's actual reasoning. Approaches may repeat.
 - For identification, wrong_option_1, wrong_option_2, and wrong_option_3 must be all exactly "".
 - For multiple-choice, the correct option and three wrong options must be four different strings.
-- Rewrite any multiple-choice or identification question that begins with
-  "According to", "Based on", or another wrapper.
+- Rewrite any multiple-choice or identification question that cites the input
+  through a wrapper such as "According to the supplied facts" or "Based on the
+  material". Preserve relevant named subject-matter authorities and rules.
 - Identification must begin directly with What, Which, Who, Where, When, Why, or How. Multiple-choice may instead begin with a concrete context or scenario and then ask the question.
 - Example:
-  Invalid: "According to the design rules, which measure assesses effectiveness?"
+  Invalid: "According to the supplied facts, which measure assesses effectiveness?"
   Valid: "Which measure assesses effectiveness?"
 - Preserve valid cards.
 - Return a complete replacement as the full cards JSON only.

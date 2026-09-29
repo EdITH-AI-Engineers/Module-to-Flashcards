@@ -374,6 +374,50 @@ def test_cards_parser_removes_complete_lesson_statement_wrappers(
 
 
 @pytest.mark.parametrize(
+    ("explanation", "expected"),
+    (
+        (
+            "The term 'social process' is defined in the facts as the patterns "
+            "of interaction and relationships within society.",
+            "The term 'social process' is defined as the patterns of interaction "
+            "and relationships within society.",
+        ),
+        (
+            "This statement is true as the facts state that social process is "
+            "defined by UNESCO in this manner.",
+            "This statement is true because social process is defined by UNESCO "
+            "in this manner.",
+        ),
+        (
+            "This statement is false because the facts define social process as "
+            "a method for analyzing structures.",
+            "This statement is false because social process is defined as a method "
+            "for analyzing structures.",
+        ),
+        (
+            "The answer aligns with the definition provided in the facts, which "
+            "emphasizes relationships within society.",
+            "The answer aligns with the definition which emphasizes relationships "
+            "within society.",
+        ),
+    ),
+)
+def test_cards_parser_rewrites_inline_fact_container_clauses(
+    explanation, expected
+):
+    payload = json.loads(cards_json())
+    payload["cards"][0]["expalanation"] = explanation
+
+    cards = parse_cards(json.dumps(payload))
+
+    assert cards[0].expalanation == expected
+    assert not any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in validate_cluster(cards, valid_concept())
+    )
+
+
+@pytest.mark.parametrize(
     "explanation",
     (
         "While HCI involves several disciplines, the provided fact emphasizes its interdisciplinary nature.",
@@ -681,13 +725,13 @@ def test_multiple_choice_accepts_nonleading_according_to_wording():
         "Based on the design rules, which measure applies?",
     ),
 )
-def test_multiple_choice_rejects_leading_wrapper_phrases(question):
+def test_multiple_choice_allows_leading_subject_matter_context(question):
     values = list(valid_cards())
     values[0] = replace(values[0], question=question)
 
     errors = validate_cluster(tuple(values), valid_concept())
 
-    assert "card 1 question contains banned framing" in errors
+    assert "card 1 question contains banned framing" not in errors
 
 
 def test_context_first_multiple_choice_requires_a_question_mark():
@@ -763,8 +807,16 @@ def test_scenario_analysis_label_does_not_require_a_scenario_template():
     (
         "To document a program",
         "A software module exposes a public interface",
+        "A software module's content is loaded lazily",
         "A file stores the records",
         "A slide mechanism controls the position",
+        "The alloy is selected based on material properties",
+        "Entropy is defined in information theory as a measure of uncertainty",
+        "The parser behaves differently based on source code semantics",
+        "The record is found in document databases",
+        "The result follows from the definition of continuity",
+        "Access changes based on file permissions",
+        "The conclusion follows from evidence collected at the scene",
     ),
 )
 def test_cluster_allows_domain_uses_of_words_that_can_also_name_sources(
@@ -779,6 +831,40 @@ def test_cluster_allows_domain_uses_of_words_that_can_also_name_sources(
         "card 1" in error and "exposes provenance metadata" in error
         for error in errors
     )
+
+
+def test_cluster_allows_named_subject_matter_attribution():
+    values = list(valid_cards())
+    values[2] = replace(
+        values[2],
+        question=(
+            "Social process is defined by UNESCO as patterns of interaction "
+            "among individuals and groups."
+        ),
+        expalanation=(
+            "UNESCO's definition emphasizes interaction and relationships "
+            "within society."
+        ),
+    )
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert not any(
+        "card 3" in error and "exposes provenance metadata" in error
+        for error in errors
+    )
+
+
+def test_banned_framing_requires_a_complete_phrase_not_a_word_prefix():
+    values = list(valid_cards())
+    values[0] = replace(
+        values[0],
+        question="Which law protects the following claimant?",
+    )
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert "card 1 question contains banned framing" not in errors
 
 
 @pytest.mark.parametrize(

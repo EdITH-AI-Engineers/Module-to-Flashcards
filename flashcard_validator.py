@@ -37,22 +37,36 @@ ALLOWED_APPROACHES = {
     "consequences",
     "reversed reasoning",
 }
-BANNED_FRAMING = (
-    "This statement accurately describes",
-    "The following claim",
-    "According to the graph",
-    "According to the material",
-    "Based on the material",
-    "The material/module/lesson/document states",
-    "Identify the concept associated with",
-    "Consider the following statement",
-    "Evaluate this statement",
+_BANNED_FRAMING_PATTERNS = (
+    re.compile(r"\bthis\s+statement\s+accurately\s+describes\b", re.I),
+    re.compile(r"\bthe\s+following\s+claim\b", re.I),
+    re.compile(r"\baccording\s+to\s+the\s+(?:graph|material)\b", re.I),
+    re.compile(r"\bbased\s+on\s+the\s+material\b", re.I),
+    re.compile(
+        r"\bthe\s+(?:material|module|lesson|document)\s+states\b", re.I
+    ),
+    re.compile(r"\bidentify\s+the\s+concept\s+associated\s+with\b", re.I),
+    re.compile(r"\bconsider\s+the\s+following\s+statement\b", re.I),
+    re.compile(r"\bevaluate\s+this\s+statement\b", re.I),
 )
 _PROVENANCE_SOURCE_TERM = (
     r"(?:knowledge\s+graph|concept\s+facts?|facts?|evidence|source(?:\s+material)?|"
     r"material|information|text|module(?:\s+content)?|document|"
     r"lesson\s+statements?|lesson|"
     r"slides?|file|chunk|citation|url|definition|vocabulary)"
+)
+_PROVENANCE_QUALIFIER = r"(?:provided|supplied|given)"
+_PROVENANCE_REFERENCE_END = r"(?=\s*[,?.!]|$)"
+_QUALIFIED_PROVENANCE_REFERENCE_END = (
+    r"(?=\s*[,?.!]|$|\s+(?:about|for|of|that|which)\b)"
+)
+# A source-like noun is metadata only when it is a complete reference. This
+# deliberately does not match prefixes of domain phrases such as "information
+# theory", "material properties", "source code", or "document database".
+_PROVENANCE_SOURCE_REFERENCE = (
+    rf"(?:{_PROVENANCE_QUALIFIER}\s+{_PROVENANCE_SOURCE_TERM}"
+    rf"{_QUALIFIED_PROVENANCE_REFERENCE_END}|"
+    rf"{_PROVENANCE_SOURCE_TERM}{_PROVENANCE_REFERENCE_END})"
 )
 PROVENANCE_PATTERNS = (
     # Internal field/control names are never educational content.
@@ -66,28 +80,33 @@ PROVENANCE_PATTERNS = (
     # Ambiguous words such as module, document, slide, and file are metadata
     # only when they participate in a source-reference construction.
     rf"\b(?:according\s+to|based\s+on)\s+(?:the\s+)?"
-    rf"(?:(?:provided|supplied|given)\s+)?{_PROVENANCE_SOURCE_TERM}\b",
+    rf"{_PROVENANCE_SOURCE_REFERENCE}",
     rf"\bas\s+(?:stated|described|noted|shown|mentioned)\s+in\s+"
-    rf"(?:the\s+)?(?:(?:provided|supplied|given)\s+)?"
-    rf"{_PROVENANCE_SOURCE_TERM}\b",
-    rf"\b(?:provided|supplied|given)\s+"
+    rf"(?:the\s+)?{_PROVENANCE_SOURCE_REFERENCE}",
+    rf"\b{_PROVENANCE_QUALIFIER}\s+"
     rf"(?:facts?|material|information|text|source(?:\s+material)?|"
-    rf"definition|vocabulary)\b",
+    rf"definition|vocabulary){_QUALIFIED_PROVENANCE_REFERENCE_END}",
     rf"\b(?:appears?|found|listed|included|defined|described|mentioned|"
     rf"discussed|presented|introduced|covered|stated|shown)\s+(?:only\s+)?"
-    rf"(?:in|by)\s+(?:the\s+)?(?:(?:provided|supplied|given)\s+)?"
-    rf"{_PROVENANCE_SOURCE_TERM}\b",
+    rf"(?:in|by)\s+(?:the\s+)?{_PROVENANCE_SOURCE_REFERENCE}",
+    rf"\b(?:defined|described|presented)\s+in\s+(?:the\s+)?"
+    rf"(?:(?:{_PROVENANCE_QUALIFIER}\s+)?{_PROVENANCE_SOURCE_TERM})\b"
+    rf"(?=\s+as\b)",
     rf"\b(?:follows?|comes?)\s+from\s+(?:the\s+)?"
-    rf"(?:(?:provided|supplied|given)\s+)?{_PROVENANCE_SOURCE_TERM}\b",
-    rf"\b(?:the\s+)?(?:source|document|lesson|slides?|facts?|"
-    rf"knowledge\s+graph)\s+(?:explicitly\s+)?"
+    rf"{_PROVENANCE_SOURCE_REFERENCE}",
+    rf"\b(?:the\s+)?(?:{_PROVENANCE_QUALIFIER}\s+)?"
+    rf"(?:source|document|lesson|slides?|facts?|knowledge\s+graph)\s+"
+    rf"(?:explicitly\s+)?"
     rf"(?:states?|says?|explains?|describes?|notes?|indicates?|mentions?|"
-    rf"shows?|confirms?)\b",
-    r"\b(?:the\s+)?module(?:'s|’s)\s+"
+    rf"shows?|confirms?|emphasizes?)\b",
+    r"\b(?:mentioned|discussed|described|defined|presented|introduced|covered)"
+    r"\s+in\s+(?:the\s+)?module(?:'s|’s)\s+"
     r"(?:content|description|focus|overview|title|heading)\b",
+    r"\b(?:this\s+module|(?:the\s+)?(?:provided|course|lesson)\s+module)"
+    r"(?:'s|’s)\s+(?:content|description|focus|overview|title|heading)\b",
+    r"\b(?:the\s+)?module(?:'s|’s)\s+(?:focus|overview|title|heading)\b",
 )
 DIRECT_STEM = re.compile(r"^(what(?:\s+term)?|which|who|where|when|why|how)\b", re.I)
-LEADING_WRAPPER = re.compile(r"^(according to|based on)\b", re.I)
 GENERIC_EXPLANATION = re.compile(
     r"^(?:.+?\s+is\s+the\s+correct\s+answer(?:\s+here)?|"
     r"this\s+is\s+the\s+correct\s+answer(?:\s+for\s+this\s+question)?|"
@@ -614,6 +633,12 @@ def _contains_provenance(value: str) -> bool:
     return _provenance_trigger(value) is not None
 
 
+def _contains_banned_framing(value: str) -> bool:
+    return any(
+        pattern.search(value) is not None for pattern in _BANNED_FRAMING_PATTERNS
+    )
+
+
 # Narrower than PROVENANCE_PATTERNS/_contains_provenance on purpose. That
 # check is tuned to catch an LLM narrating where a *card's* claim came from
 # ("as stated in the provided facts") and includes common English words
@@ -648,7 +673,7 @@ def _contains_metadata_artifact(value: str) -> bool:
     )
 
 
-_PROVENANCE_SOURCE = r"(?:(?:provided|supplied|given)\s+)?" + _PROVENANCE_SOURCE_TERM
+_PROVENANCE_SOURCE = rf"(?:{_PROVENANCE_QUALIFIER}\s+)?{_PROVENANCE_SOURCE_TERM}"
 _EXPLICIT_STATED_AS_RE = re.compile(
     r"\bis\s+explicitly\s+stated\s+as\s+(.+?)\s+in\s+the\s+(?:provided|supplied)\s+facts?\b",
     re.I,
@@ -673,26 +698,58 @@ _LEADING_FACT_ID_ASSERTION_RE = re.compile(
     r"shows?|confirms?)\s+(?:that\s+|:\s*)",
     re.I,
 )
+_COPULAR_PROVENANCE_CONTEXT_RE = re.compile(
+    rf"\b(?P<copula>is|are|was|were)\s+"
+    rf"(?P<verb>defined|described|presented)\s+in\s+(?:the\s+)?"
+    rf"{_PROVENANCE_SOURCE}\b\s+as\b",
+    re.I,
+)
+_INLINE_PROVENANCE_ASSERTION_RE = re.compile(
+    rf"\b(?:as|because|since)\s+(?:the\s+)?{_PROVENANCE_SOURCE}\s+"
+    rf"(?:explicitly\s+)?(?:states?|says?|explains?|describes?|notes?|"
+    rf"indicates?|mentions?|shows?|confirms?)\s+that\s+",
+    re.I,
+)
+_INLINE_FACT_DEFINITION_RE = re.compile(
+    rf"\b(?:as|because|since)\s+(?:the\s+)?"
+    rf"(?:{_PROVENANCE_QUALIFIER}\s+)?facts?\s+"
+    rf"(?:define|defines|describe|describes)\s+"
+    rf"(?P<subject>[^,.!?]+?)\s+as\s+",
+    re.I,
+)
+_RELATIVE_MODULE_PROVENANCE_RE = re.compile(
+    r"\s+(?:that|which)\s+(?:is|are|was|were)\s+"
+    r"(?:mentioned|discussed|described|defined|presented|introduced|covered)"
+    r"\s+in\s+(?:the\s+)?module\b\s*",
+    re.I,
+)
+_INLINE_MODULE_PROVENANCE_RE = re.compile(
+    r"\s+(?:mentioned|discussed|described|defined|presented|introduced|covered)"
+    r"\s+in\s+the\s+module\b"
+    r"(?=\s+(?:applies?|guides?|determines?|supports?|means?|refers?|"
+    r"is|are|was|were|has|have|can|will|does|do)\b)\s*",
+    re.I,
+)
 _PROVENANCE_MODIFIER_RE = re.compile(
     rf"(?:"
     rf"\s+(?:that|which)\s+(?:is|are|was|were)\s+|"
     rf",\s*(?:as\s+)?|\s+as\s+"
     rf")"
-    rf"(?:mentioned|discussed|described|defined|presented|introduced|covered)"
-    rf"\s+in\s+(?:the\s+)?{_PROVENANCE_SOURCE}\b"
-    rf"(?!['’]s\b)\s*,?",
+    rf"(?:mentioned|discussed|described|defined|presented|introduced|covered|"
+    rf"provided)\s+in\s+(?:the\s+)?{_PROVENANCE_SOURCE_REFERENCE}"
+    rf"\s*,?",
     re.I,
 )
 _BARE_PROVENANCE_MODIFIER_RE = re.compile(
-    rf"\s+(?:mentioned|discussed|described|defined|presented|introduced|covered)"
-    rf"\s+in\s+(?:the\s+)?{_PROVENANCE_SOURCE}\b"
-    rf"(?!['’]s\b)\s*,?",
+    rf"\s+(?:mentioned|discussed|described|defined|presented|introduced|covered|"
+    rf"provided)\s+in\s+(?:the\s+)?{_PROVENANCE_SOURCE_REFERENCE}"
+    rf"\s*,?",
     re.I,
 )
 _PROVENANCE_WRAPPER_RE = re.compile(
     rf",?\s*(?:(?:according\s+to|based\s+on)\s+(?:the\s+)?"
-    rf"{_PROVENANCE_SOURCE}|as\s+(?:stated|described)\s+in\s+"
-    rf"(?:the\s+)?{_PROVENANCE_SOURCE})\b(?=\s*[,?.!]|$),?\s*",
+    rf"{_PROVENANCE_SOURCE_REFERENCE}|as\s+(?:stated|described)\s+in\s+"
+    rf"(?:the\s+)?{_PROVENANCE_SOURCE_REFERENCE}),?\s*",
     re.I,
 )
 
@@ -715,6 +772,17 @@ def _strip_citation_phrasing(text: str) -> str:
     text = _LEADING_FACTS_STATE_RE.sub("", text)
     text = _LEADING_PROVENANCE_ASSERTION_RE.sub("", text)
     text = _LEADING_FACT_ID_ASSERTION_RE.sub("", text)
+    text = _COPULAR_PROVENANCE_CONTEXT_RE.sub(
+        lambda match: f"{match.group('copula')} {match.group('verb')} as",
+        text,
+    )
+    text = _INLINE_PROVENANCE_ASSERTION_RE.sub("because ", text)
+    text = _INLINE_FACT_DEFINITION_RE.sub(
+        lambda match: f"because {match.group('subject').strip()} is defined as ",
+        text,
+    )
+    text = _RELATIVE_MODULE_PROVENANCE_RE.sub(" ", text)
+    text = _INLINE_MODULE_PROVENANCE_RE.sub(" ", text)
     text = _PROVENANCE_MODIFIER_RE.sub(" ", text)
     search_from = 0
     while modifier := _BARE_PROVENANCE_MODIFIER_RE.search(text, search_from):
@@ -830,9 +898,7 @@ def validate_cluster(
             errors.append(f"{prefix} assessment approach must not be empty")
         if any("\n" in value or "\r" in value for value in _text_fields(card)):
             errors.append(f"{prefix} fields must not contain line breaks")
-        if LEADING_WRAPPER.match(card.question.strip()) or any(
-            phrase.casefold() in card.question.casefold() for phrase in BANNED_FRAMING
-        ):
+        if _contains_banned_framing(card.question):
             errors.append(f"{prefix} question contains banned framing")
         for field, value in _named_text_fields(card):
             trigger = _provenance_trigger(value) if value else None
@@ -989,9 +1055,14 @@ _QUESTION_FRAME_TOKENS = {
 
 
 def _question_content_tokens(value: str) -> tuple[str, ...]:
+    # Keep operators and identifier punctuation attached so mathematically or
+    # technically different questions do not collapse to the same words (for
+    # example x+1 vs x-1, C++ vs C#, and Na+ vs Na-).
+    surface = _canonical_option(_expand_negative_contractions(value))
+    surface = re.sub(r"[.!?,;'\"`]", " ", surface)
     return tuple(
         _stem(token)
-        for token in normalize_stem(_expand_negative_contractions(value)).split()
+        for token in surface.split()
         if token not in _QUESTION_FRAME_TOKENS and token not in _NEGATION_TOKENS
     )
 
@@ -1024,7 +1095,11 @@ def are_near_duplicates(left: str, right: str) -> bool:
     same fact are fine as long as they are worded differently. Questions whose
     negation differs (NOT / EXCEPT / least / most) are never duplicates.
     """
-    if normalize_stem(left) == normalize_stem(right):
+    left_surface = _canonical_option(_expand_negative_contractions(left))
+    right_surface = _canonical_option(_expand_negative_contractions(right))
+    left_surface = re.sub(r"[.!?,;'\"`]", " ", left_surface)
+    right_surface = re.sub(r"[.!?,;'\"`]", " ", right_surface)
+    if " ".join(left_surface.split()) == " ".join(right_surface.split()):
         return True
     if _negation_markers(left) != _negation_markers(right):
         return False

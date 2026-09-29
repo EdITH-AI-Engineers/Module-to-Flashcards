@@ -30,6 +30,25 @@ def test_near_duplicate_does_not_confuse_a_substantive_term_substitution():
     )
 
 
+@pytest.mark.parametrize(
+    ("left", "right"),
+    (
+        ("What value results from x+1?", "What value results from x-1?"),
+        ("Which language uses C++?", "Which language uses C#?"),
+        ("Which ion is Na+?", "Which ion is Na-?"),
+    ),
+)
+def test_near_duplicate_preserves_meaningful_technical_symbols(left, right):
+    assert not are_near_duplicates(left, right)
+
+
+def test_near_duplicate_normalizes_spacing_around_technical_symbols():
+    assert are_near_duplicates(
+        "What value results from x + 1?",
+        "What value results from x+1?",
+    )
+
+
 def test_near_duplicate_ignores_question_word_variation_for_the_same_content():
     assert are_near_duplicates(
         "Which number system uses base 2 to represent digital values?",

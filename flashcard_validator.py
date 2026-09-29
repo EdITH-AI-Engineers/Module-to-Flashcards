@@ -700,8 +700,17 @@ _LEADING_FACT_ID_ASSERTION_RE = re.compile(
 )
 _COPULAR_PROVENANCE_CONTEXT_RE = re.compile(
     rf"\b(?P<copula>is|are|was|were)\s+"
+    rf"(?:directly\s+|explicitly\s+|clearly\s+)?"
     rf"(?P<verb>defined|described|presented)\s+in\s+(?:the\s+)?"
     rf"{_PROVENANCE_SOURCE}\b\s+as\b",
+    re.I,
+)
+_ANSWER_CITATION_WITH_TAIL_RE = re.compile(
+    rf"^\s*(?:the\s+)?(?:correct\s+)?answer\s+is\s+"
+    rf"(?:directly\s+|explicitly\s+|clearly\s+)?"
+    rf"(?:stated|supported|confirmed|described)\s+in\s+(?:the\s+)?"
+    rf"{_PROVENANCE_SOURCE}\b\s*,\s*"
+    rf"(?:highlighting|showing|indicating|confirming)\s+(?:that|how)\s+",
     re.I,
 )
 _INLINE_PROVENANCE_ASSERTION_RE = re.compile(
@@ -746,12 +755,38 @@ _BARE_PROVENANCE_MODIFIER_RE = re.compile(
     rf"\s*,?",
     re.I,
 )
+_FACT_PROVENANCE_MODIFIER_RE = re.compile(
+    rf"\s+(?:mentioned|discussed|described|defined|presented|introduced|covered|"
+    rf"provided|stated|shown)\s+in\s+(?:the\s+)?"
+    rf"(?:{_PROVENANCE_QUALIFIER}\s+)?facts?\b",
+    re.I,
+)
 _PROVENANCE_WRAPPER_RE = re.compile(
     rf",?\s*(?:(?:according\s+to|based\s+on)\s+(?:the\s+)?"
     rf"{_PROVENANCE_SOURCE_REFERENCE}|as\s+(?:stated|described)\s+in\s+"
     rf"(?:the\s+)?{_PROVENANCE_SOURCE_REFERENCE}),?\s*",
     re.I,
 )
+
+
+def _strip_safe_provenance_modifiers(text: str, pattern: re.Pattern[str]) -> str:
+    """Remove source modifiers without deleting a sentence's predicate."""
+
+    search_from = 0
+    while modifier := pattern.search(text, search_from):
+        prefix = text[: modifier.start()]
+        # In "X is directly mentioned in the fact", the matched words are
+        # the predicate; deleting them would leave "X is directly".
+        if re.search(
+            r"\b(?:is|are|was|were|been|being)(?:\s+[a-z]+ly)?\s*$",
+            prefix,
+            flags=re.I,
+        ):
+            search_from = modifier.end()
+            continue
+        text = text[: modifier.start()] + " " + text[modifier.end() :]
+        search_from = modifier.start() + 1
+    return text
 
 
 def _strip_citation_phrasing(text: str) -> str:
@@ -772,6 +807,7 @@ def _strip_citation_phrasing(text: str) -> str:
     text = _LEADING_FACTS_STATE_RE.sub("", text)
     text = _LEADING_PROVENANCE_ASSERTION_RE.sub("", text)
     text = _LEADING_FACT_ID_ASSERTION_RE.sub("", text)
+    text = _ANSWER_CITATION_WITH_TAIL_RE.sub("", text)
     text = _COPULAR_PROVENANCE_CONTEXT_RE.sub(
         lambda match: f"{match.group('copula')} {match.group('verb')} as",
         text,
@@ -784,22 +820,8 @@ def _strip_citation_phrasing(text: str) -> str:
     text = _RELATIVE_MODULE_PROVENANCE_RE.sub(" ", text)
     text = _INLINE_MODULE_PROVENANCE_RE.sub(" ", text)
     text = _PROVENANCE_MODIFIER_RE.sub(" ", text)
-    search_from = 0
-    while modifier := _BARE_PROVENANCE_MODIFIER_RE.search(text, search_from):
-        prefix = text[: modifier.start()]
-        # In "X is directly mentioned in the fact", the matched words are
-        # the sentence's predicate; deleting them would leave "X is directly".
-        # Only remove a source modifier when it follows a complete noun phrase
-        # or clause instead of a copula (optionally + adverb).
-        if re.search(
-            r"\b(?:is|are|was|were|been|being)(?:\s+[a-z]+ly)?\s*$",
-            prefix,
-            flags=re.I,
-        ):
-            search_from = modifier.end()
-            continue
-        text = text[: modifier.start()] + " " + text[modifier.end() :]
-        search_from = modifier.start() + 1
+    text = _strip_safe_provenance_modifiers(text, _FACT_PROVENANCE_MODIFIER_RE)
+    text = _strip_safe_provenance_modifiers(text, _BARE_PROVENANCE_MODIFIER_RE)
     text = _PROVENANCE_WRAPPER_RE.sub(" ", text)
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"\s+([.,?!])", r"\1", text)

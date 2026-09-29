@@ -383,6 +383,19 @@ def test_cards_parser_removes_complete_lesson_statement_wrappers(
             "and relationships within society.",
         ),
         (
+            "The term 'globalization' is explicitly defined in the facts as the "
+            "process linking goods and capital markets across countries.",
+            "The term 'globalization' is defined as the process linking goods and "
+            "capital markets across countries.",
+        ),
+        (
+            "The correct answer is directly stated in the facts, highlighting how "
+            "globalization facilitates international investments and their positive "
+            "effects on technology and production sectors.",
+            "Globalization facilitates international investments and their positive "
+            "effects on technology and production sectors.",
+        ),
+        (
             "This statement is true as the facts state that social process is "
             "defined by UNESCO in this manner.",
             "This statement is true because social process is defined by UNESCO "
@@ -397,7 +410,7 @@ def test_cards_parser_removes_complete_lesson_statement_wrappers(
         (
             "The answer aligns with the definition provided in the facts, which "
             "emphasizes relationships within society.",
-            "The answer aligns with the definition which emphasizes relationships "
+            "The answer aligns with the definition, which emphasizes relationships "
             "within society.",
         ),
     ),
@@ -411,6 +424,33 @@ def test_cards_parser_rewrites_inline_fact_container_clauses(
     cards = parse_cards(json.dumps(payload))
 
     assert cards[0].expalanation == expected
+    assert not any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in validate_cluster(cards, valid_concept())
+    )
+
+
+@pytest.mark.parametrize(
+    ("hint", "expected"),
+    (
+        (
+            "Consider the positive outcomes mentioned in the facts related to "
+            "technology and production.",
+            "Consider the positive outcomes related to technology and production.",
+        ),
+        (
+            "Recall the definition provided in the facts about the linking of markets.",
+            "Recall the definition about the linking of markets.",
+        ),
+    ),
+)
+def test_cards_parser_removes_fact_container_modifiers_from_hints(hint, expected):
+    payload = json.loads(cards_json())
+    payload["cards"][0]["hint"] = hint
+
+    cards = parse_cards(json.dumps(payload))
+
+    assert cards[0].hint == expected
     assert not any(
         "card 1" in error and "exposes provenance metadata" in error
         for error in validate_cluster(cards, valid_concept())

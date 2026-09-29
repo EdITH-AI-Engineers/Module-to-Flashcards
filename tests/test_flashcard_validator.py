@@ -226,8 +226,9 @@ def test_cards_parser_removes_generic_provenance_wrappers(question, expected):
     cards = parse_cards(json.dumps(payload))
 
     assert cards[0].question == expected
-    assert "card 1 exposes provenance metadata" not in validate_cluster(
-        cards, valid_concept()
+    assert not any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in validate_cluster(cards, valid_concept())
     )
 
 
@@ -275,8 +276,9 @@ def test_cards_parser_does_not_partially_strip_possessive_provenance_modifier():
     cards = parse_cards(json.dumps(payload))
 
     assert cards[0].question == question
-    assert "card 1 exposes provenance metadata" in validate_cluster(
-        cards, valid_concept()
+    assert any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in validate_cluster(cards, valid_concept())
     )
 
 
@@ -324,6 +326,48 @@ def test_cards_parser_removes_a_fact_id_wrapper_without_losing_the_explanation()
 
 
 @pytest.mark.parametrize(
+    ("explanation", "correct_option", "expected"),
+    (
+        (
+            "The correct answer directly quotes the supplied material, which "
+            "defines phase coupling as synchronized phase behavior.",
+            "Synchronized phase behavior",
+            "Phase coupling is synchronized phase behavior.",
+        ),
+        (
+            "The term is directly defined in the given information as a "
+            "process that converts input into output.",
+            "Transformation",
+            "Transformation is a process that converts input into output.",
+        ),
+        (
+            "The correct answer directly quotes the provided fact, which "
+            "defines a stepwise method as requiring every action to be "
+            "specified.",
+            "A stepwise method",
+            "A stepwise method is characterized by requiring every action "
+            "to be specified.",
+        ),
+    ),
+)
+def test_cards_parser_rewrites_source_definition_explanations_without_domain_rules(
+    explanation,
+    correct_option,
+    expected,
+):
+    payload = json.loads(cards_json())
+    payload["cards"][0]["expalanation"] = explanation
+    payload["cards"][0]["correct_option"] = correct_option
+
+    card = parse_cards(json.dumps(payload))[0]
+
+    assert card.expalanation == expected
+    assert "provided" not in card.expalanation.casefold()
+    assert "supplied" not in card.expalanation.casefold()
+    assert "given information" not in card.expalanation.casefold()
+
+
+@pytest.mark.parametrize(
     "explanation",
     (
         "While HCI involves several disciplines, the provided fact emphasizes its interdisciplinary nature.",
@@ -339,8 +383,9 @@ def test_cards_parser_preserves_unsafe_explanations_for_validation_retry(
     card = parse_cards(json.dumps(payload))[0]
 
     assert card.expalanation == explanation
-    assert "card 1 exposes provenance metadata" in validate_cluster(
-        (card, *valid_cards()[1:]), valid_concept()
+    assert any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in validate_cluster((card, *valid_cards()[1:]), valid_concept())
     )
     assert "correct answer here" not in card.expalanation
 
@@ -381,7 +426,47 @@ def test_cluster_rejects_unwrapped_provenance_language(question):
 
     errors = validate_cluster(cards, valid_concept())
 
-    assert "card 1 exposes provenance metadata" in errors
+    assert any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in errors
+    )
+
+
+def test_provenance_error_names_the_field_and_exact_trigger_phrase():
+    values = list(valid_cards())
+    values[0] = replace(
+        values[0],
+        expalanation=(
+            "The result follows from the provided vocabulary without "
+            "explaining the relationship."
+        ),
+    )
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert (
+        'card 1 expalanation exposes provenance metadata; triggering phrase '
+        '"provided vocabulary"'
+    ) in errors
+
+
+def test_answer_leak_errors_name_the_exact_answer_phrase():
+    values = list(valid_cards())
+    values[1] = replace(
+        values[1],
+        question="What term is Binary?",
+        hint="The answer is Binary.",
+    )
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert (
+        'card 2 question reveals the identification answer; triggering phrase '
+        '"Binary"'
+    ) in errors
+    assert (
+        'card 2 hint reveals the correct answer; triggering phrase "Binary"'
+    ) in errors
 
 
 def test_cards_parser_rejects_boolean_true_false_value():
@@ -721,7 +806,10 @@ def test_cluster_allows_domain_uses_of_words_that_can_also_name_sources(
 
     errors = validate_cluster(tuple(values), valid_concept())
 
-    assert "card 1 exposes provenance metadata" not in errors
+    assert not any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in errors
+    )
 
 
 @pytest.mark.parametrize(
@@ -740,7 +828,10 @@ def test_cluster_rejects_internal_generation_metadata(question):
 
     errors = validate_cluster(tuple(values), valid_concept())
 
-    assert "card 1 exposes provenance metadata" in errors
+    assert any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in errors
+    )
 
 
 def test_scenario_analysis_accepts_researcher_observing_users():
@@ -899,8 +990,13 @@ def test_short_identifier_does_not_leak_through_letters_inside_words():
 
     errors = validate_cluster(tuple(values), valid_concept())
 
-    assert "card 2 question reveals the identification answer" not in errors
-    assert "card 2 hint reveals the correct answer" not in errors
+    assert not any(
+        "card 2 question reveals the identification answer" in error
+        for error in errors
+    )
+    assert not any(
+        "card 2 hint reveals the correct answer" in error for error in errors
+    )
 
 
 @pytest.mark.parametrize(
@@ -924,8 +1020,13 @@ def test_answer_leakage_still_detects_complete_identifiers_and_expressions(
 
     errors = validate_cluster(tuple(values), valid_concept())
 
-    assert "card 2 question reveals the identification answer" in errors
-    assert "card 2 hint reveals the correct answer" in errors
+    assert any(
+        "card 2 question reveals the identification answer" in error
+        for error in errors
+    )
+    assert any(
+        "card 2 hint reveals the correct answer" in error for error in errors
+    )
 
 
 @pytest.mark.parametrize("phrase", ("concept fact", "distractor pool"))
@@ -938,7 +1039,10 @@ def test_cluster_rejects_internal_evidence_labels(phrase):
 
     errors = validate_cluster(tuple(values), valid_concept())
 
-    assert "card 1 exposes provenance metadata" in errors
+    assert any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in errors
+    )
 
 
 def test_cluster_rejects_blank_assessment_approach():

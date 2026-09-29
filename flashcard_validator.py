@@ -584,20 +584,32 @@ def parse_cards(raw: str) -> tuple[FlashcardDraft, ...]:
     return tuple(results)
 
 
-def _text_fields(card: FlashcardDraft) -> tuple[str, ...]:
+def _named_text_fields(card: FlashcardDraft) -> tuple[tuple[str, str], ...]:
     return (
-        card.question,
-        card.correct_option,
-        card.wrong_option_1,
-        card.wrong_option_2,
-        card.wrong_option_3,
-        card.expalanation,
-        card.hint,
+        ("question", card.question),
+        ("correct_option", card.correct_option),
+        ("wrong_option_1", card.wrong_option_1),
+        ("wrong_option_2", card.wrong_option_2),
+        ("wrong_option_3", card.wrong_option_3),
+        ("expalanation", card.expalanation),
+        ("hint", card.hint),
     )
 
 
+def _text_fields(card: FlashcardDraft) -> tuple[str, ...]:
+    return tuple(value for _field, value in _named_text_fields(card))
+
+
+def _provenance_trigger(value: str) -> str | None:
+    for pattern in PROVENANCE_PATTERNS:
+        match = re.search(pattern, value, flags=re.I)
+        if match is not None:
+            return match.group(0)
+    return None
+
+
 def _contains_provenance(value: str) -> bool:
-    return any(re.search(pattern, value, flags=re.I) for pattern in PROVENANCE_PATTERNS)
+    return _provenance_trigger(value) is not None
 
 
 # Narrower than PROVENANCE_PATTERNS/_contains_provenance on purpose. That
@@ -635,6 +647,19 @@ def _contains_metadata_artifact(value: str) -> bool:
 
 
 _PROVENANCE_SOURCE = r"(?:(?:provided|supplied|given)\s+)?" + _PROVENANCE_SOURCE_TERM
+_QUOTED_SOURCE_DEFINITION_RE = re.compile(
+    rf"^\s*(?:the\s+)?(?:correct\s+answer|answer)\s+"
+    rf"(?:directly\s+)?(?:quotes?|repeats?|restates?)\s+(?:the\s+)?"
+    rf"{_PROVENANCE_SOURCE}\s*,?\s*which\s+"
+    rf"(?:defines?|describes?)\s+(.+?)\s+as\s+(.+?)[.!]?\s*$",
+    re.I,
+)
+_TERM_SOURCE_DEFINITION_RE = re.compile(
+    rf"^\s*(?:the\s+)?(?:term|concept|answer)\s+is\s+"
+    rf"(?:directly\s+)?(?:defined|described|presented)\s+in\s+"
+    rf"(?:the\s+)?{_PROVENANCE_SOURCE}\s+as\s+(.+?)[.!]?\s*$",
+    re.I,
+)
 _EXPLICIT_STATED_AS_RE = re.compile(
     r"\bis\s+explicitly\s+stated\s+as\s+(.+?)\s+in\s+the\s+(?:provided|supplied)\s+facts?\b",
     re.I,
@@ -730,11 +755,31 @@ def _strip_citation_phrasing(text: str) -> str:
     return text
 
 
+def _definition_statement(subject: str, description: str) -> str:
+    subject = subject.strip()
+    description = description.strip().rstrip(".!?")
+    connector = (
+        "is characterized by"
+        if re.match(r"^[A-Za-z]+ing\b", description)
+        else "is"
+    )
+    result = f"{subject} {connector} {description}."
+    return result[0].upper() + result[1:]
+
+
 def _sanitize_explanation(
     text: str, card_type: str, correct_option: str, is_true: int | None
 ) -> str:
-    del card_type, correct_option, is_true
-    cleaned = _strip_citation_phrasing(text)
+    del card_type, is_true
+    quoted_definition = _QUOTED_SOURCE_DEFINITION_RE.fullmatch(text)
+    term_definition = _TERM_SOURCE_DEFINITION_RE.fullmatch(text)
+    if quoted_definition is not None:
+        subject, description = quoted_definition.groups()
+        cleaned = _definition_statement(subject, description)
+    elif term_definition is not None and correct_option.strip():
+        cleaned = _definition_statement(correct_option, term_definition.group(1))
+    else:
+        cleaned = _strip_citation_phrasing(text)
     words = re.findall(r"[A-Za-z0-9]+", cleaned)
     # After stripping the citation clause there may be nothing substantive
     # left (e.g. "X is explicitly stated in the provided fact." carried no
@@ -820,8 +865,14 @@ def validate_cluster(
             phrase.casefold() in card.question.casefold() for phrase in BANNED_FRAMING
         ):
             errors.append(f"{prefix} question contains banned framing")
-        if any(_contains_provenance(value) for value in _text_fields(card) if value):
-            errors.append(f"{prefix} exposes provenance metadata")
+        for field, value in _named_text_fields(card):
+            trigger = _provenance_trigger(value) if value else None
+            if trigger is not None:
+                errors.append(
+                    f"{prefix} {field} exposes provenance metadata; "
+                    "triggering phrase "
+                    + json.dumps(trigger, ensure_ascii=False)
+                )
         if GENERIC_EXPLANATION.fullmatch(card.expalanation.strip()):
             errors.append(f"{prefix} expalanation must explain the answer")
 
@@ -880,7 +931,11 @@ def validate_cluster(
                     f"{prefix} identification answer must be a concise phrase"
                 )
             if _contains_complete_answer(card.question, answer):
-                errors.append(f"{prefix} question reveals the identification answer")
+                errors.append(
+                    f"{prefix} question reveals the identification answer; "
+                    "triggering phrase "
+                    + json.dumps(answer, ensure_ascii=False)
+                )
 
         elif card.type == "true-false":
             if any(
@@ -897,7 +952,10 @@ def validate_cluster(
                 errors.append(f"{prefix} true-false is_true must be 0 or 1")
 
         if _contains_complete_answer(card.hint, card.correct_option):
-            errors.append(f"{prefix} hint reveals the correct answer")
+            errors.append(
+                f"{prefix} hint reveals the correct answer; triggering phrase "
+                + json.dumps(card.correct_option.strip(), ensure_ascii=False)
+            )
 
     return tuple(errors)
 

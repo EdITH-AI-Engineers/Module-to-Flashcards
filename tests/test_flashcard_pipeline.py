@@ -225,6 +225,40 @@ def test_identification_answer_leak_retry_receives_exact_rejected_card():
     assert "REJECTED JSON TO CORRECT" in retry_prompt
 
 
+def test_pipeline_repairs_mixed_source_wrappers_and_hint_leak_without_retry():
+    mixed = json.loads(cluster_json(1))
+    mixed["cards"][0]["expalanation"] = (
+        "The correct answer directly quotes the supplied material, which "
+        "defines relation mapping as preserving a stated connection."
+    )
+    mixed["cards"][1]["expalanation"] = (
+        "The term is directly defined in the given information as the name "
+        "assigned to the item."
+    )
+    mixed["cards"][3]["hint"] = "Recall Apply relationship 1."
+    responses = [plan_json(), json.dumps(mixed)]
+    responses.extend(cluster_json(index) for index in range(2, 21))
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+        progress=lambda _message: None,
+    )
+
+    clusters = pipeline.run(ModuleIdentity("GEN101", "1"), graph_facts())
+
+    assert len(backend.calls) == 21
+    assert clusters[0].cards[0].expalanation == (
+        "Relation mapping is characterized by preserving a stated connection."
+    )
+    assert clusters[0].cards[1].expalanation == (
+        "Term 1 is the name assigned to the item."
+    )
+    assert clusters[0].cards[3].hint == (
+        "Consider the relationship or distinction needed to answer."
+    )
+
+
 def test_truncated_cluster_retries_without_embedding_partial_output():
     def truncated(system, user, max_tokens):
         raise CompletionTruncatedError(
@@ -269,7 +303,10 @@ def test_context_first_multiple_choice_keeps_relevant_external_distractor():
         tuple(cards), errors, facts, phrase_facts=facts[1:]
     )
 
-    assert errors == ("card 1 hint reveals the correct answer",)
+    assert errors == (
+        'card 1 hint reveals the correct answer; triggering phrase '
+        '"Classification 1"',
+    )
     assert repaired is not None
     assert repaired[0].wrong_option_3 == "Hexadecimal classification"
     assert validate_cluster(repaired, make_concept(1), facts) == ()

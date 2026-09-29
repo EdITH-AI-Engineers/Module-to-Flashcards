@@ -650,7 +650,8 @@ def build_cluster_retry_prompt(
         forbidden_answers: list[str] = []
         for error in error_list:
             match = re.match(
-                r"^card (\d+) question reveals the identification answer$",
+                r"^card (\d+) question reveals the identification answer"
+                r"(?:; triggering phrase .+)?$",
                 error,
             )
             if match is None:

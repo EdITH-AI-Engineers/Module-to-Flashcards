@@ -155,7 +155,10 @@ def _balanced_plan_facts(
 DISTRACTOR_FACT_LIMIT = 12
 
 
-_HINT_LEAK_ERROR_RE = re.compile(r"^card (\d+) hint reveals the correct answer$")
+_HINT_LEAK_ERROR_RE = re.compile(
+    r"^card (\d+) hint reveals the correct answer"
+    r"(?:; triggering phrase .+)?$"
+)
 _MODULE_DUPLICATE_RE = re.compile(
     r"^near-duplicate questions at cluster (\d+) card (\d+) "
     r"and cluster (\d+) card (\d+)$"

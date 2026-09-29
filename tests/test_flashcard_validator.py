@@ -856,7 +856,7 @@ def test_scenario_analysis_accepts_researcher_observing_users():
     [
         (0, {"is_true": 1}, "multiple-choice is_true must be empty"),
         (0, {"wrong_option_3": ""}, "three non-empty wrong options"),
-        (0, {"wrong_option_2": "Base 8"}, "options must be distinct"),
+        (0, {"wrong_option_2": "Base 8"}, "duplicate options"),
         (1, {"wrong_option_1": "Wrong"}, "identification wrong options must be empty"),
         (1, {"correct_option": "It is the term that names this complete relationship."}, "concise phrase"),
         (2, {"correct_option": "True"}, "true-false answer options must be empty"),
@@ -936,6 +936,9 @@ def test_cluster_allows_relevant_distractors_that_are_absent_from_source_facts()
         ("Na+", "Na-", "Cl-", "H+"),
         ("f/2.8", "f/4", "1/60 s", "ISO 400"),
         ("RGB", "RGBA", "CMYK", "HSL"),
+        ("cout << value;", "cout << value,", "x = y + 1;", "x = y + 1,"),
+        ("x <= 10;", "x <= 10,", "16:9;", "16:9,"),
+        ('"ready";', '"ready",', "25 kg;", "25 kg,"),
     ),
 )
 def test_multiple_choice_distinctness_preserves_meaningful_notation(options):
@@ -950,7 +953,14 @@ def test_multiple_choice_distinctness_preserves_meaningful_notation(options):
 
     errors = validate_cluster(tuple(values), valid_concept())
 
-    assert "card 1 multiple-choice options must be distinct" not in errors
+    assert not any(
+        "card 1 multiple-choice" in error
+        and (
+            "options must be distinct" in error
+            or "duplicate options:" in error
+        )
+        for error in errors
+    )
 
 
 @pytest.mark.parametrize(
@@ -976,7 +986,65 @@ def test_multiple_choice_distinctness_still_rejects_formatting_variants(
 
     errors = validate_cluster(tuple(values), valid_concept())
 
-    assert "card 1 multiple-choice options must be distinct" in errors
+    assert any(
+        error.startswith("card 1 multiple-choice duplicate options:")
+        for error in errors
+    )
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    (
+        ("A stable process.", "A stable process"),
+        ("Version 2.0.", "Version 2.0"),
+        ("A stable process;", "A stable process,"),
+    ),
+)
+def test_multiple_choice_distinctness_ignores_harmless_prose_punctuation(
+    left, right
+):
+    values = list(valid_cards())
+    values[0] = replace(
+        values[0],
+        correct_option=left,
+        wrong_option_1=right,
+        wrong_option_2="Alternative B",
+        wrong_option_3="Alternative C",
+    )
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    assert any(
+        error.startswith("card 1 multiple-choice duplicate options:")
+        for error in errors
+    )
+
+
+def test_multiple_choice_reports_every_duplicate_field_pair_and_original_value():
+    values = list(valid_cards())
+    values[0] = replace(
+        values[0],
+        correct_option="Stable process.",
+        wrong_option_1="Stable process",
+        wrong_option_2="Different process",
+        wrong_option_3=" STABLE PROCESS! ",
+    )
+
+    errors = validate_cluster(tuple(values), valid_concept())
+
+    duplicate_errors = tuple(
+        error
+        for error in errors
+        if error.startswith("card 1 multiple-choice duplicate options:")
+    )
+    assert duplicate_errors == (
+        'card 1 multiple-choice duplicate options: correct_option "Stable process." '
+        'and wrong_option_1 "Stable process"',
+        'card 1 multiple-choice duplicate options: correct_option "Stable process." '
+        'and wrong_option_3 " STABLE PROCESS! "',
+        'card 1 multiple-choice duplicate options: wrong_option_1 "Stable process" '
+        'and wrong_option_3 " STABLE PROCESS! "',
+    )
 
 
 def test_short_identifier_does_not_leak_through_letters_inside_words():

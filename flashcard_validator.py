@@ -208,6 +208,34 @@ _TECHNICAL_SYMBOL_TRANSLATION = str.maketrans(
     }
 )
 _ATTACHED_IDENTIFIER_SYMBOLS = frozenset("_+#-*/^%=<>|&~@")
+_NOTATION_OPERATOR = re.compile(
+    r"(?:<<|>>|==|!=|<=|>=|:=|->|=>|\+\+|--|&&|\|\||[=+*/^%<>|&~])"
+)
+_NOTATION_BRACKETS = re.compile(r"[()\[\]{}]")
+_NOTATION_QUOTED_LITERAL = re.compile(r'''(["'])(?:\\.|(?!\1).)*\1''')
+_NOTATION_RATIO = re.compile(r"\b\d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?\b")
+_NOTATION_NUMBER_UNIT = re.compile(
+    r"\b\d+(?:\.\d+)?\s*[a-zµ°ωΩ]{1,8}(?:/[a-zµ°ωΩ]{1,8})?\b",
+    re.IGNORECASE,
+)
+
+
+def _is_notation_option(value: str) -> bool:
+    """Return whether terminal separators may carry symbolic meaning."""
+
+    text = unicodedata.normalize("NFKC", value).translate(
+        _TECHNICAL_SYMBOL_TRANSLATION
+    )
+    return any(
+        pattern.search(text)
+        for pattern in (
+            _NOTATION_OPERATOR,
+            _NOTATION_BRACKETS,
+            _NOTATION_QUOTED_LITERAL,
+            _NOTATION_RATIO,
+            _NOTATION_NUMBER_UNIT,
+        )
+    )
 
 
 def _canonical_option(value: str) -> str:
@@ -219,15 +247,36 @@ def _canonical_option(value: str) -> str:
     while normalizing Unicode variants, case, and insignificant spacing.
     """
 
+    notation = _is_notation_option(value)
     text = unicodedata.normalize("NFKC", value).translate(_TECHNICAL_SYMBOL_TRANSLATION)
     text = " ".join(text.casefold().split())
     text = re.sub(r"\s*([_+#*/^%=<>|&~@()\[\]{}:\-])\s*", r"\1", text)
     # A suffix-symbol run followed by prose starts a new lexical unit. Restore
     # that boundary after compacting optional spaces around technical symbols.
     text = re.sub(r"(?<=\w)([+#]+)(?=[a-z]{2,}\b)", r"\1 ", text)
-    # Sentence punctuation at the end is formatting, not part of an answer.
-    text = re.sub(r"(?<=\w)[.!?,;:]+$", "", text)
+    # Periods, question marks, exclamation marks, and colons remain sentence
+    # formatting at the end. Commas and semicolons are retained only when the
+    # value contains independent notation signals, because they can terminate
+    # or separate code and symbolic expressions.
+    terminal_punctuation = r"[.!?:]+$" if notation else r"[.!?,;:]+$"
+    text = re.sub(terminal_punctuation, "", text)
     return text
+
+
+def _option_collisions(
+    named_options: Sequence[tuple[str, str]],
+) -> tuple[tuple[str, str, str, str], ...]:
+    """Return every pair of option fields with the same normalized value."""
+
+    collisions: list[tuple[str, str, str, str]] = []
+    for left_index, (left_name, left_value) in enumerate(named_options):
+        left_key = _canonical_option(left_value)
+        for right_name, right_value in named_options[left_index + 1 :]:
+            if left_key == _canonical_option(right_value):
+                collisions.append(
+                    (left_name, left_value, right_name, right_value)
+                )
+    return tuple(collisions)
 
 
 def _left_neighbor_is_attached(text: str, start: int) -> bool:
@@ -893,20 +942,30 @@ def validate_cluster(
                 )
 
         if card.type == "multiple-choice":
-            options = (
-                card.correct_option,
-                card.wrong_option_1,
-                card.wrong_option_2,
-                card.wrong_option_3,
+            named_options = (
+                ("correct_option", card.correct_option),
+                ("wrong_option_1", card.wrong_option_1),
+                ("wrong_option_2", card.wrong_option_2),
+                ("wrong_option_3", card.wrong_option_3),
             )
+            options = tuple(value for _, value in named_options)
             if not card.correct_option.strip() or any(
                 not option.strip() for option in options[1:]
             ):
                 errors.append(
                     f"{prefix} {card.type} requires one correct and three non-empty wrong options"
                 )
-            if len({_canonical_option(option) for option in options}) != 4:
-                errors.append(f"{prefix} {card.type} options must be distinct")
+            for (
+                left_name,
+                left_value,
+                right_name,
+                right_value,
+            ) in _option_collisions(named_options):
+                errors.append(
+                    f"{prefix} {card.type} duplicate options: "
+                    f"{left_name} {json.dumps(left_value, ensure_ascii=False)} and "
+                    f"{right_name} {json.dumps(right_value, ensure_ascii=False)}"
+                )
             if card.is_true is not None:
                 errors.append(f"{prefix} {card.type} is_true must be empty")
         elif card.type == "identification":

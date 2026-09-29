@@ -1,5 +1,6 @@
 import json
 
+import flashcard_prompt
 from flashcard_prompt import (
     SYSTEM_PROMPT,
     build_cluster_prompt,
@@ -99,6 +100,33 @@ def test_cluster_prompt_avoids_banned_provenance_language_for_distractors():
     )
 
     assert "provided module content" not in prompt.casefold()
+
+
+def test_validation_card_repair_prompt_contains_only_targeted_generic_context():
+    original = card()
+    errors = (
+        'card 1 multiple-choice duplicate options: correct_option "Binary uses base 2" '
+        'and wrong_option_2 "Binary uses base 2"',
+    )
+
+    prompt = flashcard_prompt.build_validation_card_repair_prompt(
+        ModuleIdentity("GEN101", "4"),
+        concept(),
+        original,
+        card_number=1,
+        errors=errors,
+        editable_fields=("wrong_option_2",),
+        conflicting_cards=(),
+    )
+
+    payload = json.loads(prompt.split("INPUT JSON:\n", 1)[1])
+    assert payload["card_to_repair"]["question"] == original.question
+    assert payload["validation_errors"] == list(errors)
+    assert payload["concept_evidence"]["fact_ids"] == ["e1"]
+    assert payload["editable_fields"] == ["wrong_option_2"]
+    assert "correct_option" in prompt
+    assert "wrong_option_2" in prompt
+    assert "human-computer interaction" not in prompt.casefold()
 
 
 def test_prompts_treat_scenario_analysis_as_an_approach_not_a_card_type():

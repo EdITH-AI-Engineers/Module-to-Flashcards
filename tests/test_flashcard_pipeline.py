@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+import flashcard_pipeline as flashcard_pipeline_module
 from flashcard_pipeline import (
     FlashcardPipeline,
     GenerationError,
@@ -371,6 +372,128 @@ def test_validation_exhaustion_reports_validation_cause():
         )
 
     assert len(backend.calls) == 2
+
+
+def test_validation_repair_targets_only_card_addressable_editable_errors():
+    assert flashcard_pipeline_module._validation_repair_targets(
+        (
+            "card 3 hint reveals the correct answer",
+            "cards 2 and 5 are near duplicates",
+            "card 3 expalanation must explain the answer",
+        )
+    ) == (2, 4)
+    assert flashcard_pipeline_module._validation_repair_targets(
+        ("cluster contains an unknown structural problem",)
+    ) == ()
+    assert flashcard_pipeline_module._validation_repair_targets(
+        ("card 1 difficulty must be 1, 2, or 3",)
+    ) == ()
+
+
+def test_identical_invalid_cluster_switches_to_single_card_repair():
+    invalid = json.loads(cluster_json(1))
+    invalid["cards"][0]["wrong_option_2"] = invalid["cards"][0][
+        "wrong_option_1"
+    ]
+    original_cards = parse_cards(cluster_json(1))
+    responses = [
+        plan_json(),
+        json.dumps(invalid),
+        json.dumps(invalid),
+        single_card_json(original_cards[0]),
+        *(cluster_json(index) for index in range(2, 21)),
+    ]
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+        progress=lambda _message: None,
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert len(backend.calls) == 23
+    assert backend.schemas[1]["properties"]["cards"]["minItems"] == 5
+    assert backend.schemas[2]["properties"]["cards"]["minItems"] == 5
+    assert backend.schemas[3]["properties"]["cards"]["minItems"] == 1
+    assert clusters[0].cards == original_cards
+
+
+def test_targeted_repair_stack_restores_multiple_cards_to_original_positions():
+    invalid = json.loads(cluster_json(1))
+    invalid["cards"][0]["wrong_option_2"] = invalid["cards"][0][
+        "wrong_option_1"
+    ]
+    invalid["cards"][1]["question"] = "What term is Term 1?"
+    original_cards = parse_cards(cluster_json(1))
+    responses = [
+        plan_json(),
+        json.dumps(invalid),
+        json.dumps(invalid),
+        single_card_json(original_cards[1]),
+        single_card_json(original_cards[0]),
+        *(cluster_json(index) for index in range(2, 21)),
+    ]
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=3, final_review=False),
+        progress=lambda _message: None,
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert clusters[0].cards == original_cards
+    assert [
+        schema["properties"]["cards"]["minItems"]
+        for schema in backend.schemas[3:5]
+    ] == [1, 1]
+
+
+def test_repeated_malformed_cluster_never_enters_single_card_repair():
+    backend = FakeBackend((plan_json(), '{"cards":[', '{"cards":['))
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=2, final_review=False),
+        progress=lambda _message: None,
+    )
+
+    with pytest.raises(GenerationError, match="failed after 2 validation attempts"):
+        pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert len(backend.schemas) == 3
+    assert all(
+        schema["properties"]["cards"]["minItems"] == 5
+        for schema in backend.schemas[1:]
+    )
+
+
+def test_targeted_repair_rejects_a_new_full_cluster_conflict():
+    invalid = json.loads(cluster_json(1))
+    invalid["cards"][0]["wrong_option_2"] = invalid["cards"][0][
+        "wrong_option_1"
+    ]
+    conflicting_repair = replace(
+        parse_cards(cluster_json(1))[0],
+        question=parse_cards(cluster_json(1))[1].question,
+    )
+    backend = FakeBackend(
+        (
+            plan_json(),
+            json.dumps(invalid),
+            json.dumps(invalid),
+            single_card_json(conflicting_repair),
+            single_card_json(conflicting_repair),
+        )
+    )
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(max_retries=2, final_review=False),
+        progress=lambda _message: None,
+    )
+
+    with pytest.raises(GenerationError, match="targeted card repair"):
+        pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
 
 
 def test_context_first_multiple_choice_keeps_relevant_external_distractor():

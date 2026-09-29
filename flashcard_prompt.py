@@ -851,6 +851,50 @@ def build_duplicate_card_repair_prompt(
     )
 
 
+def build_validation_card_repair_prompt(
+    identity: ModuleIdentity,
+    concept: ConceptPlan,
+    card: FlashcardDraft,
+    *,
+    card_number: int,
+    errors: Sequence[str],
+    editable_fields: Sequence[str],
+    conflicting_cards: Sequence[dict[str, object]],
+) -> str:
+    """Build one neutral repair request for card-addressable validation errors."""
+
+    payload = {
+        "course_code": identity.course_code,
+        "module_number": identity.module_number,
+        "concept_evidence": _concept_payload(concept),
+        "json_location": {"card": card_number},
+        "validation_errors": list(errors),
+        "editable_fields": list(editable_fields),
+        "card_to_repair": asdict(card),
+        "conflicting_cards": list(conflicting_cards),
+    }
+    editable = ", ".join(editable_fields)
+    return f"""Repair exactly one invalid flashcard and return it to the same JSON location.
+
+    REPAIR RULES
+    - Return exactly one complete card in the shape {{"cards":[{{...}}]}}.
+    - Change only these editable fields: {editable}.
+    - Copy every other field from card_to_repair exactly.
+    - Resolve every validation_errors entry without changing the learning point.
+    - If conflicting_cards is non-empty, make the repaired question genuinely
+      different from those questions, not a one-word or opening-word variant.
+    - Preserve factual meaning and which answer is correct. Wrong options may
+      be naturally phrased but must remain relevant, plausible, and incorrect.
+    - Keep true-false stems declarative. Keep identification answers out of
+      their question stems. Do not mention evidence, facts, modules, corpora,
+      validators, retries, or other generation metadata.
+    - Keep all eleven required fields and preserve the key spelling expalanation.
+    - Return JSON only, without Markdown or commentary.
+
+    INPUT JSON:
+    {_json(payload)}"""
+
+
 _DUPLICATE_PARAPHRASE_TECHNIQUES: dict[str, tuple[str, ...]] = {
     "multiple-choice": (
         "INVERT (swap question and answer): make the concept that is now "

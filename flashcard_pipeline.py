@@ -27,6 +27,7 @@ from flashcard_prompt import (
     build_duplicate_review_prompt,
     build_grounding_review_prompt,
     build_retry_prompt,
+    build_validation_card_repair_prompt,
     _card_subject,
     _dedup_fingerprint,
 )
@@ -63,6 +64,18 @@ from structured_module import is_unresolved_question_statement
 
 class GenerationError(RuntimeError):
     """Raised when bounded generation cannot produce a valid module."""
+
+
+class _RepairableClusterValidationError(ValidationError):
+    """A parsed five-card response with card-addressable validation errors."""
+
+    def __init__(
+        self,
+        cards: Sequence[FlashcardDraft],
+        errors: Sequence[str],
+    ) -> None:
+        super().__init__(errors)
+        self.cards = tuple(cards)
 
 
 @dataclass(frozen=True)
@@ -171,6 +184,123 @@ _DUPLICATE_REVIEW_REASON_RE = re.compile(
     r"^card (\d+) duplicates cluster (.+?) card (\d+)$",
     re.I,
 )
+_CARD_VALIDATION_ERROR_RE = re.compile(r"^card (\d+)\b", re.I)
+_CARD_PAIR_VALIDATION_ERROR_RE = re.compile(
+    r"^cards (\d+) and (\d+)\b",
+    re.I,
+)
+_OPTION_FIELD_RE = re.compile(
+    r"\b(correct_option|wrong_option_1|wrong_option_2|wrong_option_3)\b"
+)
+_CARD_TEXT_FIELDS = (
+    "question",
+    "correct_option",
+    "wrong_option_1",
+    "wrong_option_2",
+    "wrong_option_3",
+    "expalanation",
+    "hint",
+)
+_LOCKED_REPAIR_ERROR_MARKERS = (
+    " is_true ",
+    " difficulty ",
+    " assessment_approach ",
+    " assessment approach ",
+    " true-false answer options ",
+    " identification wrong options ",
+)
+
+
+def _editable_repair_fields(errors: Sequence[str]) -> tuple[str, ...]:
+    """Return fields implicated by generic validation errors, or no safe edit."""
+
+    editable: set[str] = set()
+    for error in errors:
+        lowered = f" {error.casefold()} "
+        if any(marker in lowered for marker in _LOCKED_REPAIR_ERROR_MARKERS):
+            return ()
+        if _CARD_PAIR_VALIDATION_ERROR_RE.match(error):
+            editable.add("question")
+            continue
+        if "duplicate options:" in lowered:
+            option_fields = _OPTION_FIELD_RE.findall(error)
+            if len(option_fields) < 2:
+                return ()
+            editable.add(option_fields[-1])
+            continue
+        matched_fields = [field for field in _CARD_TEXT_FIELDS if field in lowered]
+        if matched_fields:
+            editable.update(matched_fields)
+            continue
+        if "requires one correct and three non-empty wrong options" in lowered:
+            editable.update(
+                (
+                    "correct_option",
+                    "wrong_option_1",
+                    "wrong_option_2",
+                    "wrong_option_3",
+                )
+            )
+            continue
+        if "identification answer must be a concise phrase" in lowered:
+            editable.add("correct_option")
+            continue
+        return ()
+    return tuple(field for field in _CARD_TEXT_FIELDS if field in editable)
+
+
+def _validation_error_target(error: str) -> int | None:
+    pair = _CARD_PAIR_VALIDATION_ERROR_RE.match(error)
+    if pair is not None:
+        return int(pair.group(2)) - 1
+    card = _CARD_VALIDATION_ERROR_RE.match(error)
+    if card is not None:
+        return int(card.group(1)) - 1
+    return None
+
+
+def _validation_repair_targets(errors: Sequence[str]) -> tuple[int, ...]:
+    """Return safe zero-based card targets, choosing the later duplicate card."""
+
+    if not errors or not _editable_repair_fields(errors):
+        return ()
+    targets: set[int] = set()
+    for error in errors:
+        target = _validation_error_target(error)
+        if target is None or target < 0:
+            return ()
+        targets.add(target)
+    return tuple(sorted(targets))
+
+
+def _validation_errors_by_card(
+    errors: Sequence[str],
+) -> dict[int, tuple[str, ...]]:
+    grouped: dict[int, list[str]] = {}
+    for error in errors:
+        target = _validation_error_target(error)
+        if target is None:
+            continue
+        grouped.setdefault(target, []).append(error)
+    return {target: tuple(values) for target, values in grouped.items()}
+
+
+def _errors_relevant_to_card(
+    errors: Sequence[str],
+    card_index: int,
+) -> tuple[str, ...]:
+    relevant: list[str] = []
+    for error in errors:
+        pair = _CARD_PAIR_VALIDATION_ERROR_RE.match(error)
+        if pair is not None:
+            participants = {int(pair.group(1)) - 1, int(pair.group(2)) - 1}
+            if card_index in participants:
+                relevant.append(error)
+            continue
+        target = _validation_error_target(error)
+        if target is None or target == card_index:
+            relevant.append(error)
+    return tuple(relevant)
 
 
 @dataclass(frozen=True)
@@ -355,12 +485,16 @@ class FlashcardPipeline:
         retry_prompt_builder: (
             Callable[[str, str | None, Sequence[str]], str] | None
         ) = None,
+        repeated_candidate_handler: (
+            Callable[[str, Sequence[str]], Parsed] | None
+        ) = None,
     ) -> Parsed:
         build_retry = retry_prompt_builder or build_retry_prompt
         prompt = original_prompt
         last_errors: tuple[str, ...] = ()
         validation_attempts = 0
         truncation_failures = 0
+        last_rejected_fingerprint: str | None = None
         while validation_attempts < self.config.max_retries:
             self._attempt_count += 1
             try:
@@ -418,6 +552,20 @@ class FlashcardPipeline:
                     f"{self.config.max_retries} "
                     f"rejected: {' | '.join(last_errors)}"
                 )
+                fingerprint = candidate.strip()
+                repeated = fingerprint == last_rejected_fingerprint
+                last_rejected_fingerprint = fingerprint
+                if (
+                    repeated
+                    and repeated_candidate_handler is not None
+                    and isinstance(exc, _RepairableClusterValidationError)
+                    and _validation_repair_targets(last_errors)
+                ):
+                    self._progress(
+                        f"{label}: identical invalid cluster repeated; switching "
+                        "to targeted card repair."
+                    )
+                    return repeated_candidate_handler(candidate, last_errors)
                 rejected = candidate if include_rejected_candidate else None
                 prompt = build_retry(original_prompt, rejected, last_errors)
                 if validation_attempts < self.config.max_retries:
@@ -468,6 +616,132 @@ class FlashcardPipeline:
                         "previously generated module in this course"
                     )
         return tuple(errors)
+
+    def _repair_validation_cards(
+        self,
+        identity: ModuleIdentity,
+        concept: ConceptPlan,
+        raw_candidate: str,
+        errors: Sequence[str],
+        existing: Sequence[FlashcardCluster],
+        prior_questions: Sequence[str],
+        grounding_facts: Sequence[GraphFact],
+        *,
+        label: str,
+    ) -> tuple[FlashcardDraft, ...]:
+        cards = parse_cards(raw_candidate)
+        if len(cards) != CARDS_PER_CLUSTER:
+            raise GenerationError(
+                f"{label} targeted card repair requires exactly "
+                f"{CARDS_PER_CLUSTER} parsed cards"
+            )
+        targets = _validation_repair_targets(errors)
+        if not targets:
+            raise GenerationError(
+                f"{label} targeted card repair could not map validation errors "
+                "to safe editable card fields"
+            )
+        grouped_errors = _validation_errors_by_card(errors)
+        repaired = list(cards)
+        stack = list(targets)
+
+        while stack:
+            card_index = stack.pop()
+            original_card = repaired[card_index]
+            card_errors = grouped_errors.get(card_index, ())
+            editable_fields = _editable_repair_fields(card_errors)
+            if not editable_fields:
+                raise GenerationError(
+                    f"{label} targeted card repair found no safe fields for "
+                    f"card {card_index + 1}"
+                )
+            conflicting_cards: list[dict[str, object]] = []
+            for error in card_errors:
+                pair = _CARD_PAIR_VALIDATION_ERROR_RE.match(error)
+                if pair is None:
+                    continue
+                first_index = int(pair.group(1)) - 1
+                second_index = int(pair.group(2)) - 1
+                if second_index != card_index or not (0 <= first_index < len(repaired)):
+                    continue
+                conflicting_cards.append(
+                    {
+                        "card": first_index + 1,
+                        "question": repaired[first_index].question,
+                    }
+                )
+            prompt = build_validation_card_repair_prompt(
+                identity,
+                concept,
+                original_card,
+                card_number=card_index + 1,
+                errors=card_errors,
+                editable_fields=editable_fields,
+                conflicting_cards=conflicting_cards,
+            )
+
+            def parse_repair(raw: str) -> FlashcardDraft:
+                generated = parse_cards(raw)
+                if len(generated) != 1:
+                    raise ValidationError(
+                        f"expected exactly 1 replacement card, received "
+                        f"{len(generated)}"
+                    )
+                candidate = generated[0]
+                repair_errors: list[str] = []
+                for field in (
+                    "type",
+                    "is_true",
+                    "difficulty",
+                    "assessment_approach",
+                ):
+                    if getattr(candidate, field) != getattr(original_card, field):
+                        repair_errors.append(f"replacement card must preserve {field}")
+                for field in _CARD_TEXT_FIELDS:
+                    if (
+                        field not in editable_fields
+                        and getattr(candidate, field) != getattr(original_card, field)
+                    ):
+                        repair_errors.append(
+                            f"replacement card must preserve unrelated field {field}"
+                        )
+
+                trial_cards = list(repaired)
+                trial_cards[card_index] = candidate
+                trial_errors = list(
+                    validate_cluster(tuple(trial_cards), concept, grounding_facts)
+                )
+                trial_errors.extend(
+                    self._duplicate_errors(
+                        tuple(trial_cards), existing, prior_questions
+                    )
+                )
+                repair_errors.extend(
+                    _errors_relevant_to_card(trial_errors, card_index)
+                )
+                if repair_errors:
+                    raise ValidationError(repair_errors)
+                return candidate
+
+            repaired_card = self._complete_with_retries(
+                prompt,
+                parse_repair,
+                max_tokens=self.config.cluster_max_tokens,
+                label=f"{label} targeted card repair {card_index + 1}",
+                response_schema=build_single_card_schema(original_card),
+            )
+            repaired[card_index] = repaired_card
+
+        final_errors = list(validate_cluster(tuple(repaired), concept, grounding_facts))
+        final_errors.extend(
+            self._duplicate_errors(tuple(repaired), existing, prior_questions)
+        )
+        if final_errors:
+            raise GenerationError(
+                f"{label} targeted card repair reconstructed an invalid cluster: "
+                + "; ".join(final_errors)
+            )
+        return tuple(repaired)
 
     def _generate_cards(
         self,
@@ -522,6 +796,11 @@ class FlashcardPipeline:
 
         def parse_and_validate(raw: str) -> tuple[FlashcardDraft, ...]:
             cards = parse_cards(raw)
+            if len(cards) != CARDS_PER_CLUSTER:
+                raise ValidationError(
+                    f"expected exactly {CARDS_PER_CLUSTER} cards, received "
+                    f"{len(cards)}"
+                )
             for card_position, card in enumerate(cards, start=1):
                 self._progress(
                     f"[{label}] card {card_position}/{len(cards)} generated: "
@@ -552,8 +831,28 @@ class FlashcardPipeline:
                             "skipping LLM retry"
                         )
                         return repaired
-                raise ValidationError(errors)
+                raise _RepairableClusterValidationError(cards, errors)
             return cards
+
+        def repair_repeated_candidate(
+            raw: str,
+            errors: Sequence[str],
+        ) -> tuple[FlashcardDraft, ...]:
+            grounding_facts = (
+                tuple(module_facts)
+                if module_facts
+                else tuple(concept_facts) + tuple(distractor_facts)
+            )
+            return self._repair_validation_cards(
+                identity,
+                concept,
+                raw,
+                errors,
+                existing,
+                prior_questions,
+                grounding_facts,
+                label=label,
+            )
 
         return self._complete_with_retries(
             base_prompt,
@@ -563,6 +862,7 @@ class FlashcardPipeline:
             response_schema=build_card_cluster_schema(concept.assessment_approaches),
             include_rejected_candidate=True,
             retry_prompt_builder=build_cluster_retry,
+            repeated_candidate_handler=repair_repeated_candidate,
         )
 
     def _review(

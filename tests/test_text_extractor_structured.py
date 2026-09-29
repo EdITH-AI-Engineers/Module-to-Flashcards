@@ -231,6 +231,33 @@ def test_chunk_evidence_keeps_supporting_slide_only():
     assert evidence[0]["confidence"] == 0.5
 
 
+def test_fact_relationship_edges_keep_their_supporting_fact_ids(tmp_path):
+    graph = text_extractor.build_graph(
+        [
+            {
+                "subject": "Social process",
+                "relation": "defines",
+                "object": "patterns of social interaction",
+                "evidence": [
+                    {
+                        "chunk_id": "f7",
+                        "fact_id": "f7",
+                        "slides": [3],
+                        "text": (
+                            "Social process defines patterns of social interaction."
+                        ),
+                        "confidence": 1.0,
+                    }
+                ],
+            }
+        ],
+        tmp_path / "module.txt",
+        "model",
+    )
+
+    assert graph["edges"][0]["supporting_fact_ids"] == ["f7"]
+
+
 def test_save_outputs_serializes_portable_model_path(tmp_path):
     extractor = load_extractor()
     model_path = tmp_path / "models" / "rebel-large"

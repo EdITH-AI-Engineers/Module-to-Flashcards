@@ -400,6 +400,18 @@ def parse_concept_plan(
             raise ValidationError(
                 "insufficient_content must explain the specific limitation in at least five words"
             )
+        if not re.search(r"\bconcepts?\b", reason, re.I):
+            raise ValidationError(
+                "insufficient_content must report the supportable concept count; "
+                "card targets or learning points are not the concept count"
+            )
+        if len(known_facts) >= CONCEPTS_PER_MODULE:
+            raise ValidationError(
+                "insufficient_content is premature because at least "
+                f"{CONCEPTS_PER_MODULE} grounded graph statements are available; "
+                "reconsider atomic terms, properties, relationships, steps, "
+                "conditions, examples, and consequences as concept anchors"
+            )
         raise InsufficientContentError(str(reason))
 
     concepts_value = value.get("concepts")

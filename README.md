@@ -94,9 +94,9 @@ The complete local sequence is:
    their slide/topic context, while REBEL adds relationship nodes and edges.
 5. Qwen conservatively removes presentation noise and irrelevant graph items,
    then publishes the checked graph.
-6. Qwen combines normalized lesson facts with checked relationship edges, plans
-   five separately supported learning targets for every concept, and generates
-   one card for each ordered target.
+6. Qwen samples both normalized lesson facts and checked relationship edges,
+   plans 20 distinct concept anchors, then assigns five non-repetitive question
+   focuses within every concept.
 
 No PDF or extracted document content is uploaded to Mistral or another API. The selected Qwen model is text-only: Tesseract recovers visible labels from slide images, but Qwen does not perform visual interpretation of diagrams or photographs.
 
@@ -148,8 +148,10 @@ Invoke-WebRequest http://localhost:8000/health
 
 Flashcard content validation and final Qwen reviews are enabled by default.
 Every concept plan must contain five ordered card targets, each with a distinct
-learning point, supporting fact IDs, and assessment approach. The generated
-cards must keep that order and approach assignment. Use
+question focus, supporting fact IDs, and assessment approach. Targets may reuse
+a rich supporting fact when they assess genuinely different facets; they may
+not repeat one relationship through paraphrasing, card-type changes, or reversed
+polarity. The generated cards must keep the target order and approach. Use
 `--skip-flashcard-validation` only when deliberately inspecting raw model output.
 
 `--max-retries` sets the number of attempts for JSON, layout, and content errors.

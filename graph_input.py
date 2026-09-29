@@ -188,6 +188,8 @@ def extract_graph_facts(graph: Mapping[str, Any]) -> tuple[GraphFact, ...]:
                 fact_id=fact_id,
                 statement=statement,
                 slides=tuple(sorted(slide_numbers)),
+                topic=parts[0],
+                kind="relationship",
             )
         )
 

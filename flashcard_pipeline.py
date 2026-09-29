@@ -140,11 +140,59 @@ def _balanced_plan_facts(
     facts: Sequence[GraphFact],
     limit: int = PLAN_FACT_LIMIT,
 ) -> tuple[GraphFact, ...]:
-    """Bound prompt size while retaining coverage across lesson topics/slides."""
+    """Bound prompt size while retaining both claims and graph relationships.
+
+    Lesson facts are emitted before edges by the graph adapter. A plain
+    coverage sample can therefore fill the prompt with prose facts before it
+    reaches the relationship layer. Reserve up to half of the budget for
+    explicit relationships, then interleave both sources.
+    """
     values = tuple(facts)
     if len(values) <= limit:
         return values
 
+    relationships = tuple(
+        fact for fact in values if fact.kind == "relationship"
+    )
+    lesson_facts = tuple(
+        fact for fact in values if fact.kind != "relationship"
+    )
+    if not relationships or not lesson_facts:
+        return _coverage_sample(values, limit)
+
+    relationship_limit = min(len(relationships), limit // 2)
+    lesson_limit = min(len(lesson_facts), limit - relationship_limit)
+    remaining = limit - relationship_limit - lesson_limit
+    if remaining:
+        extra_relationships = min(
+            remaining, len(relationships) - relationship_limit
+        )
+        relationship_limit += extra_relationships
+        remaining -= extra_relationships
+        lesson_limit += min(remaining, len(lesson_facts) - lesson_limit)
+
+    selected_lessons = _coverage_sample(lesson_facts, lesson_limit)
+    selected_relationships = _coverage_sample(
+        relationships, relationship_limit
+    )
+    selected: list[GraphFact] = []
+    for position in range(max(len(selected_lessons), len(selected_relationships))):
+        if position < len(selected_lessons):
+            selected.append(selected_lessons[position])
+        if position < len(selected_relationships):
+            selected.append(selected_relationships[position])
+    return tuple(selected[:limit])
+
+
+def _coverage_sample(
+    facts: Sequence[GraphFact],
+    limit: int,
+) -> tuple[GraphFact, ...]:
+    """Round-robin facts across slides or topics to preserve module coverage."""
+
+    values = tuple(facts)
+    if len(values) <= limit:
+        return values
     buckets: dict[tuple[str, object], list[GraphFact]] = {}
     for fact in values:
         if fact.slides:
@@ -1202,7 +1250,7 @@ class FlashcardPipeline:
         plan_facts = _balanced_plan_facts(_exclude_structural_facts(facts))
         self._progress(
             f"Planning {CONCEPTS_PER_MODULE} concepts from "
-            f"{len(plan_facts)} grounded lesson facts..."
+            f"{len(plan_facts)} grounded graph statements..."
         )
         plan_prompt = build_concept_plan_prompt(
             identity,

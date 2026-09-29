@@ -185,7 +185,8 @@ def test_plan_prompt_serializes_relationships_without_provenance():
     assert "exactly 20" in prompt.casefold()
     assert "fact_ids" in prompt
     assert "card_targets" in prompt
-    assert "five learning points and approaches" in prompt
+    assert "distinct question focus" in prompt
+    assert "card targets as separate facts" in prompt
     assert "recall, comparison, classification, application" in prompt.casefold()
     assert "1, 2, 3, 4, 5, 6" not in prompt
 
@@ -210,6 +211,18 @@ def test_plan_prompt_includes_prior_concepts_when_supplied():
     payload = json.loads(prompt.split("INPUT JSON:\n", 1)[1])
     assert payload["previously_covered_concepts"] == ["Binary base"]
     assert "same underlying learning point" in prompt
+
+
+def test_plan_prompt_counts_concepts_separately_from_card_targets():
+    prompt = build_concept_plan_prompt(
+        ModuleIdentity("CPE0021", "2"),
+        (GraphFact("f1", "A process has several explicit supported properties."),),
+    )
+
+    assert "20 distinct concept anchors" in prompt
+    assert "not by counting 100 card targets" in prompt
+    assert "not an additional concept" in prompt
+    assert "multiple list members" in prompt
 
 
 def test_concept_plan_prompt_keeps_full_unicode_facts_and_omits_metadata():

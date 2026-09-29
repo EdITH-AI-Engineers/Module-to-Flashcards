@@ -189,7 +189,7 @@ def test_pipeline_reports_major_generation_stages():
 
     pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
 
-    assert messages[0] == "Planning 20 concepts from 20 grounded lesson facts..."
+    assert messages[0] == "Planning 20 concepts from 20 grounded graph statements..."
     assert "Generating cluster 1/20: Concept 1 topic1 alpha1 beta1" in messages
     assert "Generating cluster 20/20: Concept 20 topic20 alpha20 beta20" in messages
     assert "Generation quality: 21 model responses, 0 rejected" in messages[-2]
@@ -221,7 +221,43 @@ def test_pipeline_balances_large_fact_set_across_slides_and_bounds_prompt():
     payload = json.loads(backend.calls[0][1].split("INPUT JSON:\n", 1)[1])
     assert len(payload["graph_facts"]) == 50
     assert all(set(item) == {"fact_id", "statement"} for item in payload["graph_facts"])
-    assert messages[0] == "Planning 20 concepts from 50 grounded lesson facts..."
+    assert messages[0] == "Planning 20 concepts from 50 grounded graph statements..."
+
+
+def test_plan_fact_budget_reserves_space_for_relationships():
+    lesson_facts = tuple(
+        GraphFact(
+            f"f{index}",
+            f"Lesson claim {index} has enough substantive detail.",
+            slides=((index - 1) % 5 + 1,),
+            kind="knowledge_statement",
+        )
+        for index in range(1, 61)
+    )
+    relationships = tuple(
+        GraphFact(
+            f"e{index}",
+            f"subject {index} | relates_to | object {index}",
+            slides=((index - 1) % 5 + 1,),
+            topic=f"subject {index}",
+            kind="relationship",
+        )
+        for index in range(1, 41)
+    )
+
+    selected = flashcard_pipeline_module._balanced_plan_facts(
+        lesson_facts + relationships
+    )
+
+    assert len(selected) == 50
+    assert sum(fact.kind == "relationship" for fact in selected) == 25
+    assert sum(fact.kind != "relationship" for fact in selected) == 25
+    assert [fact.kind for fact in selected[:4]] == [
+        "knowledge_statement",
+        "relationship",
+        "knowledge_statement",
+        "relationship",
+    ]
 
 
 def test_invalid_cluster_is_retried_with_validator_feedback():
@@ -648,24 +684,62 @@ def test_exhausted_retries_do_not_return_partial_results():
     assert len(backend.calls) == 4
 
 
-def test_explicit_insufficient_content_stops_without_retries():
+def test_concept_insufficiency_is_retried_when_twenty_statements_exist():
     backend = FakeBackend(
-        [json.dumps({"insufficient_content": "only ten concepts are supported"})]
+        [
+            json.dumps({"insufficient_content": "only ten concepts are supported"}),
+            plan_json(),
+            *[cluster_json(index) for index in range(1, 21)],
+        ]
     )
     pipeline = FlashcardPipeline(
         backend, PipelineConfig(validation_enabled=True, final_review=False)
     )
 
-    with pytest.raises(GenerationError, match="more content is required"):
-        pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
 
-    assert len(backend.calls) == 1
+    assert len(clusters) == 20
+    assert "insufficient_content is premature" in backend.calls[1][1]
+
+
+def test_learning_point_count_is_retried_as_an_invalid_insufficiency_unit():
+    backend = FakeBackend(
+        [
+            json.dumps(
+                {
+                    "insufficient_content": (
+                        "Only 12 distinct learning points can be supported by the facts."
+                    )
+                }
+            ),
+            plan_json(),
+            *[cluster_json(index) for index in range(1, 21)],
+        ]
+    )
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(validation_enabled=True, max_retries=3, final_review=False),
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert len(clusters) == 20
+    assert "supportable concept count" in backend.calls[1][1]
 
 
 def test_fewer_than_twenty_facts_still_asks_planner_for_insufficient_content():
     backend = FakeBackend(
         [json.dumps({"insufficient_content": "only nineteen concepts are supported"})]
     )
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(validation_enabled=True, final_review=False)
+    )
+    facts = graph_facts()[:19]
+
+    with pytest.raises(GenerationError, match="more content is required"):
+        pipeline.run(ModuleIdentity("CPE0021", "1"), facts)
+
+    assert len(backend.calls) == 1
 
 
 def flag_duplicate_without_card_location(system, user, max_tokens):
@@ -680,15 +754,6 @@ def flag_duplicate_without_card_location(system, user, max_tokens):
             ]
         }
     )
-    pipeline = FlashcardPipeline(
-        backend, PipelineConfig(validation_enabled=True, final_review=False)
-    )
-    facts = graph_facts()[:19]
-
-    with pytest.raises(GenerationError, match="more content is required"):
-        pipeline.run(ModuleIdentity("CPE0021", "1"), facts)
-
-    assert len(backend.calls) == 1
 
 
 def test_prior_question_is_checked_without_current_module_clusters():

@@ -78,6 +78,8 @@ def test_extract_facts_combines_normalized_lesson_facts_and_relationships():
     assert facts[0].statement == "A project is a temporary endeavor."
     assert facts[0].slides == (4,)
     assert facts[0].topic == "Project Foundations"
+    assert facts[1].kind == "relationship"
+    assert facts[1].topic == "binary"
 
 
 def test_extract_facts_drops_unresolved_question_shaped_lesson_facts():

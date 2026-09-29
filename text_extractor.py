@@ -224,13 +224,17 @@ def _surface_span(value: str, text: str) -> tuple[int, int] | None:
 
 def _evidence_record(chunk: dict, text: str, slides: Sequence[int]) -> dict:
     word_count = len(_surface_tokens(text))
-    return {
+    record = {
         "chunk_id": chunk["id"],
         "slides": list(slides),
         "text": text,
         "word_count": word_count,
         "confidence": 0.5 if word_count < 8 else 1.0,
     }
+    fact_id = str(chunk.get("fact_id", "")).strip()
+    if fact_id:
+        record["fact_id"] = fact_id
+    return record
 
 
 def _source_supports_order(subject: str, relation: str, object_: str, text: str) -> bool:
@@ -416,6 +420,7 @@ def extract_relations(
         extraction_items = [
             {
                 "id": fact.get("id", f"fact-{index}"),
+                "fact_id": fact.get("id", f"fact-{index}"),
                 "text": str(fact.get("statement", "")),
                 "slides": list(fact.get("slides", [])),
             }
@@ -530,6 +535,16 @@ def build_graph(
                 for item in evidence
                 if isinstance(item, dict)
             )
+            supporting_fact_ids = list(
+                dict.fromkeys(
+                    str(item.get("fact_id", "")).strip()
+                    for item in evidence
+                    if isinstance(item, dict)
+                    and str(item.get("fact_id", "")).strip()
+                )
+            )
+            if supporting_fact_ids:
+                edge["supporting_fact_ids"] = supporting_fact_ids
         edges.append(edge)
 
     metadata = {

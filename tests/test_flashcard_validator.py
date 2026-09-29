@@ -770,6 +770,30 @@ def test_concept_plan_reports_explicit_insufficient_content():
         )
 
 
+def test_concept_plan_retries_premature_insufficiency_with_twenty_facts():
+    _, known = plan_json()
+
+    with pytest.raises(ValidationError, match="insufficient_content is premature"):
+        parse_concept_plan(
+            json.dumps({"insufficient_content": "only ten concepts are supported"}),
+            known,
+        )
+
+
+def test_concept_plan_rejects_learning_points_as_the_insufficient_count():
+    with pytest.raises(ValidationError, match="supportable concept count"):
+        parse_concept_plan(
+            json.dumps(
+                {
+                    "insufficient_content": (
+                        "Only 12 distinct learning points can be supported by the facts."
+                    )
+                }
+            ),
+            (),
+        )
+
+
 def test_concept_plan_rejects_placeholder_insufficient_reason():
     with pytest.raises(ValidationError, match="specific limitation") as exc_info:
         parse_concept_plan(

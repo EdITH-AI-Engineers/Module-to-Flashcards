@@ -342,6 +342,38 @@ def test_cards_parser_removes_an_evidence_wrapper_from_an_explanation():
 
 
 @pytest.mark.parametrize(
+    ("explanation", "expected"),
+    (
+        (
+            "Society is composed of interconnected systems such as families, "
+            "firms, schools, and states, as stated in the lesson statement.",
+            "Society is composed of interconnected systems such as families, "
+            "firms, schools, and states.",
+        ),
+        (
+            "The term 'system of systems' refers to society's composition of "
+            "interconnected subsystems as defined in the lesson statement.",
+            "The term 'system of systems' refers to society's composition of "
+            "interconnected subsystems.",
+        ),
+    ),
+)
+def test_cards_parser_removes_complete_lesson_statement_wrappers(
+    explanation, expected
+):
+    payload = json.loads(cards_json())
+    payload["cards"][0]["expalanation"] = explanation
+
+    cards = parse_cards(json.dumps(payload))
+
+    assert cards[0].expalanation == expected
+    assert not any(
+        "card 1" in error and "exposes provenance metadata" in error
+        for error in validate_cluster(cards, valid_concept())
+    )
+
+
+@pytest.mark.parametrize(
     "explanation",
     (
         "While HCI involves several disciplines, the provided fact emphasizes its interdisciplinary nature.",

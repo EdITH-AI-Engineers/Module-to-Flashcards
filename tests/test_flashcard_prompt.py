@@ -180,7 +180,8 @@ def test_cluster_prompt_allows_planned_approaches_in_any_card_order():
 
     payload = json.loads(prompt.split("INPUT JSON:\n", 1)[1])
     assert payload["topic"] == "Binary base"
-    assert payload["lesson_statements"] == ["binary | uses | base 2"]
+    assert payload["facts"] == ["binary | uses | base 2"]
+    assert "lesson_statements" not in payload
     assert "evidence" not in payload
     assert "concept" not in payload
     assert "concept_facts" not in payload
@@ -191,7 +192,7 @@ def test_cluster_prompt_allows_planned_approaches_in_any_card_order():
     assert "suggested wrong option terms" not in prompt.casefold()
     assert "already_covered_subjects" not in payload
     assert "same semantic category" in prompt
-    assert "need not appear in the lesson statements" in prompt
+    assert "need not appear in the facts" in prompt
     assert "at least one exact" not in prompt
     assert payload["assessment_approaches"] == list(
         concept().assessment_approaches

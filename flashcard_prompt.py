@@ -71,10 +71,10 @@ Identification rules:
 
 True-false rules:
 - Write only a declarative statement in question.
-- Build a true-false decision only from a lesson statement that explicitly asserts a
-  claim. An unresolved question, unanswered choice, or lesson statement ending in
+- Build a true-false decision only from a supplied fact that explicitly asserts a
+  claim. An unresolved question, unanswered choice, or supplied fact ending in
   a question mark cannot establish truth or falsity. Never infer is_true from
-  the wording of such material; use a different assertive lesson statement or use a
+  the wording of such material; use a different assertive fact or use a
   multiple-choice or identification card instead.
 - For true-false cards, correct_option, wrong_option_1, wrong_option_2, and wrong_option_3 must ALL be empty strings. The only fields that carry the answer are is_true (0 or 1) and expalanation.
 - Set is_true to integer 1 for true or integer 0 for false.
@@ -396,9 +396,9 @@ def build_cluster_prompt(
     tied to a numbered card position. Do not mislabel a recall or definition
     question merely to force approach coverage.
 
-    LESSON STATEMENT SCOPE
+    FACT SCOPE
     - Questions, correct answers, explanations, and hints must be supported by
-      the supplied lesson statements.
+      the supplied facts.
     - The five cards must be meaningfully distinct learning checks. They may
       assess the same concept from supported angles, but changing only the card
       type, opening phrase, or one word is not a different question. A negated
@@ -406,7 +406,7 @@ def build_cluster_prompt(
     - Each multiple-choice wrong_option must be plausible, unambiguously
       incorrect, and relevant to the question and subject domain. It must use
       the same semantic category and answer shape as the correct option. A
-      closely related distractor need not appear in the lesson statements.
+      closely related distractor need not appear in the facts.
     - Exactly one option may satisfy a multiple-choice question; never use
       another supported or arguably correct claim as a wrong option.
     - Never use another valid member of the requested category as a distractor.
@@ -414,7 +414,7 @@ def build_cluster_prompt(
       supported distinguishing property or choose clearly invalid alternatives.
     - Prefer positive questions. Do not use NOT or EXCEPT to make an invented
       claim the correct answer.
-    - When the lesson statements supply an equation or numerical relationship, an
+    - When the facts supply an equation or numerical relationship, an
       assigned application or scenario approach may test it using only supplied
       variables, values, units, and operations.
 
@@ -463,13 +463,13 @@ def _cluster_payload(
     distractor_facts: Sequence[GraphFact],
     prior_signals: Sequence[str] = (),
 ) -> dict[str, object]:
-    """Return only card-writing lesson statements and their topic."""
+    """Return only card-writing facts and their topic."""
 
     del identity, distractor_facts, prior_signals
     return {
         "topic": concept.name,
         "assessment_approaches": list(concept.assessment_approaches),
-        "lesson_statements": [fact.statement for fact in concept_facts],
+        "facts": [fact.statement for fact in concept_facts],
     }
 
 
@@ -635,11 +635,11 @@ def build_cluster_retry_prompt(
       period, never an interrogative beginning with Does, Do, Is, Are, Can,
       Could, Should, Would, Will, What, Which, Who, Where, When, Why, or How.
     - Do not infer is_true from an unresolved question, an unanswered choice,
-      or the mere fact that an issue was raised. If the lesson statements do not
+      or the mere fact that an issue was raised. If the supplied facts do not
       explicitly settle the claim, change this card to multiple-choice or
       identification when another true-false card remains in the cluster.
       Otherwise, replace it with a declarative true-false statement grounded
-      in a different explicit assertion from the lesson statements.
+      in a different explicit assertion from the facts.
     """
     if candidate is not None:
         try:
@@ -740,7 +740,7 @@ def build_cluster_retry_prompt(
       options, use a closely related plausible term from outside the facts
       rather than paraphrasing correct_option three times.
     - Questions, correct answers, true-false decisions, explanations, and hints
-      must use the supplied lesson statements. Multiple-choice distractors may use a familiar
+      must use the supplied facts. Multiple-choice distractors may use a familiar
       closely related term absent from the facts, but must remain relevant,
       plausible, in the same semantic category, and unambiguously incorrect.
       Exactly one multiple-choice option may satisfy its question.

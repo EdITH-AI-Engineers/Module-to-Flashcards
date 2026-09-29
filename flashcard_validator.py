@@ -50,7 +50,8 @@ BANNED_FRAMING = (
 )
 _PROVENANCE_SOURCE_TERM = (
     r"(?:knowledge\s+graph|concept\s+facts?|facts?|evidence|source(?:\s+material)?|"
-    r"material|information|text|module(?:\s+content)?|document|lesson|"
+    r"material|information|text|module(?:\s+content)?|document|"
+    r"lesson\s+statements?|lesson|"
     r"slides?|file|chunk|citation|url|definition|vocabulary)"
 )
 PROVENANCE_PATTERNS = (

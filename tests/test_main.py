@@ -33,6 +33,12 @@ def test_parse_args_defaults_to_8k_context():
     assert main.parse_args(["graph.json"]).n_ctx == 8192
 
 
+def test_parse_args_defaults_to_two_independent_truncation_retries():
+    args = main.parse_args(["graph.json"])
+
+    assert args.max_truncation_retries == 2
+
+
 def test_parse_args_preserves_identity_strings():
     args = main.parse_args(
         [

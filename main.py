@@ -175,6 +175,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="maximum attempts for each invalid response (default: 3)",
     )
     parser.add_argument(
+        "--max-truncation-retries",
+        type=int,
+        default=2,
+        help="extra retries for length-truncated responses (default: 2)",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -301,6 +307,7 @@ def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path
         backend,
         PipelineConfig(
             max_retries=args.max_retries,
+            max_truncation_retries=getattr(args, "max_truncation_retries", 2),
             final_review=args.final_review,
         ),
         progress=lambda message: print(message, file=sys.stderr, flush=True),

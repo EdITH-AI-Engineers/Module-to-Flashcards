@@ -109,6 +109,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--model-dir", type=Path, default=Path("models"))
     parser.add_argument("--attempts", type=int, default=3)
+    parser.add_argument("--max-truncation-retries", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--n-gpu-layers", type=int, default=-1)
     parser.add_argument("--n-ctx", type=int, default=DEFAULT_N_CTX)
@@ -216,6 +217,8 @@ def build_stage_commands(
         model_dir,
         "--max-retries",
         str(args.attempts),
+        "--max-truncation-retries",
+        str(args.max_truncation_retries),
         "--seed",
         str(args.seed),
         "--n-gpu-layers",

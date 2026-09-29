@@ -17,7 +17,7 @@ from flashcard_types import (
     GraphFact,
     ModuleIdentity,
 )
-from flashcard_validator import parse_cards, validate_cluster
+from flashcard_validator import ValidationError, parse_cards, validate_cluster
 from tests.factories import (
     cluster_json,
     graph_facts,
@@ -131,6 +131,7 @@ def test_pipeline_generates_twenty_valid_clusters_without_review():
 def test_pipeline_defaults_use_practical_local_token_budgets():
     config = PipelineConfig()
 
+    assert config.max_truncation_retries == 2
     assert config.plan_max_tokens == 3072
     assert config.cluster_max_tokens == 1536
     assert config.review_max_tokens == 1024
@@ -283,6 +284,93 @@ def test_truncated_cluster_retries_without_embedding_partial_output():
     assert "response was truncated before completing the JSON" in retry_prompt
     assert "PARTIAL_SENTINEL" not in retry_prompt
     assert "ORIGINAL REQUEST" not in retry_prompt
+
+
+def test_truncations_do_not_consume_parseable_validation_attempts():
+    def truncated(system, user, max_tokens):
+        raise CompletionTruncatedError(
+            "length limit",
+            prompt_tokens=6000,
+            completion_tokens=2192,
+        )
+
+    backend = FakeBackend((truncated, truncated, "invalid", "valid"))
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(
+            max_retries=2,
+            max_truncation_retries=2,
+            final_review=False,
+        ),
+        progress=lambda _message: None,
+    )
+
+    def parse(candidate):
+        if candidate == "invalid":
+            raise ValidationError("candidate failed semantic validation")
+        return candidate
+
+    result = pipeline._complete_with_retries(
+        "original",
+        parse,
+        max_tokens=128,
+        label="retry accounting",
+    )
+
+    assert result == "valid"
+    assert len(backend.calls) == 4
+
+
+def test_truncation_allowance_exhaustion_reports_truncation_cause():
+    def truncated(system, user, max_tokens):
+        raise CompletionTruncatedError("length limit")
+
+    backend = FakeBackend((truncated, truncated, truncated))
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(
+            max_retries=2,
+            max_truncation_retries=2,
+            final_review=False,
+        ),
+        progress=lambda _message: None,
+    )
+
+    with pytest.raises(GenerationError, match="truncation allowance exhausted"):
+        pipeline._complete_with_retries(
+            "original",
+            lambda candidate: candidate,
+            max_tokens=128,
+            label="retry accounting",
+        )
+
+    assert len(backend.calls) == 3
+
+
+def test_validation_exhaustion_reports_validation_cause():
+    backend = FakeBackend(("invalid one", "invalid two"))
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(
+            max_retries=2,
+            max_truncation_retries=2,
+            final_review=False,
+        ),
+        progress=lambda _message: None,
+    )
+
+    def reject(candidate):
+        raise ValidationError(f"invalid candidate: {candidate}")
+
+    with pytest.raises(GenerationError, match="failed after 2 validation attempts"):
+        pipeline._complete_with_retries(
+            "original",
+            reject,
+            max_tokens=128,
+            label="retry accounting",
+        )
+
+    assert len(backend.calls) == 2
 
 
 def test_context_first_multiple_choice_keeps_relevant_external_distractor():

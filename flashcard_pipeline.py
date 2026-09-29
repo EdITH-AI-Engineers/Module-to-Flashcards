@@ -68,6 +68,7 @@ class GenerationError(RuntimeError):
 @dataclass(frozen=True)
 class PipelineConfig:
     max_retries: int = 3
+    max_truncation_retries: int = 2
     plan_max_tokens: int = 3072
     cluster_max_tokens: int = 1536
     review_max_tokens: int = 1024
@@ -76,6 +77,8 @@ class PipelineConfig:
     def __post_init__(self) -> None:
         if self.max_retries < 1:
             raise ValueError("max_retries must be at least 1")
+        if self.max_truncation_retries < 0:
+            raise ValueError("max_truncation_retries must not be negative")
 
 
 Parsed = TypeVar("Parsed")
@@ -356,7 +359,9 @@ class FlashcardPipeline:
         build_retry = retry_prompt_builder or build_retry_prompt
         prompt = original_prompt
         last_errors: tuple[str, ...] = ()
-        for attempt in range(1, self.config.max_retries + 1):
+        validation_attempts = 0
+        truncation_failures = 0
+        while validation_attempts < self.config.max_retries:
             self._attempt_count += 1
             try:
                 candidate = self.backend.complete(
@@ -376,20 +381,29 @@ class FlashcardPipeline:
                     "response was truncated before completing the JSON" + token_detail,
                 )
                 self._record_rejection(last_errors)
+                truncation_failures += 1
                 self._progress(
-                    f"[{label}] attempt {attempt}/{self.config.max_retries} "
+                    f"[{label}] truncation {truncation_failures}/"
+                    f"{self.config.max_truncation_retries} "
                     f"rejected: {last_errors[0]}"
                 )
+                if truncation_failures > self.config.max_truncation_retries:
+                    raise GenerationError(
+                        f"{label} truncation allowance exhausted after "
+                        f"{self.config.max_truncation_retries} retries: "
+                        f"{last_errors[0]}"
+                    ) from exc
                 prompt = build_retry(original_prompt, None, last_errors)
-                if attempt < self.config.max_retries:
-                    self._progress(
-                        f"{label}: output length limit reached. Retrying with a "
-                        f"compact regeneration request "
-                        f"(attempt {attempt + 1}/{self.config.max_retries})."
-                    )
+                self._progress(
+                    f"{label}: output length limit reached. Retrying with a "
+                    f"compact regeneration request (truncation retry "
+                    f"{truncation_failures}/{self.config.max_truncation_retries})."
+                )
                 continue
+            validation_attempts += 1
             self._progress(
-                f"[{label}] attempt {attempt}/{self.config.max_retries} "
+                f"[{label}] validation attempt {validation_attempts}/"
+                f"{self.config.max_retries} "
                 f"generated output:\n{candidate}"
             )
             try:
@@ -400,21 +414,24 @@ class FlashcardPipeline:
                 last_errors = exc.errors
                 self._record_rejection(last_errors)
                 self._progress(
-                    f"[{label}] attempt {attempt}/{self.config.max_retries} "
+                    f"[{label}] validation attempt {validation_attempts}/"
+                    f"{self.config.max_retries} "
                     f"rejected: {' | '.join(last_errors)}"
                 )
                 rejected = candidate if include_rejected_candidate else None
                 prompt = build_retry(original_prompt, rejected, last_errors)
-                if attempt < self.config.max_retries:
+                if validation_attempts < self.config.max_retries:
                     summary = " | ".join(last_errors[:3])
                     self._progress(
                         f"{label}: {summary}. Retrying after validation errors "
-                        f"(attempt {attempt + 1}/{self.config.max_retries})."
+                        f"(validation attempt {validation_attempts + 1}/"
+                        f"{self.config.max_retries})."
                     )
 
         details = "; ".join(last_errors) if last_errors else "unknown validation error"
         raise GenerationError(
-            f"{label} failed after {self.config.max_retries} attempts: {details}"
+            f"{label} failed after {self.config.max_retries} validation attempts: "
+            f"{details}"
         )
 
     @staticmethod

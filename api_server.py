@@ -154,6 +154,7 @@ def pipeline_args(pdf: Path, course_code: str, module_number: str) -> Namespace:
         rebel_model=REBEL_MODEL,
         portable=PORTABLE_MODE,
         attempts=3,
+        max_truncation_retries=2,
         seed=42,
         n_gpu_layers=QWEN_GPU_LAYERS,
         n_ctx=DEFAULT_N_CTX,

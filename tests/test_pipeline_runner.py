@@ -22,6 +22,10 @@ def test_timeout_defaults_to_disabled(tmp_path):
     assert make_args(tmp_path).timeout == 0
 
 
+def test_truncation_retries_default_to_two(tmp_path):
+    assert make_args(tmp_path).max_truncation_retries == 2
+
+
 def make_args(tmp_path, *extra):
     source = tmp_path / "Module One.pdf"
     source.write_bytes(b"pdf")
@@ -162,6 +166,18 @@ def test_build_stage_commands_use_current_python_and_absolute_artifacts(tmp_path
     assert commands[2].command[corpus_index] == str(
         (paths.flashcards.parent / "course_corpus.json").resolve()
     )
+
+
+def test_build_stage_commands_forwards_independent_truncation_retries(tmp_path):
+    args = make_args(tmp_path, "--max-truncation-retries", "4")
+    paths = pipeline.pipeline_paths(
+        args.pdf, args.output_root, args.course_code, args.module_number
+    )
+
+    command = pipeline.build_stage_commands(args, paths)[2].command
+
+    option_index = command.index("--max-truncation-retries")
+    assert command[option_index + 1] == "4"
 
 
 def test_run_executes_all_stages_in_order_when_artifacts_are_missing(tmp_path):

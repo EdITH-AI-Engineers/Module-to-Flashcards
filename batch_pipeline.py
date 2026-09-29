@@ -282,6 +282,7 @@ def _flashcard_stage(item: BatchItem, backend: object) -> Path | None:
     args.output = item.paths.flashcards
     args.course_corpus = item.paths.flashcards.parent / "course_corpus.json"
     args.max_retries = item.args.attempts
+    args.max_truncation_retries = getattr(item.args, "max_truncation_retries", 2)
     args.final_review = not item.args.skip_final_review
     args.smoke_test = False
     return flashcard_generator.run(args, backend=backend)

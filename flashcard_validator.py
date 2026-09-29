@@ -858,7 +858,8 @@ def _sanitize_question(text: str) -> str:
 
     Explanations and hints aren't the only place this leaks -- the model
     just as often tacks the wrapper directly onto the question, e.g. "What
-    is the key aspect of HCI according to the provided facts?" The wrapper
+    is the key property of a process according to the provided facts?" The
+    wrapper
     carries no assessable content, so removing it only makes the stem
     cleaner; it never changes what is actually being asked. If stripping
     would remove more than the wrapper (leaving too little of the

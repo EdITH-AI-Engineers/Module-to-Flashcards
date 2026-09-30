@@ -6,6 +6,8 @@ import re
 from typing import Iterable, Mapping, Sequence
 import unicodedata
 
+from artifact_paths import module_file_label
+
 
 FORMAT_VERSION = "1"
 NOT_SPECIFIED = "Not Specified"
@@ -18,6 +20,49 @@ _CONTROL_TAG = re.compile(
 )
 _SECTION_TAG = re.compile(r"^\[(/?)([A-Z_]+)(?:\s+\d+)?\]$")
 _SLIDE_OPEN_TAG = re.compile(r"^\[SLIDE\s+(\d+)\]$", flags=re.IGNORECASE)
+_REPORT_SLIDE_HEADER = re.compile(
+    r"(?im)^\s*Slide\s+(\d+)\s*:\s*$"
+)
+_REPORT_FIELD = re.compile(
+    r"^\s*(Title|Content|Image/Diagram Description|Brief Explanation)"
+    r"\s*:\s*(.*)$",
+    flags=re.IGNORECASE,
+)
+_REPORT_MODULE_NUMBER = re.compile(
+    r"(?im)^\s*Module\s*(?:(?:Number|No\.?)\s*)?#?\s*:\s*(.*?)\s*$"
+)
+_REPORT_MODULE_TITLE = re.compile(
+    r"(?im)^\s*Module\s+Title\s*:\s*(.*?)\s*$"
+)
+_REPORT_COURSE_CODE = re.compile(
+    r"(?im)^\s*Course\s+(?:Code|ID)\s*:\s*(.*?)\s*$"
+)
+_REPORT_COURSE_LABEL = re.compile(
+    r"^Course\s*:\s*([A-Za-z0-9][A-Za-z0-9._-]*)$",
+    flags=re.IGNORECASE,
+)
+_REPORT_TITLE_MODULE_NUMBER = re.compile(
+    r"^\s*Module\s*(?:#|Number|No\.?)?\s*[:#-]?\s*"
+    r"([A-Za-z0-9][A-Za-z0-9._-]*)\s*$",
+    flags=re.IGNORECASE,
+)
+_REPORT_PRESENTATION_LABEL = re.compile(
+    r"^(?:Course|Institutions?|Campuses?|Campus Names|Tagline|Affiliation)\s*:",
+    flags=re.IGNORECASE,
+)
+_REPORT_EXERCISE_TEXT = re.compile(
+    r"^(?:(?:Task|Answer|Ans|Given|Parameters?|Question|Problem)\s*:|"
+    r"(?:Find|Determine|Calculate)\b|"
+    r"(?:What|How|Why|When|Where|Which)\s+"
+    r"(?:will|is|are|does|do|can)\b)",
+    flags=re.IGNORECASE,
+)
+_REPORT_NONLESSON_TITLE = re.compile(
+    r"^(?:Q\s*(?:&|and)\s*A(?:\s+Session)?|"
+    r"Questions?\s*(?:&|and)\s*Answers?(?:\s+Session)?|"
+    r"Thank\s+You|References?)\s*[!.]?$",
+    flags=re.IGNORECASE,
+)
 _PRESENTATION_NOISE = re.compile(
     r"^(?:(?:this|the|the first|the current|first)\s+(?:slide|page)\b|"
     r"the module title\b|(?:this|the)\s+(?:module|lesson|chapter|section)\s+"
@@ -609,6 +654,211 @@ def parse_module_metadata(text: str) -> dict[str, str]:
     return metadata
 
 
+def _report_value(pattern: re.Pattern[str], text: str) -> str | None:
+    match = pattern.search(text)
+    if not match:
+        return None
+    value = re.sub(r"\s+", " ", match.group(1)).strip()
+    return value or None
+
+
+def _specified_report_value(value: str | None) -> str | None:
+    if value is None or not _meaningful(value):
+        return None
+    return value
+
+
+def _report_lines(values: Iterable[str]) -> tuple[str, ...]:
+    items: list[str] = []
+    for value in values:
+        line = re.sub(r"\s+", " ", value).strip()
+        line = re.sub(r"^(?:[-*\u2022\u25aa\u25e6\u2023]|\d+[.)])\s+", "", line)
+        if line:
+            items.append(line)
+    return tuple(items) or (NOT_SPECIFIED,)
+
+
+def _report_paragraph(values: Iterable[str], fallback: str = NOT_SPECIFIED) -> str:
+    text = " ".join(re.sub(r"\s+", " ", value).strip() for value in values)
+    return re.sub(r"\s+", " ", text).strip() or fallback
+
+
+def _report_slide_fields(chunk: str) -> dict[str, list[str]]:
+    fields = {
+        "title": [],
+        "content": [],
+        "visual_text": [],
+        "brief_explanation": [],
+    }
+    field_names = {
+        "title": "title",
+        "content": "content",
+        "image/diagram description": "visual_text",
+        "brief explanation": "brief_explanation",
+    }
+    current: str | None = None
+    for raw_line in chunk.replace("\r\n", "\n").replace("\r", "\n").splitlines():
+        match = _REPORT_FIELD.match(raw_line)
+        if match:
+            current = field_names[match.group(1).casefold()]
+            inline_value = match.group(2).strip()
+            if inline_value:
+                fields[current].append(inline_value)
+            continue
+
+        line = raw_line.strip()
+        if line in {"{", "}", "---"}:
+            if line == "}":
+                current = None
+            continue
+        if current is not None:
+            fields[current].append(raw_line)
+    return fields
+
+
+def _module_number_from_report(
+    text: str,
+    slide_titles: Iterable[str] = (),
+) -> str | None:
+    declared = _specified_report_value(_report_value(_REPORT_MODULE_NUMBER, text))
+    if declared:
+        return declared
+    for title in slide_titles:
+        match = _REPORT_TITLE_MODULE_NUMBER.fullmatch(title)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _report_slides(text: str) -> tuple[dict[str, object], ...]:
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    matches = list(_REPORT_SLIDE_HEADER.finditer(normalized))
+    if not matches:
+        raise ValueError("input does not contain any 'Slide N:' blocks")
+    slides: list[dict[str, object]] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(normalized)
+        fields = _report_slide_fields(normalized[match.end() : end])
+        slides.append(
+            {
+                "number": int(match.group(1)),
+                "title": _report_paragraph(fields["title"]),
+                "content": _report_lines(fields["content"]),
+                "visual_text": _report_lines(fields["visual_text"]),
+                "brief_explanation": _report_paragraph(
+                    fields["brief_explanation"]
+                ),
+            }
+        )
+    return tuple(slides)
+
+
+def _report_is_presentation_slide(
+    slide: Mapping[str, object],
+    module_title: str,
+) -> bool:
+    title = str(slide["title"])
+    if _REPORT_NONLESSON_TITLE.fullmatch(title) or _REPORT_TITLE_MODULE_NUMBER.fullmatch(title):
+        return True
+    return (
+        int(slide["number"]) == 1
+        and _normalized_fact_text(title) == _normalized_fact_text(module_title)
+        and any(
+            _REPORT_PRESENTATION_LABEL.match(str(value))
+            for value in slide["content"]
+        )
+    )
+
+
+def parse_slide_report_metadata(text: str) -> dict[str, str]:
+    """Read identity fields from the uploaded human-readable slide report."""
+
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    matches = list(_REPORT_SLIDE_HEADER.finditer(normalized))
+    if not matches:
+        return {}
+    slides = _report_slides(normalized)
+    header = normalized[: matches[0].start()]
+    titles = [str(slide["title"]) for slide in slides]
+    module_number = _module_number_from_report(header, titles)
+    module_title = _specified_report_value(
+        _report_value(_REPORT_MODULE_TITLE, header)
+    ) or next((title for title in titles if _meaningful(title)), NOT_SPECIFIED)
+    metadata = {"module_title": module_title}
+    if module_number:
+        metadata["module_number"] = module_number
+    declared_course = _specified_report_value(
+        _report_value(_REPORT_COURSE_CODE, header)
+    )
+    if not declared_course:
+        for line in slides[0]["content"]:
+            match = _REPORT_COURSE_LABEL.fullmatch(str(line))
+            if match:
+                declared_course = match.group(1)
+                break
+    if declared_course:
+        metadata["course_code"] = declared_course
+    return metadata
+
+
+def validate_slide_report(
+    text: str,
+    *,
+    course_code: str,
+    module_number: str | None = None,
+) -> dict[str, str]:
+    """Validate slide-report identity and readable content without rewriting it."""
+
+    slides = _report_slides(text)
+    metadata = parse_slide_report_metadata(text)
+
+    supplied_course = str(course_code or "").strip()
+    if not supplied_course:
+        raise ValueError("course code is required for slide-report input")
+    declared_course = metadata.get("course_code")
+    if declared_course and declared_course != supplied_course:
+        raise ValueError(
+            "slide report course code does not match the request: "
+            f"{declared_course}"
+        )
+
+    declared_number = metadata.get("module_number")
+    supplied_number = _specified_report_value(str(module_number or "").strip())
+    if (
+        declared_number
+        and supplied_number
+        and module_file_label(declared_number) != module_file_label(supplied_number)
+    ):
+        raise ValueError("slide report module number does not match --module-number")
+    effective_number = declared_number or supplied_number
+    if not effective_number:
+        raise ValueError(
+            "slide report must declare a module number in 'Module #:' or a "
+            "'MODULE N' slide title"
+        )
+    if not any(
+        any(
+            _meaningful(str(value))
+            for value in (
+                slide["title"],
+                *slide["content"],
+                *slide["visual_text"],
+                slide["brief_explanation"],
+            )
+        )
+        for slide in slides
+    ):
+        raise ValueError("slide report contains no readable learning content")
+    if not graph_ready_text(text).strip():
+        raise ValueError("slide report contains no readable learning content")
+
+    return {
+        **metadata,
+        "course_code": supplied_course,
+        "module_number": effective_number,
+    }
+
+
 def _lesson_fact_text(value: str) -> str | None:
     text = _clean_fact_text(value)
     if not _meaningful(text) or _PRESENTATION_NOISE.match(text):
@@ -618,11 +868,64 @@ def _lesson_fact_text(value: str) -> str | None:
     return text
 
 
+def _extract_slide_report_facts(text: str) -> tuple[dict[str, object], ...]:
+    try:
+        slides = _report_slides(text)
+    except ValueError:
+        return ()
+
+    module_title = parse_slide_report_metadata(text).get("module_title", "")
+    facts: list[dict[str, object]] = []
+    for slide in slides:
+        slide_number = int(slide["number"])
+        title = str(slide["title"])
+        if _report_is_presentation_slide(slide, module_title):
+            continue
+        topic = title if _meaningful(title) else f"Slide {slide_number}"
+        facts_before_slide = len(facts)
+        for raw_statement in slide["content"]:
+            if (
+                _REPORT_PRESENTATION_LABEL.match(str(raw_statement))
+                or _REPORT_EXERCISE_TEXT.match(str(raw_statement))
+            ):
+                continue
+            statement = _lesson_fact_text(str(raw_statement))
+            if statement is None:
+                continue
+            candidate = {
+                "statement": statement,
+                "slides": [slide_number],
+                "kind": "content",
+                "topic": topic,
+            }
+            usable = filter_lesson_fact_records((candidate,))
+            if usable:
+                facts.append(usable[0])
+        if len(facts) == facts_before_slide:
+            explanation = str(slide["brief_explanation"])
+            for sentence in re.split(r"(?<=[.!?])\s+(?=[A-Z])", explanation):
+                if _REPORT_EXERCISE_TEXT.match(sentence):
+                    continue
+                statement = _lesson_fact_text(sentence)
+                if statement is None:
+                    continue
+                candidate = {
+                    "statement": statement,
+                    "slides": [slide_number],
+                    "kind": "content",
+                    "topic": topic,
+                }
+                usable = filter_lesson_fact_records((candidate,))
+                if usable:
+                    facts.append(usable[0])
+    return deduplicate_lesson_fact_records(facts, reassign_ids=True)
+
+
 def extract_lesson_facts(text: str) -> tuple[dict[str, object], ...]:
     """Extract grounded lesson facts from normalized structured module text."""
     metadata = parse_module_metadata(text)
     if not metadata:
-        return ()
+        return _extract_slide_report_facts(text)
 
     slides: list[dict[str, object]] = []
     current_slide: dict[str, object] | None = None
@@ -746,7 +1049,32 @@ def extract_lesson_facts(text: str) -> tuple[dict[str, object], ...]:
 
 def graph_ready_text(text: str) -> str:
     if not parse_module_metadata(text):
-        return text.strip()
+        try:
+            slides = _report_slides(text)
+        except ValueError:
+            return text.strip()
+        module_title = parse_slide_report_metadata(text).get("module_title", "")
+        output: list[str] = []
+        for slide in slides:
+            if _report_is_presentation_slide(slide, module_title):
+                continue
+            if output:
+                output.append("")
+            output.append(f"Slide {slide['number']}")
+            for key in ("title", "content", "visual_text", "brief_explanation"):
+                values = slide[key]
+                if isinstance(values, str):
+                    values = (values,)
+                for value in values:
+                    line = str(value).strip()
+                    if (
+                        _meaningful(line)
+                        and not _REPORT_PRESENTATION_LABEL.match(line)
+                        and not _REPORT_EXERCISE_TEXT.match(line)
+                    ):
+                        output.append(line)
+        projected = "\n".join(output)
+        return re.sub(r"\n{3,}", "\n\n", projected).strip()
 
     output: list[str] = []
     current_section: str | None = None

@@ -16,6 +16,8 @@ from structured_module import (
     extract_lesson_facts,
     graph_ready_text,
     parse_module_metadata,
+    parse_slide_report_metadata,
+    validate_slide_report,
 )
 
 
@@ -92,6 +94,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description="Create a knowledge graph from text using the REBEL model."
     )
     parser.add_argument("input", type=Path, help="UTF-8 .txt file to process")
+    parser.add_argument("--course-code", help="course identity for slide-report input")
+    parser.add_argument("--module-number", help="module identity for slide-report input")
     parser.add_argument(
         "--output-dir", type=Path, default=Path("knowledge_graph_output")
     )
@@ -120,9 +124,28 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
-def prepare_input_text(text: str) -> tuple[str, dict[str, str]]:
-    """Project structured modules into graph-ready prose and retain identity."""
+def prepare_input_text(
+    text: str,
+    *,
+    course_code: str | None = None,
+    module_number: str | None = None,
+    source_file: str | None = None,
+) -> tuple[str, dict[str, str]]:
+    """Project either supported module format into graph-ready prose."""
     metadata = parse_module_metadata(text)
+    report_metadata = parse_slide_report_metadata(text) if not metadata else {}
+    if report_metadata:
+        effective_course = str(course_code or report_metadata.get("course_code", ""))
+        if effective_course:
+            metadata = validate_slide_report(
+                text,
+                course_code=effective_course,
+                module_number=module_number,
+            )
+        else:
+            metadata = report_metadata
+        if source_file:
+            metadata["source_file"] = source_file
     projected = graph_ready_text(text) if metadata else text
     return clean_text(projected), metadata
 
@@ -673,7 +696,12 @@ def run(
 
     try:
         source_text = args.input.read_text(encoding="utf-8-sig", errors="replace")
-        text, module_metadata = prepare_input_text(source_text)
+        text, module_metadata = prepare_input_text(
+            source_text,
+            course_code=getattr(args, "course_code", None),
+            module_number=getattr(args, "module_number", None),
+            source_file=args.input.name,
+        )
         lesson_facts = extract_lesson_facts(source_text)
         chunks = make_chunks(text, runtime.tokenizer, args.chunk_tokens, args.overlap_tokens)
         print(f"Created {len(chunks)} overlapping chunks", flush=True)

@@ -140,6 +140,12 @@ def test_build_stage_commands_use_current_python_and_absolute_artifacts(tmp_path
     assert Path(commands[0].command[1]).name == "text-extractor.py"
     assert str(paths.structured_text.resolve()) in commands[0].command
     assert str(paths.unchecked_graph_dir.resolve()) in commands[0].command
+    assert commands[0].command[
+        commands[0].command.index("--course-code") + 1
+    ] == "CPE0021"
+    assert commands[0].command[
+        commands[0].command.index("--module-number") + 1
+    ] == "01"
     assert "cpu" in commands[0].command
     assert "--batch-size" in commands[0].command
     assert commands[0].command[commands[0].command.index("--batch-size") + 1] == "1"
@@ -426,7 +432,7 @@ def test_help_documents_artifacts_resume_and_force(capsys):
 
     assert exc_info.value.code == 0
     help_text = capsys.readouterr().out
-    assert "structured UTF-8 TXT module" in help_text
+    assert "UTF-8 TXT module report" in help_text
     assert "--course-code" in help_text
     assert "--module-number" in help_text
     assert "structured_module.txt" in help_text

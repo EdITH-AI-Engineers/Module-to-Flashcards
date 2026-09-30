@@ -19,7 +19,11 @@ from artifact_paths import module_file_label
 from local_qwen import DEFAULT_N_CTX
 from pipeline import pipeline_paths
 from portable_paths import PortablePaths, build_paths
-from structured_module import parse_module_metadata
+from structured_module import (
+    parse_module_metadata,
+    parse_slide_report_metadata,
+    validate_slide_report,
+)
 from version import __version__
 
 
@@ -246,7 +250,7 @@ def safe_filename(filename: str) -> str:
     if not name:
         raise ValueError("uploaded file must have a filename")
     if not name.casefold().endswith(".txt"):
-        raise ValueError("only structured TXT module files are accepted")
+        raise ValueError("only TXT module reports are accepted")
     return name
 
 
@@ -316,11 +320,17 @@ async def save_upload(upload: UploadFile, course_code: str) -> Path:
 
 
 def find_module_number(module_text: str) -> str:
-    """Find the declared module number by searching structured module text."""
+    """Find the module number in either supported TXT input format."""
     metadata = parse_module_metadata(module_text)
     module_number = metadata.get("module_number", "").strip()
     if module_number:
         return module_number
+
+    report_number = parse_slide_report_metadata(module_text).get(
+        "module_number", ""
+    ).strip()
+    if report_number:
+        return report_number
 
     fallback = re.search(
         r"(?im)^\s*(?:module_number|module(?:\s+(?:number|no\.?))?)"
@@ -338,15 +348,19 @@ def structured_module_number(source: Path, course_code: str) -> str:
     except (OSError, UnicodeError) as exc:
         raise ValueError(f"could not read structured module: {exc}") from exc
     metadata = parse_module_metadata(content)
-    if metadata.get("format_version") != "1":
-        raise ValueError("structured module must declare format_version: 1")
-    embedded_course = metadata.get("course_code")
-    if embedded_course != course_code.strip():
-        raise ValueError(
-            "structured module course_code does not match the request: "
-            f"{embedded_course or '(missing)'}"
-        )
-    return find_module_number(content)
+    if metadata:
+        if metadata.get("format_version") != "1":
+            raise ValueError("structured module must declare format_version: 1")
+        embedded_course = metadata.get("course_code")
+        if embedded_course != course_code.strip():
+            raise ValueError(
+                "structured module course_code does not match the request: "
+                f"{embedded_course or '(missing)'}"
+            )
+        return find_module_number(content)
+
+    report_metadata = validate_slide_report(content, course_code=course_code)
+    return report_metadata["module_number"]
 
 
 def canonical_module_filename(course_code: str, module_number: str) -> str:
@@ -415,7 +429,7 @@ async def process_files(
         ),
     ],
     files: Annotated[
-        list[UploadFile], File(description="Structured TXT module files")
+        list[UploadFile], File(description="TXT module reports")
     ],
 ) -> dict:
     request_id = _PIPELINE_STATUS.enqueue(
@@ -470,7 +484,7 @@ async def process_files(
                             state="processing",
                             stage="validating",
                             progress_percent=0,
-                            message="Saving and validating structured input...",
+                            message="Saving and validating module input...",
                         )
                         try:
                             safe_filename(upload.filename or "")
@@ -528,7 +542,7 @@ async def process_files(
                                 state="queued",
                                 stage="ingest",
                                 progress_percent=0,
-                                message="Waiting for structured input staging.",
+                                message="Waiting for module input staging.",
                             )
                         except (OSError, ValueError, RuntimeError) as exc:
                             if source is not None and source.suffix == ".tmp":

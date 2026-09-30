@@ -1,6 +1,6 @@
 # Module to Flashcards
 
-This project accepts structured UTF-8 text modules, extracts a relationship
+This project accepts UTF-8 text module reports, extracts a relationship
 graph with REBEL, and uses a local Qwen model to generate validated,
 copy-paste-ready assessment CSV files.
 
@@ -8,44 +8,43 @@ Current release: 1.1.0
 
 ## Input format
 
-The local server accepts `.txt` files that already follow the structured module
-contract. Each file must contain a `[MODULE]` block with `format_version: 1`
-and at least one readable `[SLIDE n]` block. PDF files are not accepted, and
+The local server accepts `.txt` slide reports with `Module #:` and `Module Title:`
+headers followed by `Slide N:` sections. Each slide may contain `Title:`,
+`Content:`, `Image/Diagram Description:`, and `Brief Explanation:`. The report
+is staged in its original text form. The earlier `[MODULE]` / `[SLIDE n]`
+format is also accepted for existing inputs. PDF files are not accepted, and
 the application does not perform image recognition or document conversion.
 
 A minimal example is:
 
 ```text
-[MODULE]
-format_version: 1
-course_code: CPE0021
-module_number: 1
-module_title: Processor Architecture
-source_file: CPE0021-M1.txt
-[/MODULE]
+Module #: 9
+Module Title: BASIC ELECTRICAL ENGINEERING
 
-[SLIDE 1]
-extraction_method: text
-[TITLE]
-Processor
-[/TITLE]
-[CONTENT]
-- A processor executes instructions.
-[/CONTENT]
-[VISUAL_TEXT]
-- Not Specified
-[/VISUAL_TEXT]
-[DEFINITIONS]
+---
+
+Slide 1:
+{
+Title:
+Effective value of AC
+
+Content:
+Course: BASICEE
+The effective value of AC is its root mean square (RMS) value.
+
+Image/Diagram Description:
 Not Specified
-[/DEFINITIONS]
-[KNOWLEDGE_STATEMENTS]
-- A processor contains an arithmetic logic unit.
-[/KNOWLEDGE_STATEMENTS]
-[BRIEF_EXPLANATION]
-The slide describes a processor.
-[/BRIEF_EXPLANATION]
-[/SLIDE]
+}
+
+Brief Explanation:
+RMS compares the heating effect of AC with DC in the same resistor.
+
+---
 ```
+
+If `Module #:` is `Not Specified`, a slide titled `MODULE 9` supplies module
+number `9`. The course code is provided separately as `courseCode` in the API
+or `--course-code` in the command line.
 
 ## Quick start with the local server
 
@@ -65,15 +64,15 @@ The server listens at `http://localhost:8000`. Check it with:
 Invoke-WebRequest http://localhost:8000/health
 ```
 
-Send one or more structured text modules as multipart form data to:
+Send one or more text module reports as multipart form data to:
 
 ```text
 POST http://localhost:8000/process
 ```
 
 The multipart payload must contain `courseCode` once and one or more `files`
-fields. The server reads `module_number` from each structured module, verifies
-the module's embedded course code against `courseCode`, and stores the upload as
+fields. The server reads the module number from each report, checks any declared
+course code against `courseCode`, and stores the upload as
 `<courseCode>_M<moduleNumber>.txt` regardless of its original filename.
 
 While processing is running, poll the status endpoint:
@@ -104,11 +103,11 @@ topics, then keeps the largest set that fits while reserving the complete
 
 ## Command-line pipeline
 
-Run the complete sequence with a structured text module:
+Run the complete sequence with a text module report:
 
 ```powershell
-.\.venv\Scripts\python.exe pipeline.py "C:\path\to\CPE0021-M1.txt" `
-  --course-code CPE0021 --module-number 1
+.\.venv\Scripts\python.exe pipeline.py "C:\path\to\EDITH-2503-0522-5807-75B3.txt" `
+  --course-code BASICEE --module-number 9
 ```
 
 Useful options include `--output-root`, `--kg-device`, `--kg-batch-size`,
@@ -119,14 +118,15 @@ flashcards instead of resuming from valid artifacts.
 Run only the knowledge-graph stage:
 
 ```powershell
-.\.venv\Scripts\python.exe text-extractor.py structured-module.txt --output-dir output
+.\.venv\Scripts\python.exe text-extractor.py "C:\path\to\EDITH-2503-0522-5807-75B3.txt" `
+  --course-code BASICEE --module-number 9 --output-dir output
 ```
 
 Run only flashcard generation:
 
 ```powershell
 .\.venv\Scripts\python.exe main.py output\knowledge_graph.json `
-  --course-code CPE0021 --module-number 1
+  --course-code BASICEE --module-number 9
 ```
 
 Every successful module produces two labeled CSV blocks with 50 rows each:

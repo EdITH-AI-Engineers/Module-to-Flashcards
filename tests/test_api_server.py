@@ -71,7 +71,7 @@ class ClosingUpload(FakeUpload):
 
 def test_safe_filename_accepts_txt_and_rejects_pdf():
     assert api_server.safe_filename("Module 1.txt") == "Module_1.txt"
-    with pytest.raises(ValueError, match="structured TXT"):
+    with pytest.raises(ValueError, match="TXT module reports"):
         api_server.safe_filename("Module 1.pdf")
 
 

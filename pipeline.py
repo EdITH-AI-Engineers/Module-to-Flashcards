@@ -17,7 +17,12 @@ from flashcard_types import ModuleIdentity
 from graph_input import GraphInputError, extract_graph_facts, load_graph
 from knowledge_graph_checker import is_checked_graph
 from local_qwen import DEFAULT_N_CTX
-from structured_module import graph_ready_text, parse_module_metadata
+from structured_module import (
+    graph_ready_text,
+    parse_module_metadata,
+    parse_slide_report_metadata,
+    validate_slide_report,
+)
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -89,7 +94,7 @@ def pipeline_paths(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run a structured TXT module -> knowledge graph -> validated "
+            "Run a TXT module report -> knowledge graph -> validated "
             "flashcards as a resumable local sequence."
         ),
         epilog=(
@@ -99,7 +104,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "Valid completed stages are reused when the sequence resumes."
         ),
     )
-    parser.add_argument("input", type=Path, help="structured UTF-8 TXT module")
+    parser.add_argument("input", type=Path, help="UTF-8 TXT module report")
     parser.add_argument("--course-code", required=True, help="exact course code")
     parser.add_argument("--module-number", required=True, help="exact module number")
     parser.add_argument(
@@ -161,6 +166,10 @@ def build_stage_commands(
         str(paths.structured_text.resolve()),
         "--output-dir",
         str(paths.unchecked_graph_dir.resolve()),
+        "--course-code",
+        args.course_code,
+        "--module-number",
+        args.module_number,
         "--device",
         args.kg_device,
         "--batch-size",
@@ -212,7 +221,14 @@ def _valid_structured_text(path: Path) -> bool:
     except (OSError, UnicodeError):
         return False
     metadata = parse_module_metadata(text)
-    return metadata.get("format_version") == "1" and bool(graph_ready_text(text).strip())
+    if metadata:
+        return metadata.get("format_version") == "1" and bool(
+            graph_ready_text(text).strip()
+        )
+    report_metadata = parse_slide_report_metadata(text)
+    return bool(
+        report_metadata.get("module_number") and graph_ready_text(text).strip()
+    )
 
 
 def stage_structured_module(
@@ -222,45 +238,59 @@ def stage_structured_module(
     course_code: str | None = None,
     module_number: str | None = None,
 ) -> Path:
-    """Validate and atomically stage a structured UTF-8 module."""
+    """Validate and atomically stage a supported UTF-8 module unchanged."""
     source = Path(source)
     try:
-        content = source.read_text(encoding="utf-8-sig")
+        source_bytes = source.read_bytes()
+        content = source_bytes.decode("utf-8-sig")
     except (OSError, UnicodeError) as exc:
         raise PipelineRunError(f"could not read structured module {source}: {exc}") from exc
     metadata = parse_module_metadata(content)
-    if metadata.get("format_version") != "1" or not graph_ready_text(content).strip():
-        raise PipelineRunError(
-            f"input is not a valid format_version 1 structured module: {source}"
-        )
-    if course_code is not None and metadata.get("course_code") != str(course_code).strip():
-        raise PipelineRunError(
-            "structured module course_code does not match --course-code"
-        )
-    if (
-        module_number is not None
-        and module_file_label(metadata.get("module_number", ""))
-        != module_file_label(module_number)
-    ):
-        raise PipelineRunError(
-            "structured module module_number does not match --module-number"
-        )
+    if metadata:
+        if metadata.get("format_version") != "1" or not graph_ready_text(content).strip():
+            raise PipelineRunError(
+                f"input is not a valid format_version 1 structured module: {source}"
+            )
+        if (
+            course_code is not None
+            and metadata.get("course_code") != str(course_code).strip()
+        ):
+            raise PipelineRunError(
+                "structured module course_code does not match --course-code"
+            )
+        if (
+            module_number is not None
+            and module_file_label(metadata.get("module_number", ""))
+            != module_file_label(module_number)
+        ):
+            raise PipelineRunError(
+                "structured module module_number does not match --module-number"
+            )
+    else:
+        if course_code is None:
+            raise PipelineRunError("course code is required for slide-report input")
+        try:
+            validate_slide_report(
+                content,
+                course_code=course_code,
+                module_number=module_number,
+            )
+        except ValueError as exc:
+            raise PipelineRunError(f"invalid slide-report input {source}: {exc}") from exc
 
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary_name: str | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            newline="\n",
+            mode="wb",
             dir=destination.parent,
             prefix=f".{destination.name}.",
             suffix=".tmp",
             delete=False,
         ) as handle:
             temporary_name = handle.name
-            handle.write(content)
+            handle.write(source_bytes)
         os.replace(temporary_name, destination)
         temporary_name = None
     finally:
@@ -346,7 +376,7 @@ def run(
 ) -> PipelinePaths:
     source = Path(args.input)
     if not source.is_file():
-        raise PipelineRunError(f"structured module not found: {source}")
+        raise PipelineRunError(f"module report not found: {source}")
     if source.suffix.casefold() != ".txt":
         raise PipelineRunError(f"input must be a .txt file: {source}")
     if args.attempts < 1:

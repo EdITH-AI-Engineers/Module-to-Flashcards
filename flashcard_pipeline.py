@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from collections import Counter
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, replace
+from time import monotonic
 from typing import Callable, Sequence, TypeVar
 from uuid import uuid4
 
@@ -70,10 +73,13 @@ class PipelineConfig:
     cluster_max_tokens: int = 1536
     review_max_tokens: int = 1024
     final_review: bool = True
+    cluster_workers: int = 1
 
     def __post_init__(self) -> None:
         if self.max_retries < 1:
             raise ValueError("max_retries must be at least 1")
+        if not 1 <= self.cluster_workers <= 5:
+            raise ValueError("cluster_workers must be between 1 and 5")
 
 
 Parsed = TypeVar("Parsed")
@@ -579,6 +585,116 @@ class FlashcardPipeline:
             retry_prompt_builder=build_cluster_retry,
         )
 
+    def _generate_cluster(
+        self,
+        position: int,
+        concept: ConceptPlan,
+        identity: ModuleIdentity,
+        facts: Sequence[GraphFact],
+        prior_questions: Sequence[str],
+        existing: Sequence[FlashcardCluster] = (),
+    ) -> FlashcardCluster:
+        self._progress(
+            f"Generating cluster {position}/{CLUSTERS_PER_MODULE}: {concept.name}"
+        )
+        concept_fact_ids = set(concept.fact_ids)
+        concept_facts = tuple(
+            fact for fact in facts if fact.fact_id in concept_fact_ids
+        )
+        cards = self._generate_cards(
+            identity,
+            concept,
+            existing,
+            label=f"concept {position} ({concept.name})",
+            prior_questions=prior_questions,
+            concept_facts=concept_facts,
+            distractor_facts=_select_distractor_facts(facts, concept),
+            module_facts=facts,
+        )
+        return FlashcardCluster(cluster=str(uuid4()), concept=concept, cards=cards)
+
+    def _generate_clusters_parallel(
+        self,
+        concepts: Sequence[ConceptPlan],
+        identity: ModuleIdentity,
+        facts: Sequence[GraphFact],
+        prior_questions: Sequence[str],
+    ) -> list[FlashcardCluster]:
+        fork = getattr(self.backend, "fork", None)
+        if not callable(fork):
+            raise GenerationError("parallel clusters require a forkable model backend")
+        count = min(self.config.cluster_workers, len(concepts))
+        backends = [self.backend]
+        progress_lock = threading.Lock()
+        stop = threading.Event()
+        completed_count = 0
+
+        def report(message: str) -> None:
+            if message.startswith("Generating cluster "):
+                return
+            with progress_lock:
+                self._progress(message)
+
+        try:
+            for worker_index in range(1, count):
+                try:
+                    backends.append(fork(worker_index))
+                except Exception as exc:
+                    raise GenerationError(
+                        f"could not load cluster worker {worker_index + 1}/{count}: "
+                        f"{exc}; reduce --cluster-workers if memory is limited"
+                    ) from exc
+            workers = [
+                FlashcardPipeline(backend, self.config, progress=report)
+                for backend in backends
+            ]
+            numbered = list(enumerate(concepts, start=1))
+
+            def generate_assigned(
+                worker: FlashcardPipeline,
+                assigned: Sequence[tuple[int, ConceptPlan]],
+            ) -> list[tuple[int, FlashcardCluster]]:
+                nonlocal completed_count
+                generated = []
+                for position, concept in assigned:
+                    if stop.is_set():
+                        break
+                    try:
+                        cluster = worker._generate_cluster(
+                            position, concept, identity, facts, prior_questions
+                        )
+                    except Exception:
+                        stop.set()
+                        raise
+                    generated.append((position, cluster))
+                    with progress_lock:
+                        completed_count += 1
+                        self._progress(
+                            f"Completed cluster {completed_count}/{len(concepts)}: "
+                            f"{concept.name}"
+                        )
+                return generated
+
+            with ThreadPoolExecutor(max_workers=count) as executor:
+                futures = [
+                    executor.submit(generate_assigned, worker, numbered[index::count])
+                    for index, worker in enumerate(workers)
+                ]
+                results = [future.result() for future in futures]
+
+            for worker in workers:
+                self._attempt_count += worker._attempt_count
+                self._rejected_attempt_count += worker._rejected_attempt_count
+                self._rejection_counts.update(worker._rejection_counts)
+            ordered: list[FlashcardCluster | None] = [None] * len(concepts)
+            for batch in results:
+                for position, cluster in batch:
+                    ordered[position - 1] = cluster
+            return [cluster for cluster in ordered if cluster is not None]
+        finally:
+            for backend in backends[1:]:
+                backend.close()
+
     def _review(
         self,
         prompt: str,
@@ -942,34 +1058,27 @@ class FlashcardPipeline:
             retry_prompt_builder=build_concept_plan_retry,
         )
 
-        clusters: list[FlashcardCluster] = []
-        for position, concept in enumerate(concepts, start=1):
-            self._progress(
-                f"Generating cluster {position}/{CLUSTERS_PER_MODULE}: {concept.name}"
+        cluster_start = monotonic()
+        if self.config.cluster_workers > 1:
+            clusters = self._generate_clusters_parallel(
+                concepts, identity, facts, prior_questions
             )
-            concept_fact_ids = set(concept.fact_ids)
-
-            concept_facts = tuple(
-                fact for fact in facts if fact.fact_id in concept_fact_ids
-            )
-            distractor_facts = _select_distractor_facts(facts, concept)
-            cards = self._generate_cards(
-                identity,
-                concept,
-                clusters,
-                label=f"concept {position} ({concept.name})",
-                prior_questions=prior_questions,
-                concept_facts=concept_facts,
-                distractor_facts=distractor_facts,
-                module_facts=facts,
-            )
-            clusters.append(
-                FlashcardCluster(
-                    cluster=str(uuid4()),
-                    concept=concept,
-                    cards=cards,
+        else:
+            clusters: list[FlashcardCluster] = []
+            for position, concept in enumerate(concepts, start=1):
+                clusters.append(
+                    self._generate_cluster(
+                        position, concept, identity, facts, prior_questions, clusters
+                    )
                 )
-            )
+        cluster_elapsed = monotonic() - cluster_start
+        cluster_rate = (
+            len(clusters) * 60 / cluster_elapsed if cluster_elapsed > 0 else 0.0
+        )
+        self._progress(
+            f"Cluster generation: {len(clusters)} clusters in {cluster_elapsed:.1f}s "
+            f"({cluster_rate:.2f}/min, {self.config.cluster_workers} workers)."
+        )
 
         # Cross-cluster similarity belongs to the global review below. Running
         # it here would abort after generation but before the reviewer could

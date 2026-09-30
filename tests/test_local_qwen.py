@@ -10,6 +10,7 @@ from local_qwen import (
     MODEL_REVISION,
     LocalQwenBackend,
     ensure_model,
+    thread_budget_for_workers,
 )
 from flashcard_types import CompletionTruncatedError, ContextWindowExceededError
 
@@ -192,3 +193,52 @@ def test_backend_defaults_to_12k_context_and_can_close(monkeypatch, tmp_path):
     assert backend.context_window == 12288
     backend.close()
     assert backend._llm.closed is True
+
+
+def test_fork_creates_separate_model_context_with_worker_seed(monkeypatch, tmp_path):
+    calls = []
+
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setitem(sys.modules, "llama_cpp", SimpleNamespace(Llama=FakeLlama))
+    path = tmp_path / "model.gguf"
+    backend = LocalQwenBackend(path, n_ctx=4096, n_gpu_layers=12, seed=42)
+
+    forked = backend.fork(2)
+
+    assert calls == [
+        {"model_path": str(path), "n_ctx": 4096, "n_gpu_layers": 12,
+         "seed": 42, "verbose": False},
+        {"model_path": str(path), "n_ctx": 4096, "n_gpu_layers": 12,
+         "seed": 200042, "verbose": False},
+    ]
+    assert forked is not backend
+    forked.close()
+    assert forked._llm.closed is True
+    assert backend._llm.closed is False
+
+
+def test_parallel_model_contexts_share_the_available_cpu_threads(monkeypatch, tmp_path):
+    calls = []
+
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setitem(sys.modules, "llama_cpp", SimpleNamespace(Llama=FakeLlama))
+    monkeypatch.setattr("local_qwen.os.cpu_count", lambda: 16)
+
+    budget = thread_budget_for_workers(5)
+    backend = LocalQwenBackend(tmp_path / "model.gguf", n_threads=budget)
+    backend.fork(1)
+
+    assert budget == 3
+    assert calls[0]["n_threads"] == 3
+    assert calls[1]["n_threads"] == 3
+    assert thread_budget_for_workers(1) is None

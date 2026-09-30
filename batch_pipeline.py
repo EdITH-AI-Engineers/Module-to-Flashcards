@@ -14,7 +14,7 @@ from typing import Callable, Sequence
 
 from flashcard_pipeline import GenerationError
 from graph_input import GraphInputError
-from local_qwen import LocalQwenBackend, ensure_model
+from local_qwen import LocalQwenBackend, ensure_model, thread_budget_for_workers
 import main as flashcard_generator
 from pipeline import (
     PipelinePaths,
@@ -95,6 +95,7 @@ _SHARED_CONFIGURATION = (
     ("--n-ctx", "n_ctx"),
     ("--n-gpu-layers", "n_gpu_layers"),
     ("--seed", "seed"),
+    ("--cluster-workers", "cluster_workers"),
     ("--kg-device", "kg_device"),
     ("--kg-batch-size", "kg_batch_size"),
     ("--kg-num-beams", "kg_num_beams"),
@@ -117,7 +118,7 @@ def _source_sha256(source: Path) -> str:
 
 def _manifest_settings(args: argparse.Namespace) -> dict[str, object]:
     """Return every generation-affecting setting used by staged adapters."""
-    return {
+    settings = {
         "model_dir": str(Path(args.model_dir).resolve()),
         "attempts": args.attempts,
         "seed": args.seed,
@@ -133,6 +134,10 @@ def _manifest_settings(args: argparse.Namespace) -> dict[str, object]:
         "graph_model": DEFAULT_MODEL,
         "graph_checker": "qwen-conservative-v1",
     }
+    workers = getattr(args, "cluster_workers", 1)
+    if workers != 1:
+        settings["cluster_workers"] = workers
+    return settings
 
 
 def _manifest_contents(item: BatchItem) -> dict[str, object]:
@@ -248,6 +253,7 @@ def _qwen_loader(args: argparse.Namespace):
         model_path,
         n_ctx=args.n_ctx,
         n_gpu_layers=args.n_gpu_layers,
+        n_threads=thread_budget_for_workers(getattr(args, "cluster_workers", 1)),
         seed=args.seed,
     )
     try:
@@ -403,7 +409,7 @@ def _flashcard_detail_progress(
         return
     percent = max(45, state.progress_percent)
     cluster_match = re.search(
-        r"(?:Generating|Regenerating reviewed) cluster (\d+)/(\d+)",
+        r"(?:Generating|Completed|Regenerating reviewed) cluster (\d+)/(\d+)",
         message,
     )
     if cluster_match:

@@ -119,6 +119,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--n-gpu-layers", type=int, default=-1)
     parser.add_argument("--n-ctx", type=int, default=DEFAULT_N_CTX)
     parser.add_argument(
+        "--cluster-workers",
+        type=int,
+        choices=range(1, 6),
+        default=1,
+        help="parallel Qwen model instances for cluster generation (default: 1)",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=0,
@@ -201,6 +208,8 @@ def build_stage_commands(
         str(args.n_gpu_layers),
         "--n-ctx",
         str(args.n_ctx),
+        "--cluster-workers",
+        str(args.cluster_workers),
     ]
     if args.skip_final_review:
         stage_three.append("--skip-final-review")

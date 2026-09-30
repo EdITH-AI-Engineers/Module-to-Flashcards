@@ -43,8 +43,11 @@ RMS compares the heating effect of AC with DC in the same resistor.
 ```
 
 If `Module #:` is `Not Specified`, a slide titled `MODULE 9` supplies module
-number `9`. The course code is provided separately as `courseCode` in the API
-or `--course-code` in the command line.
+number `9`. The course identity is provided separately as `courseCode` in the
+API or `--course-code` in the command line. A cover-slide label such as
+`Course: BASICEE` is not required to match that identity (for example,
+`COE0041`). The server uses each request's `courseCode` value even if the
+report labels the course differently; `COE0041` below is only an example.
 
 ## Quick start with the local server
 
@@ -71,8 +74,8 @@ POST http://localhost:8000/process
 ```
 
 The multipart payload must contain `courseCode` once and one or more `files`
-fields. The server reads the module number from each report, checks any declared
-course code against `courseCode`, and stores the upload as
+fields. The server reads the module number from each report, uses `courseCode`
+as the course identity, and stores the upload as
 `<courseCode>_M<moduleNumber>.txt` regardless of its original filename.
 
 While processing is running, poll the status endpoint:
@@ -107,26 +110,36 @@ Run the complete sequence with a text module report:
 
 ```powershell
 .\.venv\Scripts\python.exe pipeline.py "C:\path\to\EDITH-2503-0522-5807-75B3.txt" `
-  --course-code BASICEE --module-number 9
+  --course-code COE0041 --module-number 9
 ```
 
 Useful options include `--output-root`, `--kg-device`, `--kg-batch-size`,
-`--kg-num-beams`, `--n-gpu-layers`, `--n-ctx`, `--timeout`, and `--force`.
+`--kg-num-beams`, `--n-gpu-layers`, `--n-ctx`, `--cluster-workers`,
+`--timeout`, and `--force`.
 The timeout is disabled by default. `--force` recomputes the graph and
 flashcards instead of resuming from valid artifacts.
+
+Cluster generation uses one Qwen instance by default. On a machine with enough
+RAM or VRAM, `--cluster-workers 2` through `--cluster-workers 5` generates
+that many independent clusters at once, then restores concept order and runs
+the same module validation and duplicate repair. Each worker loads a separate
+Qwen model context, so measure throughput and memory use before increasing the
+count. For the local API, set `MODULE_FLASHCARDS_CLUSTER_WORKERS` to a value
+from `1` to `5` before starting the server; the default is `1`. Changing the
+worker count can change model output because workers use distinct seeds.
 
 Run only the knowledge-graph stage:
 
 ```powershell
 .\.venv\Scripts\python.exe text-extractor.py "C:\path\to\EDITH-2503-0522-5807-75B3.txt" `
-  --course-code BASICEE --module-number 9 --output-dir output
+  --course-code COE0041 --module-number 9 --output-dir output
 ```
 
 Run only flashcard generation:
 
 ```powershell
 .\.venv\Scripts\python.exe main.py output\knowledge_graph.json `
-  --course-code BASICEE --module-number 9
+  --course-code COE0041 --module-number 9
 ```
 
 Every successful module produces two labeled CSV blocks with 50 rows each:

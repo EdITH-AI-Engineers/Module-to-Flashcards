@@ -159,6 +159,86 @@ def test_process_discovers_module_number_and_renames_upload(
     assert captured[0].args.module_number == "02"
 
 
+@pytest.mark.parametrize("payload_course", ("COE0041", "ECE0099"))
+def test_process_accepts_nine_slide_reports_with_course_abbreviation(
+    monkeypatch, tmp_path, payload_course
+):
+    def report(number):
+        return f"""Module #: Not Specified
+Module Title: BASIC ELECTRICAL ENGINEERING
+
+Slide 1:
+{{
+Title:
+BASIC ELECTRICAL ENGINEERING
+Content:
+Course: BASICEE
+Image/Diagram Description:
+Not Specified
+}}
+Brief Explanation:
+This slide introduces the course.
+
+Slide 2:
+{{
+Title:
+MODULE {number}
+Content:
+Not Specified
+Image/Diagram Description:
+Not Specified
+}}
+Brief Explanation:
+This slide introduces the module.
+
+Slide 3:
+{{
+Title:
+Frequency
+Content:
+Frequency is the number of cycles per second.
+Image/Diagram Description:
+Not Specified
+}}
+Brief Explanation:
+This slide defines frequency.
+"""
+
+    uploads = [
+        ContentUpload(f"EDITH-{number}.txt", report(number))
+        for number in range(1, 10)
+    ]
+    captured = []
+
+    def fake_batch(items, **kwargs):
+        captured.extend(items)
+        return BatchResult(outputs=(), errors=())
+
+    monkeypatch.setattr(
+        api_server, "structured_module_number", _REAL_STRUCTURED_MODULE_NUMBER
+    )
+    monkeypatch.setattr(api_server, "UPLOAD_DIR", tmp_path / "uploads")
+    monkeypatch.setattr(api_server, "OUTPUT_ROOT", tmp_path / "output")
+    monkeypatch.setattr(api_server, "run_batch", fake_batch)
+
+    response = asyncio.run(api_server.process_files(payload_course, uploads))
+
+    assert response["errors"] == []
+    assert response["courseCode"] == payload_course
+    assert [item.args.module_number for item in captured] == [
+        str(number) for number in range(1, 10)
+    ]
+    assert all(item.args.course_code == payload_course for item in captured)
+    for number in range(1, 10):
+        saved = (
+            tmp_path
+            / "uploads"
+            / payload_course
+            / f"{payload_course}_M{number}.txt"
+        )
+        assert saved.read_text(encoding="utf-8") == report(number)
+
+
 def test_configure_api_storage_routes_portable_work_into_adjacent_data(tmp_path):
     original = build_paths(api_server.PROJECT_DIR, portable=False)
     portable = build_paths(tmp_path, portable=True)

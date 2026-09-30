@@ -17,7 +17,12 @@ from graph_input import (
     load_graph,
     resolve_identity,
 )
-from local_qwen import DEFAULT_N_CTX, LocalQwenBackend, ensure_model
+from local_qwen import (
+    DEFAULT_N_CTX,
+    LocalQwenBackend,
+    ensure_model,
+    thread_budget_for_workers,
+)
 from knowledge_graph_checker import (
     KnowledgeGraphCheckError,
     check_knowledge_graph,
@@ -138,6 +143,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=f"model context window (default: {DEFAULT_N_CTX})",
     )
     parser.add_argument(
+        "--cluster-workers",
+        type=int,
+        choices=range(1, 6),
+        default=1,
+        help="parallel Qwen model instances for cluster generation (default: 1)",
+    )
+    parser.add_argument(
         "--skip-final-review",
         action="store_false",
         dest="final_review",
@@ -177,6 +189,7 @@ def run(
                 model_path,
                 n_ctx=args.n_ctx,
                 n_gpu_layers=args.n_gpu_layers,
+                n_threads=thread_budget_for_workers(getattr(args, "cluster_workers", 1)),
                 seed=args.seed,
             )
         except Exception as exc:
@@ -252,6 +265,7 @@ def run(
         PipelineConfig(
             max_retries=args.max_retries,
             final_review=args.final_review,
+            cluster_workers=getattr(args, "cluster_workers", 1),
         ),
         progress=progress
         or (lambda message: print(message, file=sys.stderr, flush=True)),

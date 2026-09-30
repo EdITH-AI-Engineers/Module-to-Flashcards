@@ -37,10 +37,6 @@ _REPORT_MODULE_TITLE = re.compile(
 _REPORT_COURSE_CODE = re.compile(
     r"(?im)^\s*Course\s+(?:Code|ID)\s*:\s*(.*?)\s*$"
 )
-_REPORT_COURSE_LABEL = re.compile(
-    r"^Course\s*:\s*([A-Za-z0-9][A-Za-z0-9._-]*)$",
-    flags=re.IGNORECASE,
-)
 _REPORT_TITLE_MODULE_NUMBER = re.compile(
     r"^\s*Module\s*(?:#|Number|No\.?)?\s*[:#-]?\s*"
     r"([A-Za-z0-9][A-Za-z0-9._-]*)\s*$",
@@ -790,12 +786,6 @@ def parse_slide_report_metadata(text: str) -> dict[str, str]:
     declared_course = _specified_report_value(
         _report_value(_REPORT_COURSE_CODE, header)
     )
-    if not declared_course:
-        for line in slides[0]["content"]:
-            match = _REPORT_COURSE_LABEL.fullmatch(str(line))
-            if match:
-                declared_course = match.group(1)
-                break
     if declared_course:
         metadata["course_code"] = declared_course
     return metadata
@@ -815,12 +805,6 @@ def validate_slide_report(
     supplied_course = str(course_code or "").strip()
     if not supplied_course:
         raise ValueError("course code is required for slide-report input")
-    declared_course = metadata.get("course_code")
-    if declared_course and declared_course != supplied_course:
-        raise ValueError(
-            "slide report course code does not match the request: "
-            f"{declared_course}"
-        )
 
     declared_number = metadata.get("module_number")
     supplied_number = _specified_report_value(str(module_number or "").strip())

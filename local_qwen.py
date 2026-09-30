@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -12,6 +13,13 @@ MODEL_REPO = "Qwen/Qwen3-8B-GGUF"
 MODEL_REVISION = "4f02e7c52b572082828edf5058a87e2e7dc3e4d5"
 MODEL_FILENAME = "Qwen3-8B-Q5_K_M.gguf"
 DEFAULT_N_CTX = 12288
+
+
+def thread_budget_for_workers(workers: int) -> int | None:
+    """Avoid multiplying CPU inference threads across model instances."""
+    if workers <= 1:
+        return None
+    return max(1, (os.cpu_count() or 1) // workers)
 
 
 def ensure_model(model_dir: Path, *, allow_download: bool = True) -> Path:
@@ -41,6 +49,7 @@ class LocalQwenBackend:
         *,
         n_ctx: int = DEFAULT_N_CTX,
         n_gpu_layers: int = -1,
+        n_threads: int | None = None,
         temperature: float = 0.2,
         seed: int = 42,
     ) -> None:
@@ -52,17 +61,37 @@ class LocalQwenBackend:
                 "python -m pip install -r requirements.txt"
             ) from exc
 
-        self._llm = Llama(
+        self._model_path = Path(model_path)
+        self._n_ctx = n_ctx
+        self._n_gpu_layers = n_gpu_layers
+        self._n_threads = n_threads
+        llama_kwargs = dict(
             model_path=str(model_path),
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
             seed=seed,
             verbose=False,
         )
+        if n_threads is not None:
+            llama_kwargs["n_threads"] = n_threads
+        self._llm = Llama(**llama_kwargs)
         self._temperature = temperature
         self._seed = seed
         self._completion_index = 0
         self._context_window = int(n_ctx)
+
+    def fork(self, worker_index: int) -> LocalQwenBackend:
+        """Load an independent inference context for one cluster worker."""
+        if worker_index < 1:
+            raise ValueError("worker_index must be positive")
+        return LocalQwenBackend(
+            self._model_path,
+            n_ctx=self._n_ctx,
+            n_gpu_layers=self._n_gpu_layers,
+            n_threads=self._n_threads,
+            temperature=self._temperature,
+            seed=self._seed + 100_000 * worker_index,
+        )
 
     @property
     def context_window(self) -> int:

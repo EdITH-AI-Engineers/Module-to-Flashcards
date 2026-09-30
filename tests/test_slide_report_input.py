@@ -73,11 +73,11 @@ def test_slide_report_stages_original_text_and_uses_title_module_number(tmp_path
     source.write_text(REPORT, encoding="utf-8")
     destination = tmp_path / "stage" / "structured_module.txt"
 
-    assert api_server.structured_module_number(source, "BASICEE") == "9"
+    assert api_server.structured_module_number(source, "COE0041") == "9"
     pipeline.stage_structured_module(
         source,
         destination,
-        course_code="BASICEE",
+        course_code="COE0041",
         module_number="09",
     )
 
@@ -85,18 +85,34 @@ def test_slide_report_stages_original_text_and_uses_title_module_number(tmp_path
     assert destination.read_text(encoding="utf-8").startswith("Module #:")
 
 
-def test_slide_report_checks_course_code_declared_on_cover_slide(tmp_path):
+def test_slide_report_uses_requested_course_id_not_cover_abbreviation(tmp_path):
     source = tmp_path / "module.txt"
     source.write_text(REPORT, encoding="utf-8")
 
-    with pytest.raises(ValueError, match="course code does not match"):
-        api_server.structured_module_number(source, "OTHER")
+    assert api_server.structured_module_number(source, "COE0041") == "9"
+    assert "course_code" not in parse_slide_report_metadata(REPORT)
+
+
+def test_slide_report_payload_course_overrides_header_course_code(tmp_path):
+    report = REPORT.replace(
+        "Module Title: BASIC ELECTRICAL ENGINEERING",
+        "Course Code: BASICEE\nModule Title: BASIC ELECTRICAL ENGINEERING",
+        1,
+    )
+    source = tmp_path / "module.txt"
+    source.write_text(report, encoding="utf-8")
+
+    assert api_server.structured_module_number(source, "COE0041") == "9"
+    _, metadata = text_extractor.prepare_input_text(
+        report, course_code="COE0041", module_number="9"
+    )
+    assert metadata["course_code"] == "COE0041"
 
 
 def test_slide_report_graph_input_preserves_course_and_slide_provenance():
     prepared, metadata = text_extractor.prepare_input_text(
         REPORT,
-        course_code="BASICEE",
+        course_code="COE0041",
         module_number="9",
         source_file="EDITH-2503-0522-5807-75B3.txt",
     )
@@ -105,7 +121,7 @@ def test_slide_report_graph_input_preserves_course_and_slide_provenance():
     assert metadata == {
         "module_title": "BASIC ELECTRICAL ENGINEERING",
         "module_number": "9",
-        "course_code": "BASICEE",
+        "course_code": "COE0041",
         "source_file": "EDITH-2503-0522-5807-75B3.txt",
     }
     assert "Slide 4\nDEFINITION OF TERMS" in prepared

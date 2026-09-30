@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict
 from dataclasses import dataclass, field
+import os
 import re
 from argparse import Namespace
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -386,6 +387,12 @@ def publish_module_upload(
 
 
 def pipeline_args(source: Path, course_code: str, module_number: str) -> Namespace:
+    try:
+        cluster_workers = int(os.environ.get("MODULE_FLASHCARDS_CLUSTER_WORKERS", "1"))
+    except ValueError as exc:
+        raise ValueError("MODULE_FLASHCARDS_CLUSTER_WORKERS must be 1 to 5") from exc
+    if not 1 <= cluster_workers <= 5:
+        raise ValueError("MODULE_FLASHCARDS_CLUSTER_WORKERS must be 1 to 5")
     return Namespace(
         input=source,
         course_code=course_code,
@@ -398,6 +405,7 @@ def pipeline_args(source: Path, course_code: str, module_number: str) -> Namespa
         seed=42,
         n_gpu_layers=QWEN_GPU_LAYERS,
         n_ctx=DEFAULT_N_CTX,
+        cluster_workers=cluster_workers,
         timeout=0,
         kg_device=KG_DEVICE,
         kg_batch_size=1,

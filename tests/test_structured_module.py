@@ -518,7 +518,7 @@ def test_module_requires_at_least_one_slide():
             course_code="CPE0021",
             module_number="1",
             module_title="Empty",
-            source_file="module.pdf",
+            source_file="module.txt",
             slides=(),
         )
 
@@ -526,7 +526,7 @@ def test_module_requires_at_least_one_slide():
 def test_module_rejects_document_when_every_slide_is_unreadable():
     slide = StructuredSlide(
         number=1,
-        extraction_method="ocr",
+        extraction_method="text",
         title="Not Specified",
         content=("[Unreadable Text]",),
         visual_text=("[Unreadable Text]",),
@@ -540,6 +540,6 @@ def test_module_rejects_document_when_every_slide_is_unreadable():
             course_code="CPE0021",
             module_number="1",
             module_title="Unreadable",
-            source_file="module.pdf",
+            source_file="module.txt",
             slides=(slide,),
         )

@@ -1,25 +1,143 @@
 # Module to Flashcards
 
-This project turns slide PDFs into structured text, extracts a relationship graph, and uses a local Qwen model to generate validated, copy-paste-ready assessment CSV.
+This project accepts structured UTF-8 text modules, extracts a relationship
+graph with REBEL, and uses a local Qwen model to generate validated,
+copy-paste-ready assessment CSV files.
 
 Current release: 1.1.0
 
+## Input format
+
+The local server accepts `.txt` files that already follow the structured module
+contract. Each file must contain a `[MODULE]` block with `format_version: 1`
+and at least one readable `[SLIDE n]` block. PDF files are not accepted, and
+the application does not perform image recognition or document conversion.
+
+A minimal example is:
+
+```text
+[MODULE]
+format_version: 1
+course_code: CPE0021
+module_number: 1
+module_title: Processor Architecture
+source_file: CPE0021-M1.txt
+[/MODULE]
+
+[SLIDE 1]
+extraction_method: text
+[TITLE]
+Processor
+[/TITLE]
+[CONTENT]
+- A processor executes instructions.
+[/CONTENT]
+[VISUAL_TEXT]
+- Not Specified
+[/VISUAL_TEXT]
+[DEFINITIONS]
+Not Specified
+[/DEFINITIONS]
+[KNOWLEDGE_STATEMENTS]
+- A processor contains an arithmetic logic unit.
+[/KNOWLEDGE_STATEMENTS]
+[BRIEF_EXPLANATION]
+The slide describes a processor.
+[/BRIEF_EXPLANATION]
+[/SLIDE]
+```
+
+## Quick start with the local server
+
+From the project directory in Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python api_server.py
+```
+
+The server listens at `http://localhost:8000`. Check it with:
+
+```powershell
+Invoke-WebRequest http://localhost:8000/health
+```
+
+Send one or more structured text modules as multipart form data to:
+
+```text
+POST http://localhost:8000/process
+```
+
+The multipart payload must contain `courseCode` once and one or more `files`
+fields. The server reads `module_number` from each structured module, verifies
+the module's embedded course code against `courseCode`, and stores the upload as
+`<courseCode>_M<moduleNumber>.txt` regardless of its original filename.
+
+While processing is running, poll the status endpoint:
+
+```text
+GET http://localhost:8000/status
+```
+
+It returns the currently active module, the ordered module queue, recent module
+states, and summary counts. Each module includes `stage`, `progressPercent`,
+`message`, `error`, and its output path when complete. The top-level `status` is
+`processing` while any module is active or queued, otherwise it is `idle`.
+
+Uploaded modules are saved under `pipeline_uploads/<course>/`. Intermediate artifacts are stored under
+`pipeline_output/<course>/<module-name>/`, and final files are stored under
+`flashcards/<course>/<course>_M<module>.csv`.
+
+For each batch, the server stages and validates all pending text files, builds
+their knowledge graphs with one REBEL model load, and generates flashcards with
+one Qwen model load. Heavy inference is sequential. A failure in one module is
+reported without preventing the other modules from completing. Re-sending an
+unchanged module reuses valid completed artifacts.
+
+Qwen uses a 12,288-token context window by default. Concept planning no longer
+uses a fixed fact-count ceiling: it balances eligible facts across slides and
+topics, then keeps the largest set that fits while reserving the complete
+3,072-token planning response budget.
+
+## Command-line pipeline
+
+Run the complete sequence with a structured text module:
+
+```powershell
+.\.venv\Scripts\python.exe pipeline.py "C:\path\to\CPE0021-M1.txt" `
+  --course-code CPE0021 --module-number 1
+```
+
+Useful options include `--output-root`, `--kg-device`, `--kg-batch-size`,
+`--kg-num-beams`, `--n-gpu-layers`, `--n-ctx`, `--timeout`, and `--force`.
+The timeout is disabled by default. `--force` recomputes the graph and
+flashcards instead of resuming from valid artifacts.
+
+Run only the knowledge-graph stage:
+
+```powershell
+.\.venv\Scripts\python.exe text-extractor.py structured-module.txt --output-dir output
+```
+
+Run only flashcard generation:
+
+```powershell
+.\.venv\Scripts\python.exe main.py output\knowledge_graph.json `
+  --course-code CPE0021 --module-number 1
+```
+
+Every successful module produces two labeled CSV blocks with 50 rows each:
+20 graph-supported concept clusters, five questions per cluster, and exactly
+100 questions in total. Partial output is not written when validation fails.
+
 ## Portable Windows release
 
-The Windows release is a portable, fully offline, one-directory application for Windows 11 x64. It includes the Python runtime, Qwen3 8B Q5_K_M model, REBEL model, Tesseract OCR, and required CUDA libraries. The complete extracted directory is approximately 11-18 GB; copying only `ModuleToFlashcards.exe` is not supported.
-
-Quick start:
-
-1. Extract the complete `ModuleToFlashcards` directory to a writable location.
-2. Keep `ModuleToFlashcards.exe`, `runtime`, `models`, `tesseract`, and `licenses` together.
-3. Double-click `ModuleToFlashcards.exe` and leave its console open.
-4. Wait for the `http://127.0.0.1:8000` readiness message.
-5. Use the existing browser extension. CSV results appear under `data/flashcards/<course>/` beside the EXE.
-6. Press Ctrl+C in the console to stop the server.
-
-Input files must be PDF files. Export `.ppt` or `.pptx` presentations to PDF before selecting them in the extension. The packaged release neither downloads models nor uses a Hugging Face user cache; missing or modified bundle files cause startup to stop instead of accessing the network.
-
-The portable layout is:
+The Windows release is a fully offline, one-directory application for Windows
+11 x64. It bundles the Python runtime, Qwen3 8B Q5_K_M model, REBEL model, and
+the required CUDA libraries. Keep the complete extracted directory together:
 
 ```text
 ModuleToFlashcards/
@@ -29,9 +147,6 @@ ModuleToFlashcards/
     Qwen3-8B-Q5_K_M.gguf
     rebel-large/
     manifest.json
-  tesseract/
-    tesseract.exe
-    tessdata/
   licenses/
   data/
     uploads/
@@ -41,361 +156,47 @@ ModuleToFlashcards/
     logs/
 ```
 
-Run a full integrity and device check without starting the server:
+Double-click `ModuleToFlashcards.exe`, wait for the localhost readiness
+message, and leave the console open while processing. Run a full integrity and
+device check without starting the server with:
 
 ```powershell
 .\ModuleToFlashcards.exe --verify
 ```
 
-Use another port when the extension is configured for it:
+Use another port with `--port 8010`. The browser extension must use the same
+port and include `http://localhost:8000/*` (or the chosen port) in its host
+permissions.
 
-```powershell
-.\ModuleToFlashcards.exe --port 8010
-```
+The launcher reports `GPU acceleration ready` only when PyTorch CUDA and
+llama.cpp GPU offload both work. Otherwise, it reports CPU fallback. Startup
+failures are recorded under `data/logs/` when that directory is writable.
 
-The launcher reports `GPU acceleration ready` only when PyTorch CUDA and llama.cpp GPU offload both work. Otherwise it prints `CPU fallback active` and runs both models on the CPU. A release intended for the RTX 5070 must report CUDA for both runtimes during final target-machine validation.
+## Build the portable release
 
-For five typical text-heavy modules of about 20 slides each, allow roughly 15-40 minutes on the RTX 5070 12 GB after startup. OCR-heavy slides, very dense content, or model validation retries can extend that to 30-90 minutes or more. Processing is deliberately sequential to keep Qwen and REBEL from occupying the 12 GB VRAM at the same time. These are planning estimates; record the actual end-to-end time with a representative five-module batch before treating them as a performance guarantee.
-
-### Portable troubleshooting
-
-- Run `nvidia-smi` if the launcher selects CPU unexpectedly. Then confirm the packaged PyTorch and llama.cpp builds both support the installed NVIDIA driver.
-- A writable-folder error means the extracted directory does not permit creating `data`. Move the complete directory to a user-writable location such as Documents.
-- If port 8000 belongs to another program, close that program or start with `--port 8010` and set the extension to the same port. A healthy copy of the same application is detected and reused.
-- An integrity error names the missing, resized, or modified bundled file. Re-extract the entire release; do not download a replacement model into the bundle manually.
-- Startup failures are recorded in `data/logs/startup-YYYYMMDD-HHMMSS-ffffff.log` when that directory is writable.
-
-### Build the portable release
-
-Maintainer builds require Windows x64, Python 3.11 or 3.12, the project dependencies, the pinned PyInstaller dependency, a CUDA-enabled PyTorch installation, a CUDA-enabled `llama-cpp-python` installation, internet access while staging locked models, and Tesseract 5.4.0.20240606. The produced release itself runs offline.
+Maintainer builds require Windows x64, Python 3.11 or 3.12, the project and
+PyInstaller dependencies, CUDA-enabled PyTorch and `llama-cpp-python` builds,
+and internet access while staging the locked Qwen and REBEL models.
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-build.txt
 .\.venv\Scripts\python.exe -c "import torch, llama_cpp; print(torch.cuda.is_available()); print(llama_cpp.llama_supports_gpu_offload())"
-powershell -ExecutionPolicy Bypass -File packaging/build_portable.ps1 -TesseractDir "C:\Program Files\Tesseract-OCR"
+powershell -ExecutionPolicy Bypass -File packaging/build_portable.ps1
 ```
 
-The build script validates `packaging/model-lock.json`, downloads the exact locked Qwen file and immutable REBEL snapshot into the ignored `packaging/assets` directory, validates the supplied portable Tesseract files, freezes the application, assembles and verifies `dist/ModuleToFlashcards`, and creates `dist/ModuleToFlashcards-1.1.0-windows-x64.zip`.
-
-Use `-SkipAssetPreparation` only when the locked assets are already staged. `-SkipGpuPreflight` is for CPU-hosted configuration checks and must not be used to label an archive GPU-ready. Never commit `packaging/assets`, `build`, `dist`, model files, runtime binaries, uploads, generated outputs, temporary data, or logs.
-
-## Python source installation
-
-The application uses one generative model throughout: the official `Qwen/Qwen3-8B-GGUF` repository and exact `Qwen3-8B-Q5_K_M.gguf` file. In source mode, the first run downloads that immutable checkpoint into `models/`; later runs reuse it for both slide normalization and flashcard generation. Qwen uses non-thinking JSON mode with an 8K-token context window by default. REBEL remains a separate relationship extractor, not a second generative model.
-
-The complete local sequence is:
-
-1. PyMuPDF extracts each PDF slide's embedded text.
-2. Sparse or image-only slides use local Tesseract OCR.
-3. Qwen organizes the extracted page text into a validated structured TXT file.
-4. The graph stage preserves normalized definitions and knowledge statements with
-   their slide/topic context, while REBEL adds relationship nodes and edges.
-5. Qwen conservatively removes presentation noise and irrelevant graph items,
-   then publishes the checked graph.
-6. Qwen generates and validates flashcards from a balanced set of grounded lesson
-   facts covering the readable slides.
-
-No PDF or extracted document content is uploaded to Mistral or another API. The selected Qwen model is text-only: Tesseract recovers visible labels from slide images, but Qwen does not perform visual interpretation of diagrams or photographs.
-
-## Git and release guidance
-
-The matching annotated Git release tag for version 1.1.0 should be `v1.1.0`.
-
-## Requirements
-
-- Windows, macOS, or Linux
-- Python 3.11 or 3.12 recommended for the easiest `llama-cpp-python` installation
-- A CUDA-capable GPU with a GPU-enabled `llama-cpp-python` build for acceleration
-- Tesseract OCR available on `PATH` or installed in its standard Windows folder
-- Several gigabytes of free disk space
-- Internet access for initial dependency and model downloads
-
-GPU offload is enabled by default with `n_gpu_layers=-1`, and REBEL selects CUDA automatically when PyTorch can access it. GPU acceleration requires a GPU-enabled `llama-cpp-python` build compatible with the installed GPU runtime. CPU-only inference remains supported but can be slow because a complete module requires concept planning, 20 cluster-generation calls, validation retries, and, in full-quality CLI mode, six optional final review calls. API fast mode skips those optional reviews.
-
-## Quick start with the browser extension
-
-Run these steps from the project directory in Windows PowerShell:
-
-1. Install the project dependencies once:
-
-  ```powershell
-  python -m venv .venv
-  .\.venv\Scripts\Activate.ps1
-  python -m pip install --upgrade pip
-  python -m pip install -r requirements.txt
-  ```
-
-2. Start the local processor and leave it running:
-
-  ```powershell
-  .\.venv\Scripts\python.exe api_server.py
-  ```
-
-3. Open the Paraverse course page, select the PDFs in the extension panel,
-  and click **Process Selected**. The extension sends them to the local
-  server at `http://localhost:8000/process/<course-code>`.
-
-Confirm that the server is ready before using the extension:
-
-```powershell
-Invoke-WebRequest http://localhost:8000/health
-```
-
-The server accepts multiple selected PDFs in one request. Intermediate artifacts
-and checked graphs are stored under `pipeline_output/<course>/<pdf-name>/`; final
-CSV files are stored under `flashcards/<course>/<course>_M<module>.csv`. Keep the
-server terminal open while processing.
-There is no default processing timeout: `--timeout 0` means unlimited time.
-
-For a multi-file request, the server stages work to reduce memory pressure and
-model reloads: it normalizes all pending PDFs with one Qwen load, builds all
-pending knowledge graphs with one REBEL load, then uses a second Qwen load to
-prune each graph before generating flashcards from it. Heavy inference is
-sequential, not parallel. If one module
-fails in a stage, it is reported in `errors` and does not block the other
-modules from continuing. Re-send the same file to resume: valid completed
-artifacts are reused, while incomplete downstream stages run again.
-
-## One-time setup on Windows PowerShell
-
-Install the Python dependencies once in a project virtual environment. Do not
-run the install command each time you generate flashcards; later runs only use
-the already configured environment and reuse the downloaded model.
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -m pip check
-```
-
-Keep the virtual environment activated while using the project. If it is not
-activated, call the same interpreter explicitly with
-`.\.venv\Scripts\python.exe`.
-
-Install Tesseract OCR if it is not already available. On Windows, one common installation is:
-
-```powershell
-winget install --exact --id UB-Mannheim.TesseractOCR
-```
-
-Verify the installation:
-
-```powershell
-& "C:\Program Files\Tesseract-OCR\tesseract.exe" --version
-```
-
-If the installer does not add Tesseract to `PATH`, the project also checks the standard Windows installation folders automatically. Tesseract is only invoked when a PDF page has too little embedded text. A text-layer PDF can complete stage 1 without OCR.
-
-The default configuration requests GPU acceleration. Install the `llama-cpp-python` wheel matching your GPU backend before running the project. CUDA users should follow the official `llama-cpp-python` installation instructions for their CUDA version; the correct wheel must be installed in `.venv` for `n_gpu_layers=-1` to use the GPU. If a GPU-enabled build is unavailable, the program falls back only when you explicitly run with `--n-gpu-layers 0` and `--kg-device cpu`.
-
-If `llama-cpp-python` tries to compile and fails, install the Visual Studio C++ Build Tools or install an official prebuilt wheel matching the computer's CPU or CUDA environment. Python 3.11 or 3.12 generally has broader native-wheel compatibility than a newly released Python version.
-
-## Connect the browser extension
-
-Start the local API once after setup and leave this terminal open while using
-the Paraverse extension:
-
-```powershell
-.\.venv\Scripts\python.exe api_server.py
-```
-
-The server listens at `http://localhost:8000`. Your extension's
-`background.js` sends selected files to:
-
-```text
-POST http://localhost:8000/process/<course-code>
-```
-
-The endpoint accepts the extension's multipart `files` fields, processes each
-PDF locally, and returns `outputs` and `errors`. It uses fast API defaults for
-interactive batches: REBEL batch size `1`, one beam, and no optional final
-flashcard review. Names such as
-`CPE0021-M1.pdf` automatically select module number `1`; files without an
-`M<number>` marker use module number `1`.
-
-If your extension has a `manifest.json`, include localhost in its background
-host permissions:
-
-```json
-"host_permissions": [
-  "https://paraverse.feutech.edu.ph/*",
-  "http://localhost:8000/*"
-]
-```
-
-Check the connection before processing files:
-
-```powershell
-Invoke-WebRequest http://localhost:8000/health
-```
-
-The extension's Local port field can be changed from `8000`, but the server
-must then be started with the matching port, for example:
-
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn api_server:app --host 127.0.0.1 --port 8010
-```
-
-## Run the complete sequence
-
-After one-time setup, from the project directory, run the full-quality CLI
-configuration. The CLI defaults are REBEL batch size 4 and three beams:
-
-```powershell
-.\.venv\Scripts\python.exe pipeline.py "C:\path\to\module.pdf" `
-  --course-code CPE0021 --module-number 1 `
-  --kg-batch-size 4 --kg-num-beams 3
-```
-
-The command creates a per-PDF workspace:
-
-```text
-pipeline_output/
-  CPE0021/
-    module/
-      structured_module.txt
-      knowledge_graph/
-        knowledge_graph.json
-        triples.csv
-flashcards/
-  CPE0021/
-    CPE0021_M1.csv
-```
-
-If the command stops, run it again. Valid completed artifacts are reused. Use `--force` to recompute all stages:
-
-```powershell
-.\.venv\Scripts\python.exe pipeline.py "C:\path\to\module.pdf" --course-code CPE0021 --module-number 1 --force
-```
-
-CPU-only Qwen and REBEL inference can take a long time for a full module. Force CPU execution when needed:
-
-```powershell
-.\.venv\Scripts\python.exe pipeline.py "C:\path\to\module.pdf" --course-code CPE0021 --module-number 1 --n-gpu-layers 0 --kg-device cpu
-```
-
-The source PDF is never changed or deleted.
-
-The command-line timeout is disabled by default (`--timeout 0`). Set a positive
-number of seconds only when you need a limit for one module:
-
-```powershell
-.\.venv\Scripts\python.exe pipeline.py "C:\path\to\module.pdf" --course-code CPE0021 --module-number 1 --timeout 600
-```
-
-## Run stage 1 only
-
-Create only the structured TXT artifact:
-
-```powershell
-.\.venv\Scripts\python.exe slides_pdf_to_txt.py "C:\path\to\module.pdf" --course-code CPE0021 --module-number 1
-```
-
-The default destination is `structured_text/<pdf-name>.txt`. Useful options include `--module-title`, `--output`, `--ocr-min-chars`, `--ocr-dpi`, `--n-gpu-layers`, and `--n-ctx`.
-
-The file uses a stable, machine-readable plain-text contract with `[MODULE]`, `[SLIDE n]`, `[CONTENT]`, `[DEFINITIONS]`, `[KNOWLEDGE_STATEMENTS]`, and related sections. The knowledge-graph stage removes these control tags and preserves their meaningful learning content.
-
-## Run the knowledge-graph stage only
-
-The included extractor accepts a UTF-8 text module:
-
-```powershell
-.\.venv\Scripts\python.exe text-extractor.py sample.txt --output-dir output
-```
-
-If `output/knowledge_graph.json` already exists, skip this extraction step.
-
-## Generate flashcards
-
-Run stage 3 directly:
-
-```powershell
-.\.venv\Scripts\python.exe main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1
-```
-
-The generated file defaults to:
-
-```text
-flashcards/CPE0021/CPE0021_M1.csv
-```
-
-It contains two labeled CSV blocks:
-
-- `Module 1.1`: ten complete clusters and 50 rows
-- `Module 1.2`: ten complete clusters and 50 rows
-
-The two module labels, two CSV headers, and blank separator are structural
-lines, not flashcards. Count the parsed CSV data rows in each block: 50 + 50.
-
-Every successful module contains 20 graph-supported concepts, five questions per concept, 20 UUID clusters, and exactly 100 questions. The program stops without writing partial output if it cannot validate those requirements.
-
-## First-run model smoke test
-
-Before generating all 100 questions, download and load the model with a tiny JSON request:
-
-```powershell
-.\.venv\Scripts\python.exe main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --smoke-test
-```
-
-A successful run prints:
-
-```text
-Qwen smoke test passed.
-```
-
-## Useful options
-
-Choose another output path:
-
-```powershell
-.\.venv\Scripts\python.exe main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --output flashcards\cpe0021-module-1.csv
-```
-
-The CLI keeps its final model-assisted review enabled by default. To skip the
-five grounding reviews and global duplicate review when runtime matters:
-
-```powershell
-.\.venv\Scripts\python.exe main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --skip-final-review
-```
-
-Skipping review retains deterministic schema and duplicate checks, but reduces semantic grounding and duplication assurance.
-
-Use CPU only:
-
-```powershell
-.\.venv\Scripts\python.exe main.py output\knowledge_graph.json --course-code CPE0021 --module-number 1 --n-gpu-layers 0
-```
-
-See all options:
-
-```powershell
-.\.venv\Scripts\python.exe main.py --help
-```
-
-## Identity precedence
-
-- Course code: the `--course-code` value is preferred; graph metadata is the fallback.
-- Module number: graph metadata is preferred; `--module-number` is the fallback.
-
-Both values are preserved as exact strings. If a required value is unavailable, the program reports only the missing value.
-
-## Tests
-
-The default tests never download or load the model:
+The build validates `packaging/model-lock.json`, stages the exact locked model
+assets, freezes the server, assembles and verifies `dist/ModuleToFlashcards`,
+and creates the versioned Windows archive. Use `-SkipAssetPreparation` only
+when locked assets are already staged. `-SkipGpuPreflight` is intended only for
+configuration checks.
+
+## Development checks
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-## Privacy and output behavior
-
-The portable release runs locally without any model download. In source mode,
-processing runs locally after the initial model downloads. Qwen receives grounded
-lesson statements plus compact topic and slide provenance; raw evidence chunks and
-filenames are excluded. All inference remains on the computer. The program assembles
-the complete result in memory and replaces the destination atomically only after
-final validation succeeds.
+Generated models, portable assets, build output, uploads, pipeline output,
+flashcards, temporary data, and logs must remain outside version control.

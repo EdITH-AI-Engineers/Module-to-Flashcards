@@ -19,9 +19,6 @@ _VERSION_PACKAGES = (
     "fastapi",
     "huggingface-hub",
     "llama-cpp-python",
-    "Pillow",
-    "PyMuPDF",
-    "pytesseract",
     "sentencepiece",
     "torch",
     "transformers",
@@ -113,7 +110,7 @@ def _copy_declared_models(repo_root: Path, source: Path, destination: Path) -> N
 
 
 def _manifest_assets(output: Path) -> tuple[Path, ...]:
-    roots = (output / "models", output / "tesseract", output / "licenses")
+    roots = (output / "models", output / "licenses")
     files = []
     for root in roots:
         files.extend(
@@ -142,7 +139,6 @@ def assemble_portable(
     if not runtime.is_dir():
         raise ValueError(f"frozen application is missing runtime directory: {runtime}")
     models_source = _require_directory(assets / "models", "staged models")
-    tesseract_source = _require_directory(assets / "tesseract", "staged Tesseract")
     if frozen_app == output:
         raise ValueError("frozen application and distribution directory must be different")
 
@@ -151,7 +147,6 @@ def assemble_portable(
         shutil.rmtree(output)
     shutil.copytree(frozen_app, output)
     _copy_declared_models(repo_root, models_source, output / "models")
-    shutil.copytree(tesseract_source, output / "tesseract")
 
     for relative in ("uploads", "pipeline_output", "temporary", "logs"):
         (output / "data" / relative).mkdir(parents=True, exist_ok=True)
@@ -160,7 +155,6 @@ def assemble_portable(
     licenses.mkdir()
     (licenses / "build-versions.txt").write_text(_build_versions(), encoding="utf-8")
     _copy_license_files(repo_root, licenses, "project")
-    _copy_license_files(tesseract_source, licenses, "tesseract")
 
     manifest = output / "models" / "manifest.json"
     write_manifest(output, _manifest_assets(output), manifest)

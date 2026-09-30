@@ -40,7 +40,6 @@ def _dependencies(events, *, status=None, port_status=FREE):
         "detect_devices": lambda: events.append("detect") or (status or _gpu_status()),
         "probe": lambda _port: events.append("probe") or port_status,
         "load_server": lambda: events.append("server") or server,
-        "configure_ocr": lambda _paths: events.append("ocr"),
         "run_server": lambda *_args, **kwargs: events.append(("run", kwargs)),
         "output": lambda message: events.append(("output", message)),
     }

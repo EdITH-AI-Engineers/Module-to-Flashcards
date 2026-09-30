@@ -11,7 +11,7 @@ from flashcard_types import CompletionTruncatedError, ContextWindowExceededError
 MODEL_REPO = "Qwen/Qwen3-8B-GGUF"
 MODEL_REVISION = "4f02e7c52b572082828edf5058a87e2e7dc3e4d5"
 MODEL_FILENAME = "Qwen3-8B-Q5_K_M.gguf"
-DEFAULT_N_CTX = 8192
+DEFAULT_N_CTX = 12288
 
 
 def ensure_model(model_dir: Path, *, allow_download: bool = True) -> Path:
@@ -62,6 +62,60 @@ class LocalQwenBackend:
         self._temperature = temperature
         self._seed = seed
         self._completion_index = 0
+        self._context_window = int(n_ctx)
+
+    @property
+    def context_window(self) -> int:
+        return self._context_window
+
+    def count_prompt_tokens(self, system: str, user: str) -> int:
+        """Count the exact chat-template tokens used by the local backend."""
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"{user}\n\n/no_think"},
+        ]
+        metadata = getattr(self._llm, "metadata", {})
+        template = (
+            metadata.get("tokenizer.chat_template")
+            if isinstance(metadata, Mapping)
+            else None
+        )
+        if isinstance(template, str) and template:
+            from llama_cpp import llama_chat_format
+
+            eos_token_id = self._llm.token_eos()
+            bos_token_id = self._llm.token_bos()
+            eos_token = (
+                self._llm._model.token_get_text(eos_token_id)
+                if eos_token_id != -1
+                else ""
+            )
+            bos_token = (
+                self._llm._model.token_get_text(bos_token_id)
+                if bos_token_id != -1
+                else ""
+            )
+            formatter = llama_chat_format.Jinja2ChatFormatter(
+                template=template,
+                eos_token=eos_token,
+                bos_token=bos_token,
+                stop_token_ids=[eos_token_id],
+            )
+            rendered = formatter(messages=messages)
+            return len(
+                self._llm.tokenize(
+                    rendered.prompt.encode("utf-8"),
+                    add_bos=not rendered.added_special,
+                    special=True,
+                )
+            )
+
+        # The pinned Qwen GGUF contains a chat template. This fallback keeps
+        # alternate/test models conservative when that metadata is absent.
+        raw = f"System:\n{system}\nUser:\n{user}\n\n/no_think\nAssistant:\n"
+        return len(
+            self._llm.tokenize(raw.encode("utf-8"), add_bos=True, special=True)
+        ) + 16
 
     def close(self) -> None:
         close = getattr(self._llm, "close", None)

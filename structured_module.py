@@ -185,7 +185,7 @@ def _is_self_contained_content_fact(statement: str) -> bool:
     """Return whether fallback slide text states a usable claim on its own.
 
     Normalized definitions and knowledge statements have already been rewritten
-    as facts. Raw CONTENT is only a fallback, so incomplete OCR lines, list
+    as facts. Raw CONTENT is only a fallback, so incomplete source lines, list
     labels, and headings need a stricter check before becoming fact IDs.
     """
 
@@ -210,7 +210,7 @@ def _is_self_contained_content_fact(statement: str) -> bool:
         return True
     if _FACT_RELATION_VERB.search(statement):
         return True
-    # A longer line can be a complete unpunctuated OCR sentence. Requiring
+    # A longer line can be a complete unpunctuated sentence. Requiring
     # length and some lower-case prose prevents title-like text from passing.
     lower_case_words = sum(bool(re.search(r"[a-z]", word)) for word in words)
     return len(words) >= 8 and lower_case_words >= len(words) // 2
@@ -491,8 +491,8 @@ class StructuredSlide:
         if self.number < 1:
             raise ValueError("slide number must be positive")
         method = _single_line(self.extraction_method).casefold()
-        if method not in {"text", "ocr"}:
-            raise ValueError("extraction method must be text or ocr")
+        if method != "text":
+            raise ValueError("extraction method must be text")
         object.__setattr__(self, "extraction_method", method)
         object.__setattr__(self, "title", _safe_item(self.title))
         object.__setattr__(self, "content", _items(self.content) or (NOT_SPECIFIED,))

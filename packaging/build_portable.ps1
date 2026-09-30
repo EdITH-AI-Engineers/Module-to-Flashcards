@@ -1,6 +1,5 @@
 [CmdletBinding()]
 param(
-    [string]$TesseractDir = "C:\Program Files\Tesseract-OCR",
     [string]$PythonExe = "",
     [switch]$SkipGpuPreflight,
     [switch]$SkipAssetPreparation
@@ -56,7 +55,7 @@ if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
 
 New-Item -ItemType Directory -Force -Path $BuildRoot, $DistRoot | Out-Null
 
-& $PythonExe -c "import fastapi, huggingface_hub, llama_cpp, PIL, pymupdf, pytesseract, sentencepiece, torch, transformers, uvicorn"
+& $PythonExe -c "import fastapi, huggingface_hub, llama_cpp, sentencepiece, torch, transformers, uvicorn"
 if ($LASTEXITCODE -ne 0) {
     throw "Runtime dependency preflight failed. Install requirements.txt before building."
 }
@@ -69,10 +68,7 @@ if (-not $SkipGpuPreflight) {
 }
 
 if (-not $SkipAssetPreparation) {
-    if (-not (Test-Path -LiteralPath $TesseractDir -PathType Container)) {
-        throw "Tesseract directory not found: $TesseractDir"
-    }
-    & $PythonExe (Join-Path $PSScriptRoot "prepare_assets.py") --repo-root $RepoRoot --tesseract-dir $TesseractDir
+    & $PythonExe (Join-Path $PSScriptRoot "prepare_assets.py") --repo-root $RepoRoot
     if ($LASTEXITCODE -ne 0) {
         throw "Locked asset preparation failed."
     }

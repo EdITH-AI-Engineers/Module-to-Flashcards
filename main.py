@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
-from typing import Sequence
+from typing import Callable, Sequence
 
 from artifact_paths import flashcard_output_path
 from flashcard_csv import render_module, write_module_output
@@ -152,7 +152,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path | None:
+def run(
+    args: argparse.Namespace,
+    *,
+    backend: ChatBackend | None = None,
+    progress: Callable[[str], None] | None = None,
+) -> Path | None:
     graph_path = Path(args.graph)
     unchecked_path = getattr(args, "unchecked_graph", None)
     checked_graph = None
@@ -201,7 +206,8 @@ def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path
             source_graph,
             backend,
             max_retries=args.max_retries,
-            progress=lambda message: print(message, file=sys.stderr, flush=True),
+            progress=progress
+            or (lambda message: print(message, file=sys.stderr, flush=True)),
         )
         save_outputs(checked_graph, graph_path.parent)
         if unchecked_path is not None:
@@ -247,7 +253,8 @@ def run(args: argparse.Namespace, *, backend: ChatBackend | None = None) -> Path
             max_retries=args.max_retries,
             final_review=args.final_review,
         ),
-        progress=lambda message: print(message, file=sys.stderr, flush=True),
+        progress=progress
+        or (lambda message: print(message, file=sys.stderr, flush=True)),
     )
     clusters = pipeline.run(
         identity,

@@ -19,7 +19,6 @@ from portable_manifest import sha256_file
 LOCK_PATH = Path(__file__).with_name("model-lock.json")
 ASSETS_DIR = Path(__file__).with_name("assets")
 _REVISION_PATTERN = re.compile(r"[0-9a-f]{40}")
-_DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 _QWEN_LOCK = {
     "repo_id": "Qwen/Qwen3-8B-GGUF",
@@ -38,12 +37,6 @@ _REBEL_REQUIRED = {
     "tokenizer_config.json",
     "vocab.json",
 }
-_TESSERACT_LOCK = {
-    "tesseract.exe": "babb405f4366b480d02cd8ff2bac8d497170f6c1711ce6f3d5d8bf0fb7fa6ed9",
-    "tessdata/eng.traineddata": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
-}
-
-
 def _mapping(value: object, label: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError(f"{label} lock must be an object")
@@ -81,14 +74,6 @@ def validate_model_lock(lock: object) -> Mapping[str, Any]:
     if "pytorch_model.bin" in patterns:
         raise ValueError("REBEL lock must select safetensors instead of pickle weights")
 
-    tesseract = _mapping(payload.get("tesseract"), "Tesseract")
-    if tesseract.get("version") != "5.4.0.20240606":
-        raise ValueError("unexpected locked Tesseract version")
-    required = _mapping(tesseract.get("required_files"), "Tesseract files")
-    if dict(required) != _TESSERACT_LOCK:
-        raise ValueError("unexpected locked Tesseract file digests")
-    if not all(_DIGEST_PATTERN.fullmatch(value) for value in required.values()):
-        raise ValueError("malformed locked Tesseract digest")
     return payload
 
 
@@ -113,17 +98,9 @@ def _require_descendant(path: Path, parent: Path, label: str) -> Path:
     return resolved
 
 
-def _replace_tree(source: Path, destination: Path, *, allowed_parent: Path) -> None:
-    destination = _require_descendant(destination, allowed_parent, "asset destination")
-    if destination.exists():
-        shutil.rmtree(destination)
-    shutil.copytree(source, destination)
-
-
 def prepare_assets(
     *,
     repo_root: Path = PROJECT_ROOT,
-    tesseract_dir: Path,
     assets_dir: Path | None = None,
     qwen_download: Callable[..., str] | None = None,
     rebel_download: Callable[..., str] | None = None,
@@ -135,7 +112,6 @@ def prepare_assets(
         packaging_root,
         "assets directory",
     )
-    tesseract_source = Path(tesseract_dir).resolve()
     lock = load_model_lock(packaging_root / "model-lock.json")
 
     if qwen_download is None or rebel_download is None:
@@ -178,30 +154,18 @@ def prepare_assets(
     if missing:
         raise ValueError("REBEL snapshot is missing locked files: " + ", ".join(missing))
 
-    tesseract_target = destination / "tesseract"
-    if not tesseract_source.is_dir():
-        raise ValueError(f"Tesseract directory not found: {tesseract_source}")
-    _replace_tree(tesseract_source, tesseract_target, allowed_parent=destination)
-    required_files = lock["tesseract"]["required_files"]
-    for relative, expected_digest in required_files.items():
-        candidate = tesseract_target.joinpath(*relative.split("/"))
-        if not candidate.is_file():
-            raise ValueError(f"Tesseract directory is missing {relative}")
-        if _sha256(candidate) != expected_digest:
-            raise ValueError(f"Tesseract digest mismatch: {relative}")
     return destination
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Stage locked portable release assets.")
-    parser.add_argument("--tesseract-dir", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path, default=PROJECT_ROOT)
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    result = prepare_assets(repo_root=args.repo_root, tesseract_dir=args.tesseract_dir)
+    result = prepare_assets(repo_root=args.repo_root)
     print(f"Prepared locked assets at {result}")
     return 0
 

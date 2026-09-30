@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Callable, Sequence
 
-from artifact_paths import flashcard_output_path, safe_path_component
+from artifact_paths import flashcard_output_path, module_file_label, safe_path_component
 from flashcard_csv import parse_rendered_module
 from flashcard_types import ModuleIdentity
 from graph_input import GraphInputError, extract_graph_facts, load_graph
@@ -52,7 +54,7 @@ def _safe_stem(path: Path) -> str:
 
 
 def pipeline_paths(
-    pdf: Path,
+    source: Path,
     output_root: Path,
     course_code: str | None = None,
     module_number: str | None = None,
@@ -61,7 +63,7 @@ def pipeline_paths(
     workspace_root = output_root
     if course_code is not None:
         workspace_root /= safe_path_component(course_code, fallback="course")
-    workspace = workspace_root / _safe_stem(Path(pdf))
+    workspace = workspace_root / _safe_stem(Path(source))
     unchecked_graph_dir = workspace / "unchecked_knowledge_graph"
     graph_dir = workspace / "knowledge_graph"
     flashcards = workspace / "flashcards.csv"
@@ -87,33 +89,30 @@ def pipeline_paths(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run PDF slides -> structured TXT -> knowledge graph -> validated "
+            "Run a structured TXT module -> knowledge graph -> validated "
             "flashcards as a resumable local sequence."
         ),
         epilog=(
-            "Each per-PDF workspace contains structured_module.txt and the "
+            "Each per-module workspace contains structured_module.txt and the "
             "checked knowledge_graph/knowledge_graph.json. CSV output is written to "
             "flashcards/<course>/<course>_M<module>.csv. "
             "Valid completed stages are reused when the sequence resumes."
         ),
     )
-    parser.add_argument("pdf", type=Path, help="source slide PDF")
+    parser.add_argument("input", type=Path, help="structured UTF-8 TXT module")
     parser.add_argument("--course-code", required=True, help="exact course code")
     parser.add_argument("--module-number", required=True, help="exact module number")
-    parser.add_argument("--module-title", help="exact module title")
     parser.add_argument(
         "--output-root",
         type=Path,
         default=Path("pipeline_output"),
-        help="root for per-PDF stage artifacts (default: pipeline_output)",
+        help="root for per-module stage artifacts (default: pipeline_output)",
     )
     parser.add_argument("--model-dir", type=Path, default=Path("models"))
     parser.add_argument("--attempts", type=int, default=3)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--n-gpu-layers", type=int, default=-1)
     parser.add_argument("--n-ctx", type=int, default=DEFAULT_N_CTX)
-    parser.add_argument("--ocr-min-chars", type=int, default=40)
-    parser.add_argument("--ocr-dpi", type=int, default=200)
     parser.add_argument(
         "--timeout",
         type=float,
@@ -155,36 +154,7 @@ def build_stage_commands(
     args: argparse.Namespace,
     paths: PipelinePaths,
 ) -> tuple[StageCommand, ...]:
-    pdf = str(Path(args.pdf).resolve())
     model_dir = str(Path(args.model_dir).resolve())
-    stage_one = [
-        sys.executable,
-        str((PROJECT_DIR / "slides_pdf_to_txt.py").resolve()),
-        pdf,
-        "--output",
-        str(paths.structured_text.resolve()),
-        "--course-code",
-        args.course_code,
-        "--module-number",
-        args.module_number,
-        "--model-dir",
-        model_dir,
-        "--attempts",
-        str(args.attempts),
-        "--seed",
-        str(args.seed),
-        "--n-gpu-layers",
-        str(args.n_gpu_layers),
-        "--n-ctx",
-        str(args.n_ctx),
-        "--ocr-min-chars",
-        str(args.ocr_min_chars),
-        "--ocr-dpi",
-        str(args.ocr_dpi),
-    ]
-    if args.module_title:
-        stage_one.extend(("--module-title", args.module_title))
-
     stage_two = [
         sys.executable,
         str((PROJECT_DIR / "text-extractor.py").resolve()),
@@ -227,7 +197,6 @@ def build_stage_commands(
         stage_three.append("--skip-final-review")
 
     return (
-        StageCommand("pdf-to-text", tuple(stage_one), paths.structured_text),
         StageCommand(
             "knowledge-graph", tuple(stage_two), paths.unchecked_graph_json
         ),
@@ -240,10 +209,64 @@ def _valid_structured_text(path: Path) -> bool:
         return False
     try:
         text = path.read_text(encoding="utf-8-sig")
-    except OSError:
+    except (OSError, UnicodeError):
         return False
     metadata = parse_module_metadata(text)
     return metadata.get("format_version") == "1" and bool(graph_ready_text(text).strip())
+
+
+def stage_structured_module(
+    source: Path,
+    destination: Path,
+    *,
+    course_code: str | None = None,
+    module_number: str | None = None,
+) -> Path:
+    """Validate and atomically stage a structured UTF-8 module."""
+    source = Path(source)
+    try:
+        content = source.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeError) as exc:
+        raise PipelineRunError(f"could not read structured module {source}: {exc}") from exc
+    metadata = parse_module_metadata(content)
+    if metadata.get("format_version") != "1" or not graph_ready_text(content).strip():
+        raise PipelineRunError(
+            f"input is not a valid format_version 1 structured module: {source}"
+        )
+    if course_code is not None and metadata.get("course_code") != str(course_code).strip():
+        raise PipelineRunError(
+            "structured module course_code does not match --course-code"
+        )
+    if (
+        module_number is not None
+        and module_file_label(metadata.get("module_number", ""))
+        != module_file_label(module_number)
+    ):
+        raise PipelineRunError(
+            "structured module module_number does not match --module-number"
+        )
+
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_name = handle.name
+            handle.write(content)
+        os.replace(temporary_name, destination)
+        temporary_name = None
+    finally:
+        if temporary_name is not None:
+            Path(temporary_name).unlink(missing_ok=True)
+    return destination
 
 
 def _valid_graph(path: Path) -> bool:
@@ -300,7 +323,7 @@ def _invalidate_artifacts(paths: Sequence[Path]) -> None:
 
 def _invalidate_downstream_for_stage(stage_name: str, paths: PipelinePaths) -> None:
     manifest = paths.workspace / _BATCH_REUSE_MANIFEST_NAME
-    if stage_name == "pdf-to-text":
+    if stage_name == "knowledge-graph":
         _invalidate_artifacts(
             (
                 paths.unchecked_graph_json,
@@ -311,12 +334,8 @@ def _invalidate_downstream_for_stage(stage_name: str, paths: PipelinePaths) -> N
                 manifest,
             )
         )
-    elif stage_name == "knowledge-graph":
-        _invalidate_artifacts(
-            (paths.graph_json, paths.triples_csv, paths.flashcards, manifest)
-        )
     elif stage_name == "flashcards":
-        _invalidate_artifacts((manifest,))
+        _invalidate_artifacts((paths.flashcards, manifest))
 
 
 def run(
@@ -325,11 +344,11 @@ def run(
     command_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
     timeout_seconds: float | None = None,
 ) -> PipelinePaths:
-    source = Path(args.pdf)
+    source = Path(args.input)
     if not source.is_file():
-        raise PipelineRunError(f"PDF not found: {source}")
-    if source.suffix.casefold() != ".pdf":
-        raise PipelineRunError(f"input must be a PDF file: {source}")
+        raise PipelineRunError(f"structured module not found: {source}")
+    if source.suffix.casefold() != ".txt":
+        raise PipelineRunError(f"input must be a .txt file: {source}")
     if args.attempts < 1:
         raise PipelineRunError("--attempts must be at least 1")
 
@@ -349,9 +368,14 @@ def run(
         args.module_number,
     )
     paths.workspace.mkdir(parents=True, exist_ok=True)
+    stage_structured_module(
+        source,
+        paths.structured_text,
+        course_code=args.course_code,
+        module_number=args.module_number,
+    )
     commands = build_stage_commands(args, paths)
     validators = {
-        "pdf-to-text": _valid_structured_text,
         "knowledge-graph": lambda path: (
             _valid_checked_graph(paths.graph_json) or _valid_graph(path)
         ),

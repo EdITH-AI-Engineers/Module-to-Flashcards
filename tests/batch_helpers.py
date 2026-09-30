@@ -11,13 +11,13 @@ from batch_pipeline import BatchDependencies, BatchItem
 from structured_module import StructuredModule, StructuredSlide, render_structured_module
 
 
-def structured_content():
+def structured_content(module_number="01", source_file="Module One.txt"):
     return render_structured_module(
         StructuredModule(
             course_code="CPE0021",
-            module_number="01",
+            module_number=str(module_number),
             module_title="Architecture",
-            source_file="Module One.pdf",
+            source_file=source_file,
             slides=(
                 StructuredSlide(
                     number=1,
@@ -37,11 +37,14 @@ def structured_content():
 def make_items(tmp_path, *names):
     items = []
     for number, name in enumerate(names, start=1):
-        pdf = tmp_path / name
-        pdf.write_bytes(b"pdf")
+        source = tmp_path / name
+        source.write_text(
+            structured_content(number, name),
+            encoding="utf-8",
+        )
         args = pipeline.parse_args(
             [
-                str(pdf),
+                str(source),
                 "--course-code",
                 "CPE0021",
                 "--module-number",
@@ -62,7 +65,7 @@ def make_items(tmp_path, *names):
                 name,
                 args,
                 pipeline.pipeline_paths(
-                    pdf,
+                    source,
                     args.output_root,
                     args.course_code,
                     args.module_number,
@@ -73,9 +76,12 @@ def make_items(tmp_path, *names):
 
 
 def materialize(item, stage):
-    if stage == "normalize":
+    if stage == "ingest":
         item.paths.structured_text.parent.mkdir(parents=True, exist_ok=True)
-        item.paths.structured_text.write_text(structured_content(), encoding="utf-8")
+        item.paths.structured_text.write_text(
+            item.args.input.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
     elif stage == "graph":
         item.paths.unchecked_graph_dir.mkdir(parents=True, exist_ok=True)
         item.paths.unchecked_graph_json.write_text(
@@ -146,14 +152,14 @@ def fake_dependencies(
     qwen_loader,
     rebel_loader,
     *,
-    fail_normalize=None,
+    fail_ingest=None,
     monotonic=None,
 ):
-    def normalize(item, backend):
-        events.append(("normalize", item.filename, backend))
-        if item.filename == fail_normalize:
-            raise RuntimeError("normalization failed")
-        materialize(item, "normalize")
+    def ingest(item, runtime):
+        events.append(("ingest", item.filename, runtime))
+        if item.filename == fail_ingest:
+            raise RuntimeError("ingest failed")
+        materialize(item, "ingest")
 
     def graph(item, runtime):
         events.append(("graph", item.filename, runtime))
@@ -166,7 +172,7 @@ def fake_dependencies(
     return BatchDependencies(
         qwen_loader=qwen_loader,
         rebel_loader=rebel_loader,
-        normalize_stage=normalize,
+        ingest_stage=ingest,
         graph_stage=graph,
         flashcard_stage=flashcards,
         monotonic=monotonic or time.monotonic,
@@ -184,9 +190,9 @@ def counting_dependencies(counters: Counter):
         counters["rebel_load"] += 1
         yield object()
 
-    def normalize(item, backend):
-        counters["normalize"] += 1
-        materialize(item, "normalize")
+    def ingest(item, runtime):
+        counters["ingest"] += 1
+        materialize(item, "ingest")
 
     def graph(item, runtime):
         counters["graph"] += 1
@@ -199,7 +205,7 @@ def counting_dependencies(counters: Counter):
     return BatchDependencies(
         qwen_loader=qwen_loader,
         rebel_loader=rebel_loader,
-        normalize_stage=normalize,
+        ingest_stage=ingest,
         graph_stage=graph,
         flashcard_stage=flashcards,
         monotonic=time.monotonic,

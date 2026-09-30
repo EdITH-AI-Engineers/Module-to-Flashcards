@@ -174,7 +174,7 @@ def test_backend_translates_context_window_overflow():
         backend.complete("SYSTEM", "USER", max_tokens=1536)
 
 
-def test_backend_defaults_to_low_memory_context_and_can_close(monkeypatch, tmp_path):
+def test_backend_defaults_to_12k_context_and_can_close(monkeypatch, tmp_path):
     captured = {}
 
     class FakeLlama:
@@ -188,6 +188,7 @@ def test_backend_defaults_to_low_memory_context_and_can_close(monkeypatch, tmp_p
     monkeypatch.setitem(sys.modules, "llama_cpp", SimpleNamespace(Llama=FakeLlama))
     backend = LocalQwenBackend(tmp_path / "model.gguf")
 
-    assert captured["n_ctx"] == 8192
+    assert captured["n_ctx"] == 12288
+    assert backend.context_window == 12288
     backend.close()
     assert backend._llm.closed is True

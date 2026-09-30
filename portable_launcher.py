@@ -90,18 +90,6 @@ def _default_run_server(app: object, **kwargs: object) -> None:
     uvicorn.run(app, **kwargs)
 
 
-def _configure_ocr(paths: PortablePaths) -> None:
-    import pytesseract
-
-    from pdf_ingestion import _configure_tesseract
-
-    _configure_tesseract(
-        pytesseract,
-        portable_executable=paths.tesseract_exe,
-        tessdata_dir=paths.tessdata,
-    )
-
-
 def _device_settings(status: AccelerationStatus) -> tuple[int, str]:
     if status.torch_cuda and status.llama_gpu_offload:
         return -1, "cuda"
@@ -140,7 +128,6 @@ def run_launcher(
     detect_devices: Callable[[], AccelerationStatus] = detect_acceleration,
     probe: Callable[[int], str] = probe_port,
     load_server: Callable[[], Any] = _default_load_server,
-    configure_ocr: Callable[[PortablePaths], None] = _configure_ocr,
     run_server: Callable[..., None] = _default_run_server,
     output: Callable[[str], None] = print,
 ) -> int:
@@ -188,7 +175,6 @@ def run_launcher(
             n_gpu_layers=n_gpu_layers,
             kg_device=kg_device,
         )
-        configure_ocr(paths)
         output(f"Ready at http://127.0.0.1:{args.port} (Ctrl+C to stop)")
         run_server(
             server.app,

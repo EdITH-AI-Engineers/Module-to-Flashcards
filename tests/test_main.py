@@ -29,8 +29,8 @@ def test_load_course_corpus_tolerates_missing_and_corrupt_files(tmp_path):
     assert main.load_course_corpus(tmp_path) == ([], [])
 
 
-def test_parse_args_defaults_to_8k_context():
-    assert main.parse_args(["graph.json"]).n_ctx == 8192
+def test_parse_args_defaults_to_12k_context():
+    assert main.parse_args(["graph.json"]).n_ctx == 12288
 
 
 def test_parse_args_preserves_identity_strings():

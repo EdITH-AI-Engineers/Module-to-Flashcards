@@ -15,8 +15,6 @@ class PortablePaths:
     models: Path
     qwen_model: Path
     rebel_model: Path
-    tesseract_exe: Path
-    tessdata: Path
     data: Path
     uploads: Path
     outputs: Path
@@ -47,8 +45,6 @@ def build_paths(
         models=resolved_root / "models",
         qwen_model=resolved_root / "models" / MODEL_FILENAME,
         rebel_model=resolved_root / "models" / "rebel-large",
-        tesseract_exe=resolved_root / "tesseract" / "tesseract.exe",
-        tessdata=resolved_root / "tesseract" / "tessdata",
         data=data,
         uploads=data / "uploads" if portable else resolved_root / "pipeline_uploads",
         outputs=(

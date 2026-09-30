@@ -77,7 +77,7 @@ class PipelineConfig:
 
 
 Parsed = TypeVar("Parsed")
-PLAN_FACT_LIMIT = 50
+PLAN_CONTEXT_MARGIN = 64
 
 # Fact `kind` values that mark structural/presentation content (slide titles,
 # section headers, module headings) rather than teachable material. Facts
@@ -118,11 +118,11 @@ def _exclude_non_assertive_facts(
 
 def _balanced_plan_facts(
     facts: Sequence[GraphFact],
-    limit: int = PLAN_FACT_LIMIT,
+    limit: int | None = None,
 ) -> tuple[GraphFact, ...]:
-    """Bound prompt size while retaining coverage across lesson topics/slides."""
+    """Order facts for balanced coverage, optionally taking a prefix."""
     values = tuple(facts)
-    if len(values) <= limit:
+    if limit is not None and len(values) <= limit:
         return values
 
     buckets: dict[tuple[str, object], list[GraphFact]] = {}
@@ -137,18 +137,54 @@ def _balanced_plan_facts(
 
     selected: list[GraphFact] = []
     offset = 0
-    while len(selected) < limit:
+    target = len(values) if limit is None else min(limit, len(values))
+    while len(selected) < target:
         added = False
         for bucket in buckets.values():
             if offset < len(bucket):
                 selected.append(bucket[offset])
                 added = True
-                if len(selected) == limit:
+                if len(selected) == target:
                     break
         if not added:
             break
         offset += 1
     return tuple(selected)
+
+
+def _context_fitted_plan_facts(
+    backend: ChatBackend,
+    identity: ModuleIdentity,
+    facts: Sequence[GraphFact],
+    prior_concept_names: Sequence[str],
+    *,
+    completion_tokens: int,
+) -> tuple[GraphFact, ...]:
+    """Keep the largest balanced fact set that reserves the full output budget."""
+    ordered = _balanced_plan_facts(facts)
+    count_prompt_tokens = getattr(backend, "count_prompt_tokens", None)
+    context_window = getattr(backend, "context_window", None)
+    if not callable(count_prompt_tokens) or not isinstance(context_window, int):
+        return ordered
+
+    prompt_budget = context_window - completion_tokens - PLAN_CONTEXT_MARGIN
+    if prompt_budget <= 0:
+        return ()
+
+    low = 0
+    high = len(ordered)
+    while low < high:
+        middle = (low + high + 1) // 2
+        prompt = build_concept_plan_prompt(
+            identity,
+            ordered[:middle],
+            prior_concept_names,
+        )
+        if count_prompt_tokens(SYSTEM_PROMPT, prompt) <= prompt_budget:
+            low = middle
+        else:
+            high = middle - 1
+    return ordered[:low]
 
 
 DISTRACTOR_FACT_LIMIT = 12
@@ -859,10 +895,20 @@ class FlashcardPipeline:
         self._rejected_attempt_count = 0
         self._rejection_counts.clear()
         facts = _exclude_non_assertive_facts(facts)
-        plan_facts = _balanced_plan_facts(_exclude_structural_facts(facts))
+        eligible_plan_facts = _exclude_structural_facts(facts)
+        plan_facts = _context_fitted_plan_facts(
+            self.backend,
+            identity,
+            eligible_plan_facts,
+            prior_concept_names,
+            completion_tokens=self.config.plan_max_tokens,
+        )
+        fact_count = f"{len(plan_facts)}"
+        if len(plan_facts) < len(eligible_plan_facts):
+            fact_count += f" of {len(eligible_plan_facts)}"
         self._progress(
             f"Planning {CONCEPTS_PER_MODULE} concepts from "
-            f"{len(plan_facts)} grounded lesson facts..."
+            f"{fact_count} grounded lesson facts..."
         )
         plan_prompt = build_concept_plan_prompt(
             identity,

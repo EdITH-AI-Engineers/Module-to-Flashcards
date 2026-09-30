@@ -156,7 +156,7 @@ def test_pipeline_reports_major_generation_stages():
     assert messages[-1] == "100 flashcards generated (50 + 50)."
 
 
-def test_pipeline_balances_large_fact_set_across_slides_and_bounds_prompt():
+def test_pipeline_uses_all_balanced_facts_when_backend_has_no_token_counter():
     facts = tuple(
         GraphFact(
             f"e{index}",
@@ -179,9 +179,47 @@ def test_pipeline_balances_large_fact_set_across_slides_and_bounds_prompt():
     pipeline.run(ModuleIdentity("CPE0021", "1"), facts)
 
     payload = json.loads(backend.calls[0][1].split("INPUT JSON:\n", 1)[1])
-    assert len(payload["graph_facts"]) == 50
+    assert len(payload["graph_facts"]) == 60
     assert {item["slides"][0] for item in payload["graph_facts"]} == {1, 2, 3}
-    assert messages[0] == "Planning 20 concepts from 50 grounded lesson facts..."
+    assert messages[0] == "Planning 20 concepts from 60 grounded lesson facts..."
+
+
+def test_pipeline_uses_largest_balanced_fact_set_that_fits_context():
+    facts = tuple(
+        GraphFact(
+            f"e{index}",
+            f"Grounded lesson fact {index} with enough detail.",
+            slides=((index - 1) % 3 + 1,),
+            topic=f"Topic {(index - 1) % 3 + 1}",
+        )
+        for index in range(1, 61)
+    )
+
+    class SizedBackend(FakeBackend):
+        context_window = 7836
+
+        def count_prompt_tokens(self, system, user):
+            payload = review_payload(user)
+            return 1000 + 100 * len(payload["graph_facts"])
+
+    backend = SizedBackend(
+        [plan_json()] + [cluster_json(index) for index in range(1, 21)]
+    )
+    messages = []
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(final_review=False),
+        progress=messages.append,
+    )
+
+    pipeline.run(ModuleIdentity("CPE0021", "1"), facts)
+
+    payload = review_payload(backend.calls[0][1])
+    assert len(payload["graph_facts"]) == 37
+    assert {item["slides"][0] for item in payload["graph_facts"]} == {1, 2, 3}
+    assert messages[0] == (
+        "Planning 20 concepts from 37 of 60 grounded lesson facts..."
+    )
 
 
 def test_invalid_cluster_is_retried_with_validator_feedback():

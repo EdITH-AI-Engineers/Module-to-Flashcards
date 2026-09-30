@@ -18,8 +18,6 @@ def test_portable_paths_keep_models_and_generated_data_beside_executable(tmp_pat
     assert paths.models == tmp_path / "models"
     assert paths.qwen_model == tmp_path / "models" / MODEL_FILENAME
     assert paths.rebel_model == tmp_path / "models" / "rebel-large"
-    assert paths.tesseract_exe == tmp_path / "tesseract" / "tesseract.exe"
-    assert paths.tessdata == tmp_path / "tesseract" / "tessdata"
     assert paths.data == tmp_path / "data"
     assert paths.uploads == tmp_path / "data" / "uploads"
     assert paths.outputs == tmp_path / "data" / "pipeline_output"

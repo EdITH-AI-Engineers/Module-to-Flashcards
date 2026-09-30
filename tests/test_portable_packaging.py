@@ -36,6 +36,7 @@ def _valid_lock() -> dict:
 
 
 def test_model_lock_selects_exact_qwen3_8b_checkpoint():
+    assert set(_valid_lock()) == {"schema_version", "qwen", "rebel"}
     assert _valid_lock()["qwen"] == {
         "repo_id": "Qwen/Qwen3-8B-GGUF",
         "revision": "4f02e7c52b572082828edf5058a87e2e7dc3e4d5",
@@ -82,9 +83,6 @@ def _fake_assets(repo: Path) -> Path:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("{}", encoding="utf-8")
     (assets / "models" / "unexpected-model.bin").write_bytes(b"unexpected")
-    (assets / "tesseract" / "tessdata").mkdir(parents=True)
-    (assets / "tesseract" / "tesseract.exe").write_bytes(b"ocr")
-    (assets / "tesseract" / "tessdata" / "eng.traineddata").write_bytes(b"eng")
     return assets
 
 
@@ -105,7 +103,6 @@ def test_assemble_copies_assets_and_writes_verifiable_manifest(tmp_path):
     )
     assert (result / "ModuleToFlashcards.exe").is_file()
     assert (result / "runtime" / "python.dll").is_file()
-    assert (result / "tesseract" / "tesseract.exe").is_file()
     assert not (result / "models" / "unexpected-model.bin").exists()
     assert (result / "data" / "pipeline_output").is_dir()
     assert (result / "licenses" / "build-versions.txt").is_file()

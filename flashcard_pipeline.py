@@ -640,10 +640,29 @@ class FlashcardPipeline:
                 try:
                     backends.append(fork(worker_index))
                 except Exception as exc:
-                    raise GenerationError(
-                        f"could not load cluster worker {worker_index + 1}/{count}: "
-                        f"{exc}; reduce --cluster-workers if memory is limited"
-                    ) from exc
+                    self._progress(
+                        f"Could not load cluster worker {worker_index + 1}/{count}: "
+                        f"{exc}; continuing with {len(backends)} loaded workers."
+                    )
+                    break
+            count = len(backends)
+            self._actual_cluster_workers = count
+            self._progress(
+                f"Cluster workers: selected {self.config.cluster_workers}, "
+                f"actual {count}"
+            )
+            if count == 1:
+                clusters: list[FlashcardCluster] = []
+                for position, concept in enumerate(concepts, start=1):
+                    clusters.append(
+                        self._generate_cluster(
+                            position, concept, identity, facts, prior_questions, clusters
+                        )
+                    )
+                    self._progress(
+                        f"Completed cluster {position}/{len(concepts)}: {concept.name}"
+                    )
+                return clusters
             workers = [
                 FlashcardPipeline(backend, self.config, progress=report)
                 for backend in backends
@@ -1059,6 +1078,7 @@ class FlashcardPipeline:
         )
 
         cluster_start = monotonic()
+        self._actual_cluster_workers = 1
         if self.config.cluster_workers > 1:
             clusters = self._generate_clusters_parallel(
                 concepts, identity, facts, prior_questions
@@ -1077,7 +1097,7 @@ class FlashcardPipeline:
         )
         self._progress(
             f"Cluster generation: {len(clusters)} clusters in {cluster_elapsed:.1f}s "
-            f"({cluster_rate:.2f}/min, {self.config.cluster_workers} workers)."
+            f"({cluster_rate:.2f}/min, {self._actual_cluster_workers} workers)."
         )
 
         # Cross-cluster similarity belongs to the global review below. Running

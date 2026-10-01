@@ -119,14 +119,17 @@ Useful options include `--output-root`, `--kg-device`, `--kg-batch-size`,
 The timeout is disabled by default. `--force` recomputes the graph and
 flashcards instead of resuming from valid artifacts.
 
-Cluster generation uses one Qwen instance by default. On a machine with enough
-RAM or VRAM, `--cluster-workers 2` through `--cluster-workers 5` generates
-that many independent clusters at once, then restores concept order and runs
-the same module validation and duplicate repair. Each worker loads a separate
-Qwen model context, so measure throughput and memory use before increasing the
-count. For the local API, set `MODULE_FLASHCARDS_CLUSTER_WORKERS` to a value
-from `1` to `5` before starting the server; the default is `1`. Changing the
-worker count can change model output because workers use distinct seeds.
+Cluster generation defaults to `--cluster-workers auto`. It measures available
+GPU memory before and after loading Qwen, reserves headroom, and selects up to
+20 independent cluster workers. CPU-only runs, partial GPU offload, and runs
+without a reliable memory reading default to one worker. Use an explicit count
+from `1` to `20` to override this policy; the local API uses the same setting
+through `MODULE_FLASHCARDS_CLUSTER_WORKERS`. Each worker loads a separate Qwen
+context. If an extra context fails to load, generation continues with the
+contexts already available. Progress reports selected and actual worker counts.
+More workers are not a guaranteed speedup, so measure throughput on the target
+GPU. Changing an explicit count can change model output because workers use
+distinct seeds.
 
 Run only the knowledge-graph stage:
 

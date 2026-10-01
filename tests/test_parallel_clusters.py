@@ -219,7 +219,7 @@ def test_parallel_clusters_still_repair_cross_cluster_duplicates():
             response = super().complete(
                 system, user, max_tokens=max_tokens, schema=schema
             )
-            if "Generate exactly 5 cards" in user and '"topic": "Concept 2 ' in user:
+            if "Generate exactly 5 cards" in user and '"topic":"Concept 2 ' in user:
                 payload = json.loads(response)
                 payload["cards"][0]["question"] = make_cards(1)[0].question
                 return json.dumps(payload)

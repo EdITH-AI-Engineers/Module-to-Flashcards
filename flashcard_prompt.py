@@ -65,7 +65,7 @@ Multiple-choice rules:
 Identification rules:
 - Supply one concise identifiable term, name, concept, classification, principle, process, figure, or title as correct_option.
 - The answer must be a short phrase, not a sentence or explanation.
-- Set wrong_option_1, wrong_option_2, wrong_option_3 to empty strings and is_true to null. These three fields must literally be "" â€” do not place any distractor words, related terms, or partial answers there, even though that pattern is normal for multiple-choice.
+- Set wrong_option_1, wrong_option_2, wrong_option_3 to empty strings and is_true to null. These three fields must literally be "" - do not place any distractor words, related terms, or partial answers there, even though that pattern is normal for multiple-choice.
 - Ask directly without embedding the answer or its full definition in the stem.
 - Neither the complete answer nor its abbreviation may appear anywhere in the question, even as part of a longer phrase. Describe the concept by its function, purpose, defining trait, or relationships, never by restating its name. Use this content-neutral pattern: a question is invalid when it contains the exact correct_option text or its abbreviation. A valid question asks for the term through a supported function, purpose, defining trait, or relationship. If the supplied fact defining the concept restates the concept's own name, paraphrase around the name instead of quoting the fact.
 
@@ -103,117 +103,17 @@ Before returning JSON, silently check every item against the supplied facts and 
 
 
 def _json(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, indent=2)
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-def _concept_payload(concept: ConceptPlan) -> dict[str, object]:
-    return {
-        "name": concept.name,
-        "fact_ids": list(concept.fact_ids),
-        "facts": list(concept.facts),
-        "assessment_approaches": list(concept.assessment_approaches),
-    }
-
-
-PRIOR_QUESTION_LIMIT = 50
-PRIOR_QUESTION_CHARS = 80
-PRIOR_QUESTION_CHAR_BUDGET = 1200
-
-_LEADING_QUESTION_WORDS = re.compile(
-    r"^(?:what\s+term|what|which\s+of\s+the\s+following|which|who|where|when|why|how)\b"
-    r"(?:\s+(?:is|are|was|were|does|do|did|best\s+describes?|most\s+accurately\s+describes?))?\s*",
-    re.I,
-)
-_TRAILING_PROVENANCE = re.compile(
-    r"\s*(?:according to|based on|as\s+(?:stated|described)\s+in)\s+the\s+"
-    r"(?:provided|supplied|given)?\s*(?:facts?|material|module|content|text|information)\s*\.?\s*$",
-    re.I,
-)
-
-
-def _card_subject(question: str) -> str:
-    """Reduce a question to a short subject phrase for dedup context.
-
-    Strips the interrogative stem ("What is", "Which of the following
-    is", ...), a leading article, and trailing provenance filler
-    ("according to the provided facts"), then keeps only the first
-    handful of remaining words -- the part of the question that actually
-    names what it is asking about, not the grammatical wrapper around it.
-    """
-    text = re.sub(r"\s+", " ", question).strip().rstrip("?").strip()
-    text = _TRAILING_PROVENANCE.sub("", text).strip()
-    text = _LEADING_QUESTION_WORDS.sub("", text).strip()
-    text = re.sub(r"^(?:a|an|the)\s+", "", text, flags=re.I).strip()
-    words = text.split()
-    subject = " ".join(words[:8])
-    return subject or text[:40]
-
-
-def _card_answer(card: FlashcardDraft) -> str:
-    """Reduce a card's answer to a short phrase for dedup context."""
-    if card.type == "true-false":
-        return "true" if card.is_true else "false"
-    words = card.correct_option.strip().split()
-    return " ".join(words[:4])
-
-
-def _dedup_fingerprint(card: FlashcardDraft) -> str:
-    """Compact subject/answer signature identifying what a card actually
-    tests, for use as cheap dedup context in later cluster prompts.
-
-    Two cards are duplicates because they test the same subject with the
-    same answer, not because they share exact wording -- so this is both
-    cheaper to send and, if anything, a more robust duplicate signal than
-    the full question text would be.
-    """
-    return f"{_card_subject(card.question)} -> {_card_answer(card)}"
-
-
-def _condensed_prior_signals(signals: Sequence[str]) -> tuple[list[str], int]:
-    """Dedupe and bound already-generated dedup signals before they go into
-    a cluster prompt.
-
-    A naive "include everything asked so far" list doesn't just grow with
-    the module -- it gets resent on every remaining cluster call, so its
-    real cost across a 20-concept module compounds roughly quadratically,
-    not linearly. Two things keep the per-call cost flat instead:
-    - a fixed total CHARACTER BUDGET for the field (not just a per-item
-      truncation and an item-count cap), so a single call's cost has a hard
-      ceiling no matter how large the module gets;
-    - preferring the MOST RECENT signals over the earliest ones. Adjacent
-      clusters are drawn from nearby, overlapping source facts and are the
-      far more likely source of an actual near-duplicate, so recent signals
-      are higher-value context per character spent than early ones -- which
-      a plain head-of-list cap would keep instead.
-    Anything trimmed here is still caught by the near-duplicate check in
-    validate_module; this list is a cheap first line of defense, not the
-    only one.
-    """
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for signal in signals:
-        text = re.sub(r"\s+", " ", str(signal)).strip()
-        if not text:
-            continue
-        if len(text) > PRIOR_QUESTION_CHARS:
-            text = text[:PRIOR_QUESTION_CHARS].rstrip() + "..."
-        if text not in seen:
-            seen.add(text)
-            deduped.append(text)
-
-    kept_reverse: list[str] = []
-    budget = PRIOR_QUESTION_CHAR_BUDGET
-    for text in reversed(deduped):
-        if len(kept_reverse) >= PRIOR_QUESTION_LIMIT:
-            break
-        cost = len(text) + 1
-        if kept_reverse and cost > budget:
-            break
-        budget -= cost
-        kept_reverse.append(text)
-
-    kept = list(reversed(kept_reverse))
-    return kept, len(deduped) - len(kept)
+def _plan_fact_lines(facts: Sequence[GraphFact]) -> list[str]:
+    """Keep exact fact IDs while avoiding repeated JSON object keys and provenance."""
+    return [
+        f"{fact.fact_id}: "
+        + (f"[{fact.topic}] " if fact.topic else "")
+        + fact.statement
+        for fact in facts
+    ]
 
 
 def build_concept_plan_prompt(
@@ -224,22 +124,13 @@ def build_concept_plan_prompt(
     payload: dict[str, object] = {
         "course_code": identity.course_code,
         "module_number": identity.module_number,
-        "graph_facts": [
-            {
-                "fact_id": fact.fact_id,
-                "statement": fact.statement,
-                **({"topic": fact.topic} if fact.topic else {}),
-                **({"slides": list(fact.slides)} if fact.slides else {}),
-            }
-            for fact in facts
-        ],
+        "graph_facts": _plan_fact_lines(facts),
     }
     overlap_guidance = ""
     context_guidance = ""
-    if any(fact.topic or fact.slides for fact in facts):
+    if any(fact.topic for fact in facts):
         context_guidance = (
-            " The optional topic and slides fields provide context and provenance, "
-            "not additional facts."
+            " Bracketed topics provide grouping context, not additional facts."
         )
     if prior_concept_names:
         payload["previously_covered_concepts"] = list(prior_concept_names)
@@ -252,7 +143,7 @@ def build_concept_plan_prompt(
         f"""Select exactly {CONCEPTS_PER_MODULE} distinct, explicitly supported concepts for this module.
     Each concept must be assessable in {CARDS_PER_CLUSTER} genuinely different ways. Keep concepts semantically distinct and do not use presentation or provenance details as concepts.
 
-    For each concept, copy one or more fact_ids exactly from the input. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements.{context_guidance} Choose exactly {CARDS_PER_CLUSTER} distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
+    Each graph_facts line starts with an exact fact_id followed by a colon. For each concept, copy one or more of those fact_ids exactly. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements.{context_guidance} Choose exactly {CARDS_PER_CLUSTER} distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
 
     Return one JSON object whose top-level key is "concepts" and whose value is an array. The array must contain exactly {CONCEPTS_PER_MODULE} concept objects before its closing bracket. Every concept object has these keys: name (string), fact_ids (non-empty string array), and assessment_approaches (array of exactly {CARDS_PER_CLUSTER} distinct allowed approaches). Do not treat a one-object shape illustration as a complete answer.
 
@@ -319,15 +210,7 @@ def build_concept_plan_retry_prompt(
     payload: dict[str, object] = {
         "course_code": identity.course_code,
         "module_number": identity.module_number,
-        "graph_facts": [
-            {
-                "fact_id": fact.fact_id,
-                "statement": fact.statement,
-                **({"topic": fact.topic} if fact.topic else {}),
-                **({"slides": list(fact.slides)} if fact.slides else {}),
-            }
-            for fact in facts
-        ],
+        "graph_facts": _plan_fact_lines(facts),
     }
     if prior_concept_names:
         payload["previously_covered_concepts"] = list(prior_concept_names)
@@ -1032,11 +915,24 @@ def build_grounding_review_prompt(
     payload = {
         "clusters": [
             {
-                "cluster": cluster.cluster,
-                "concept": _concept_payload(cluster.concept),
-                "cards": [asdict(card) for card in cluster.cards],
+                "cluster": str(index),
+                "concept": cluster.concept.name,
+                "facts": list(cluster.concept.facts),
+                "cards": [
+                    {
+                        "question": card.question,
+                        **({"correct_option": card.correct_option} if card.correct_option else {}),
+                        **({"wrong_option_1": card.wrong_option_1} if card.wrong_option_1 else {}),
+                        **({"wrong_option_2": card.wrong_option_2} if card.wrong_option_2 else {}),
+                        **({"wrong_option_3": card.wrong_option_3} if card.wrong_option_3 else {}),
+                        **({"is_true": card.is_true} if card.is_true is not None else {}),
+                        "expalanation": card.expalanation,
+                        "hint": card.hint,
+                    }
+                    for card in cluster.cards
+                ],
             }
-            for cluster in clusters
+            for index, cluster in enumerate(clusters, start=1)
         ]
     }
     return f"""Review these generated clusters against only their supplied facts. Questions, correct answers, true-false decisions, explanations, and hints must be supported by those facts. Flag a cluster if any card contains an unsupported claim, answer leakage, an invalid distractor, or a misleading explanation. Also flag a cluster when two cards ask the same question with at most one word different; cards that test the same fact in differently worded questions, in a different type, or in negated form are not duplicates. Do not infer duplication merely from the same answer-bearing relationship when there is a different type, polarity, or wording.
@@ -1044,7 +940,7 @@ def build_grounding_review_prompt(
     A wrong option is not invalid merely because its wording does not appear in the supplied facts. It may use a familiar related term, but it must be plausible, unambiguously incorrect, in the same semantic category and answer shape as the correct option, and relevant to the question and module domain. Flag a distractor only when it is correct or arguably correct, duplicates another option, is nonsensical, mismatches the answer category, or is unrelated to the question or module domain. Do not rewrite cards.
 
     Return only this JSON shape. Use an empty issues list when no defect exists:
-    {{"issues":[{{"cluster":"valid UUID copied from input","reasons":["unsupported claim"]}}]}}
+    {{"issues":[{{"cluster":"index copied from input","reasons":["unsupported claim"]}}]}}
 
     INPUT JSON:
     """ + _json(
@@ -1058,17 +954,17 @@ def build_duplicate_review_prompt(
     payload = {
         "clusters": [
             {
-                "cluster": cluster.cluster,
+                "cluster": str(index),
                 "concept": cluster.concept.name,
                 "questions": [card.question for card in cluster.cards],
             }
-            for cluster in clusters
+            for index, cluster in enumerate(clusters, start=1)
         ]
     }
-    return """Compare all question stems for near duplication. Flag only a question that is the same sentence as another question with at most one filler, modifier, or synonym word added, removed, or swapped. Do not flag questions that merely assess the same fact or concept in differently worded questions, questions of different types, or a question and its negated form (for example \"is a component\" versus \"is NOT a component\"). Under this surface-only rule, a definition and its negated restatement are not duplicates unless the stems otherwise differ by at most one word. A swapped key term that changes what is asked (for example binary versus octal) makes a different question. Report each duplicate pair once: put the later cluster/card in the issue's cluster field and at the start of its reason, and identify the earlier card after the word cluster. Every reason must use exactly the form "card <number> duplicates cluster <uuid> card <number>". Do not judge factual correctness in this pass and do not rewrite questions.
+    return """Compare all question stems for near duplication. Flag only a question that is the same sentence as another question with at most one filler, modifier, or synonym word added, removed, or swapped. Do not flag questions that merely assess the same fact or concept in differently worded questions, questions of different types, or a question and its negated form (for example \"is a component\" versus \"is NOT a component\"). Under this surface-only rule, a definition and its negated restatement are not duplicates unless the stems otherwise differ by at most one word. A swapped key term that changes what is asked (for example binary versus octal) makes a different question. Report each duplicate pair once: put the later cluster/card in the issue's cluster field and at the start of its reason, and identify the earlier card after the word cluster. Every reason must use exactly the form "card <number> duplicates cluster <index> card <number>". Do not judge factual correctness in this pass and do not rewrite questions.
 
     Return only this JSON shape. Use an empty issues list when no duplicate exists:
-    {"issues":[{"cluster":"valid UUID copied from input","reasons":["card 2 duplicates cluster <uuid> card 4"]}]}
+    {"issues":[{"cluster":"index copied from input","reasons":["card 2 duplicates cluster 3 card 4"]}]}
 
     INPUT JSON:
     """ + _json(

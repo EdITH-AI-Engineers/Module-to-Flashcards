@@ -29,8 +29,6 @@ from flashcard_prompt import (
     build_duplicate_review_prompt,
     build_grounding_review_prompt,
     build_retry_prompt,
-    _card_subject,
-    _dedup_fingerprint,
 )
 from flashcard_schema import (
     build_card_cluster_schema,
@@ -526,9 +524,9 @@ class FlashcardPipeline:
         distractor_facts: Sequence[GraphFact] = (),
         module_facts: Sequence[GraphFact] = (),
     ) -> tuple[FlashcardDraft, ...]:
-        prior_signals = tuple(
-            _dedup_fingerprint(card) for cluster in existing for card in cluster.cards
-        ) + tuple(_card_subject(question) for question in prior_questions)
+        # The prompt payload deliberately omits prior signals; duplicate
+        # validation still compares against existing and prior questions.
+        prior_signals: tuple[str, ...] = ()
         base_prompt = build_cluster_prompt(
             identity,
             concept,
@@ -747,9 +745,33 @@ class FlashcardPipeline:
         label: str,
         task: str,
         require_duplicate_locations: bool = False,
+        cluster_index_map: Mapping[str, str] | None = None,
     ) -> tuple[ReviewIssue, ...]:
+        index_map = dict(cluster_index_map or {})
+
         def parse(raw: str) -> tuple[ReviewIssue, ...]:
-            issues = parse_review_issues(raw, known_clusters)
+            # Accept legacy UUIDs from injected test backends, but constrain
+            # the actual model schema to the short indices shown in its prompt.
+            issues = parse_review_issues(raw, known_clusters | set(index_map))
+            converted: list[ReviewIssue] = []
+            for issue in issues:
+                reasons: list[str] = []
+                for reason in issue.reasons:
+                    match = _DUPLICATE_REVIEW_REASON_RE.match(reason)
+                    if require_duplicate_locations and match is not None:
+                        target = index_map.get(match.group(2), match.group(2))
+                        reason = (
+                            f"card {match.group(1)} duplicates cluster "
+                            f"{target} card {match.group(3)}"
+                        )
+                    reasons.append(reason)
+                converted.append(
+                    ReviewIssue(
+                        cluster=index_map.get(issue.cluster, issue.cluster),
+                        reasons=tuple(reasons),
+                    )
+                )
+            issues = tuple(converted)
             if not require_duplicate_locations:
                 return issues
 
@@ -790,7 +812,9 @@ class FlashcardPipeline:
             max_tokens=self.config.review_max_tokens,
             label=label,
             task=task,
-            response_schema=build_review_schema(tuple(known_clusters)),
+            response_schema=build_review_schema(
+                tuple(index_map) if index_map else tuple(known_clusters)
+            ),
         )
 
     def _collect_review_issues(
@@ -818,6 +842,10 @@ class FlashcardPipeline:
                 {cluster.cluster for cluster in group},
                 label=f"grounding review {group_number}",
                 task="grounding_review",
+                cluster_index_map={
+                    str(index): cluster.cluster
+                    for index, cluster in enumerate(group, start=1)
+                },
             )
             self._merge_issues(merged, issues)
             grounding_clusters.update(issue.cluster for issue in issues)
@@ -829,6 +857,10 @@ class FlashcardPipeline:
             label="global duplicate review",
             task="duplicate_review",
             require_duplicate_locations=True,
+            cluster_index_map={
+                str(index): cluster.cluster
+                for index, cluster in enumerate(clusters, start=1)
+            },
         )
         self._merge_issues(merged, global_issues)
         return (

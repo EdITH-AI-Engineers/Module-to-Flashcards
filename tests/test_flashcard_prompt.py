@@ -138,7 +138,7 @@ def test_plan_prompt_serializes_relationships_without_provenance():
     assert payload == {
         "course_code": "CPE0021",
         "module_number": "1",
-        "graph_facts": [{"fact_id": "e1", "statement": "binary | uses | base 2"}],
+        "graph_facts": ["e1: binary | uses | base 2"],
     }
     assert "slide" not in prompt.casefold()
     assert "array must contain exactly 20 concept objects" in prompt.casefold()
@@ -411,6 +411,14 @@ def test_grounding_review_includes_evidence_and_card_content():
     assert "unrelated to the question or module domain" in prompt
     assert "same answer-bearing relationship" in prompt
     assert "different type, polarity, or wording" in prompt
+    payload = json.loads(prompt.split("INPUT JSON:\n", 1)[1])
+    assert payload["clusters"][0]["cluster"] == "1"
+    assert cluster().cluster not in prompt
+    assert "fact_ids" not in prompt
+    assert "difficulty" not in prompt
+    assert "assessment_approach" not in prompt
+    assert "wrong_option_1" in prompt
+    assert "is_true" not in payload["clusters"][0]["cards"][0]
 
 
 def test_duplicate_review_excludes_answers_and_evidence():
@@ -421,3 +429,10 @@ def test_duplicate_review_excludes_answers_and_evidence():
     assert "binary | uses | base 2" not in prompt
     assert '"issues"' in prompt
     assert "definition and its negated restatement" in prompt
+    assert cluster().cluster not in prompt
+
+
+def test_compact_json_keeps_unicode_and_no_layout_whitespace():
+    from flashcard_prompt import _json
+
+    assert _json({"café": [1, 2]}) == '{"café":[1,2]}'

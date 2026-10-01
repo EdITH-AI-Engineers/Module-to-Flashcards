@@ -124,7 +124,7 @@ def test_pipeline_excludes_question_shaped_facts_from_factual_authority():
     pipeline.run(ModuleIdentity("CPE0021", "1"), (question,) + graph_facts())
 
     plan_payload = review_payload(backend.calls[0][1])
-    assert [item["fact_id"] for item in plan_payload["graph_facts"]] == [
+    assert [item.split(":", 1)[0] for item in plan_payload["graph_facts"]] == [
         fact.fact_id for fact in graph_facts()
     ]
 
@@ -155,6 +155,28 @@ def flag_second_cluster_duplicate(system, user, max_tokens):
             ]
         }
     )
+
+
+def test_review_index_mapping_restores_cluster_uuids_in_pair_reasons():
+    first = "123e4567-e89b-42d3-a456-426614174001"
+    second = "123e4567-e89b-42d3-a456-426614174002"
+    backend = FakeBackend(
+        ['{"issues":[{"cluster":"2","reasons":["card 1 duplicates cluster 1 card 3"]}]}']
+    )
+    pipeline = FlashcardPipeline(backend, progress=lambda _message: None)
+
+    issues = pipeline._review(
+        "indexed prompt",
+        {first, second},
+        label="duplicate review",
+        task="duplicate_review",
+        require_duplicate_locations=True,
+        cluster_index_map={"1": first, "2": second},
+    )
+
+    assert issues[0].cluster == second
+    assert issues[0].reasons == (f"card 1 duplicates cluster {first} card 3",)
+    assert backend.schemas[0]["properties"]["issues"]["items"]["properties"]["cluster"]["enum"] == ["1", "2"]
 
 
 def test_pipeline_generates_twenty_valid_clusters_without_review():
@@ -241,7 +263,8 @@ def test_pipeline_uses_all_balanced_facts_when_backend_has_no_token_counter():
 
     payload = json.loads(backend.calls[0][1].split("INPUT JSON:\n", 1)[1])
     assert len(payload["graph_facts"]) == 60
-    assert {item["slides"][0] for item in payload["graph_facts"]} == {1, 2, 3}
+    assert all("slides" not in item for item in payload["graph_facts"])
+    assert all("[Topic " in item for item in payload["graph_facts"])
     assert messages[0] == "Planning 20 concepts from 60 grounded lesson facts..."
 
 
@@ -277,7 +300,8 @@ def test_pipeline_uses_largest_balanced_fact_set_that_fits_context():
 
     payload = review_payload(backend.calls[0][1])
     assert len(payload["graph_facts"]) == 37
-    assert {item["slides"][0] for item in payload["graph_facts"]} == {1, 2, 3}
+    assert all("slides" not in item for item in payload["graph_facts"])
+    assert all("[Topic " in item for item in payload["graph_facts"])
     assert messages[0] == (
         "Planning 20 concepts from 37 of 60 grounded lesson facts..."
     )

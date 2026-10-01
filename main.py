@@ -93,7 +93,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Generate validated assessment CSV from a knowledge graph with a "
-            "local Qwen3 8B Q5_K_M model."
+            "local Qwen3-4B-Instruct-2507 Q5_K_M model."
         )
     )
     parser.add_argument("graph", type=Path, help="knowledge_graph.json path")

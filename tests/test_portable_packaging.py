@@ -35,14 +35,14 @@ def _valid_lock() -> dict:
     return json.loads((ROOT / "packaging" / "model-lock.json").read_text(encoding="utf-8"))
 
 
-def test_model_lock_selects_exact_qwen3_8b_checkpoint():
+def test_model_lock_selects_exact_qwen3_4b_instruct_checkpoint():
     assert set(_valid_lock()) == {"schema_version", "qwen", "rebel"}
     assert _valid_lock()["qwen"] == {
-        "repo_id": "Qwen/Qwen3-8B-GGUF",
-        "revision": "4f02e7c52b572082828edf5058a87e2e7dc3e4d5",
-        "filename": "Qwen3-8B-Q5_K_M.gguf",
-        "size": 5851112224,
-        "sha256": "068bae163faa96ad48032daf4e071a6a28fe67d8dcc95367609c2ff165e52738",
+        "repo_id": "bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF",
+        "revision": "ae44f08e1392f39c0e474af10c3ff8355c8b6688",
+        "filename": "Qwen_Qwen3-4B-Instruct-2507-Q5_K_M.gguf",
+        "size": 2889513696,
+        "sha256": "66713ce35a58a82fe87642d4ec13425bf9b9a46800fff5c49a665ef5701439dc",
     }
 
 

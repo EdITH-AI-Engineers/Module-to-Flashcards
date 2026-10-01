@@ -157,15 +157,16 @@ when they are safely converted.
 ## Portable Windows release
 
 The Windows release is a fully offline, one-directory application for Windows
-11 x64. It bundles the Python runtime, Qwen3 8B Q5_K_M model, REBEL model, and
-the required CUDA libraries. Keep the complete extracted directory together:
+11 x64. It bundles the Python runtime, Qwen3-4B-Instruct-2507 Q5_K_M model,
+REBEL model, and the required CUDA libraries. Keep the complete extracted
+directory together:
 
 ```text
 ModuleToFlashcards/
   ModuleToFlashcards.exe
   runtime/
   models/
-    Qwen3-8B-Q5_K_M.gguf
+    Qwen_Qwen3-4B-Instruct-2507-Q5_K_M.gguf
     rebel-large/
     manifest.json
   licenses/

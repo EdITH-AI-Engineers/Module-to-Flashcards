@@ -13,9 +13,9 @@ from flashcard_types import CompletionTruncatedError, ContextWindowExceededError
 from worker_budget import choose_cluster_workers
 
 
-MODEL_REPO = "Qwen/Qwen3-8B-GGUF"
-MODEL_REVISION = "4f02e7c52b572082828edf5058a87e2e7dc3e4d5"
-MODEL_FILENAME = "Qwen3-8B-Q5_K_M.gguf"
+MODEL_REPO = "bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF"
+MODEL_REVISION = "ae44f08e1392f39c0e474af10c3ff8355c8b6688"
+MODEL_FILENAME = "Qwen_Qwen3-4B-Instruct-2507-Q5_K_M.gguf"
 DEFAULT_N_CTX = 12288
 QWEN_NON_THINKING_SAMPLING = {
     "temperature": 0.7,
@@ -182,7 +182,7 @@ class LocalQwenBackend:
             )
         messages = [
             {"role": "system", "content": system},
-            {"role": "user", "content": f"{user}\n\n/no_think"},
+            {"role": "user", "content": user},
         ]
         metadata = getattr(self._llm, "metadata", {})
         template = (
@@ -222,7 +222,7 @@ class LocalQwenBackend:
 
         # The pinned Qwen GGUF contains a chat template. This fallback keeps
         # alternate/test models conservative when that metadata is absent.
-        raw = f"System:\n{system}\nUser:\n{user}\n\n/no_think\nAssistant:\n"
+        raw = f"System:\n{system}\nUser:\n{user}\nAssistant:\n"
         return len(
             self._llm.tokenize(raw.encode("utf-8"), add_bos=True, special=True)
         ) + 16
@@ -232,8 +232,8 @@ class LocalQwenBackend:
         """Render exactly the ChatML bytes passed to create_completion."""
         return (
             f"<|im_start|>system\n{system}<|im_end|>\n"
-            f"<|im_start|>user\n{user}\n\n/no_think<|im_end|>\n"
-            "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+            f"<|im_start|>user\n{user}<|im_end|>\n"
+            "<|im_start|>assistant\n"
         )
 
     def close(self) -> None:
@@ -299,7 +299,7 @@ class LocalQwenBackend:
                 response = self._llm.create_chat_completion(
                     messages=[
                         {"role": "system", "content": system},
-                        {"role": "user", "content": f"{user}\n\n/no_think"},
+                        {"role": "user", "content": user},
                     ],
                     temperature=self._temperature,
                     seed=call_seed,

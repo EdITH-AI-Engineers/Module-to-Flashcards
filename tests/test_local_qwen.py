@@ -15,7 +15,9 @@ from local_qwen import (
 from flashcard_types import CompletionTruncatedError, ContextWindowExceededError
 
 
-def test_ensure_model_downloads_exact_checkpoint(tmp_path, monkeypatch):
+def test_ensure_model_downloads_exact_qwen3_4b_instruct_checkpoint(
+    tmp_path, monkeypatch
+):
     calls = []
 
     def fake_download(**kwargs):
@@ -28,17 +30,17 @@ def test_ensure_model_downloads_exact_checkpoint(tmp_path, monkeypatch):
 
     path = ensure_model(tmp_path)
 
-    assert path.name == "Qwen3-8B-Q5_K_M.gguf"
+    assert path.name == "Qwen_Qwen3-4B-Instruct-2507-Q5_K_M.gguf"
     assert calls == [
         {
-            "repo_id": "Qwen/Qwen3-8B-GGUF",
-            "revision": "4f02e7c52b572082828edf5058a87e2e7dc3e4d5",
-            "filename": "Qwen3-8B-Q5_K_M.gguf",
+            "repo_id": "bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF",
+            "revision": "ae44f08e1392f39c0e474af10c3ff8355c8b6688",
+            "filename": "Qwen_Qwen3-4B-Instruct-2507-Q5_K_M.gguf",
             "local_dir": str(tmp_path),
         }
     ]
-    assert MODEL_REPO == "Qwen/Qwen3-8B-GGUF"
-    assert MODEL_REVISION == "4f02e7c52b572082828edf5058a87e2e7dc3e4d5"
+    assert MODEL_REPO == "bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF"
+    assert MODEL_REVISION == "ae44f08e1392f39c0e474af10c3ff8355c8b6688"
 
 
 def test_existing_model_is_reused(tmp_path, monkeypatch):
@@ -65,7 +67,7 @@ def test_missing_bundled_model_never_downloads_when_download_is_disabled(
         ensure_model(tmp_path, allow_download=False)
 
 
-def test_backend_disables_thinking_and_varies_deterministic_call_seeds():
+def test_backend_uses_unmodified_user_prompts_and_varies_deterministic_call_seeds():
     calls = []
 
     class FakeLlama:
@@ -94,7 +96,7 @@ def test_backend_disables_thinking_and_varies_deterministic_call_seeds():
         {
             "messages": [
                 {"role": "system", "content": "SYSTEM"},
-                {"role": "user", "content": "USER\n\n/no_think"},
+                {"role": "user", "content": "USER"},
             ],
             "temperature": 0.2,
             "seed": 42,
@@ -104,7 +106,7 @@ def test_backend_disables_thinking_and_varies_deterministic_call_seeds():
         {
             "messages": [
                 {"role": "system", "content": "SYSTEM"},
-                {"role": "user", "content": "RETRY\n\n/no_think"},
+                {"role": "user", "content": "RETRY"},
             ],
             "temperature": 0.2,
             "seed": 43,
@@ -208,7 +210,7 @@ def test_backend_records_task_metrics_for_success_truncation_and_context_error()
     assert all("content" not in item for item in events)
 
 
-def test_hard_no_think_path_counts_exact_rendered_prompt_and_uses_schema_grammar():
+def test_raw_completion_path_uses_plain_chatml_and_schema_grammar():
     calls = []
     tokenized = []
 
@@ -236,7 +238,11 @@ def test_hard_no_think_path_counts_exact_rendered_prompt_and_uses_schema_grammar
     assert backend.complete("S", "U", max_tokens=100, schema=schema) == '{"cards":[]}'
     assert calls[0]["prompt"] == tokenized[0][0]
     assert tokenized[0][1:] == (False, True)
-    assert "<think>\n\n</think>" in calls[0]["prompt"]
+    assert calls[0]["prompt"] == (
+        "<|im_start|>system\nS<|im_end|>\n"
+        "<|im_start|>user\nU<|im_end|>\n"
+        "<|im_start|>assistant\n"
+    )
     assert calls[0]["stop"] == ["<|im_end|>"]
     assert calls[0]["grammar"] is not None
 

@@ -299,7 +299,7 @@ def check_knowledge_graph(
             "edge_count": len(checked["edges"]),
             "fact_count": len(checked["facts"]),
             "graph_checker": {
-                "model": "Qwen3-8B-Q5_K_M",
+                "model": "Qwen3-4B-Instruct-2507-Q5_K_M",
                 "status": "checked",
                 "removed_facts": len(removed_positions["facts"]),
                 "removed_edges": len(removed_positions["edges"]),

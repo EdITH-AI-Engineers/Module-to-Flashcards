@@ -217,6 +217,10 @@ def single_card_json(card: FlashcardDraft) -> str:
     return json.dumps({"cards": [asdict(card)]})
 
 
+def numbered_card_json(number: int, card: FlashcardDraft) -> str:
+    return json.dumps({"cards": [{"card_number": number, "card": asdict(card)}]})
+
+
 def review_payload(user: str) -> dict[str, object]:
     payload_text = user.split("INPUT JSON:\n", 1)[1].lstrip()
     payload, _ = json.JSONDecoder().raw_decode(payload_text)
@@ -394,6 +398,7 @@ def test_invalid_cluster_is_retried_with_validator_feedback():
     assert "expected exactly 5 cards" in backend.calls[2][1]
     assert "complete replacement" in backend.calls[2][1].lower()
     assert "REJECTED JSON TO CORRECT" in backend.calls[2][1]
+    assert backend.schemas[2]["properties"]["cards"]["minItems"] == 5
     stats = pipeline.rejection_stats
     assert stats["attempts"] == 22
     assert stats["rejected_attempts"] == 1
@@ -404,7 +409,7 @@ def test_invalid_cluster_is_retried_with_validator_feedback():
 def test_identification_answer_leak_retry_receives_exact_rejected_card():
     leaking = json.loads(cluster_json(1))
     leaking["cards"][1]["question"] = "What term is Term 1?"
-    responses = [plan_json(), json.dumps(leaking), cluster_json(1)]
+    responses = [plan_json(), json.dumps(leaking), numbered_card_json(2, make_cards(1)[1])]
     responses.extend(cluster_json(index) for index in range(2, 21))
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
@@ -412,13 +417,16 @@ def test_identification_answer_leak_retry_receives_exact_rejected_card():
         PipelineConfig(max_retries=3, final_review=False),
     )
 
-    pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
 
     retry_prompt = backend.calls[2][1]
     assert "question reveals the identification answer" in retry_prompt
     assert 'answer text "Term 1"' in retry_prompt
     assert "What term is Term 1?" in retry_prompt
     assert "REJECTED JSON TO CORRECT" in retry_prompt
+    assert backend.schemas[2]["properties"]["cards"]["minItems"] == 1
+    assert clusters[0].cards[0] == parse_cards(json.dumps(leaking))[0]
+    assert clusters[0].cards[2:] == parse_cards(json.dumps(leaking))[2:]
 
 
 def test_provenance_retry_receives_field_and_exact_trigger_phrase():
@@ -427,7 +435,7 @@ def test_provenance_retry_receives_field_and_exact_trigger_phrase():
         "Perception interprets and organizes sensory input, which aligns with "
         "the provided definition."
     )
-    responses = [plan_json(), json.dumps(leaking), cluster_json(1)]
+    responses = [plan_json(), json.dumps(leaking), numbered_card_json(1, make_cards(1)[0])]
     responses.extend(cluster_json(index) for index in range(2, 21))
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
@@ -622,7 +630,7 @@ def test_duplicate_question_against_an_earlier_cluster_is_deferred_to_review():
 
 
 def test_pipeline_threads_prior_concepts_and_retries_prior_question_duplicate():
-    responses = [plan_json(), cluster_json(1), cluster_json(1, revision=1)]
+    responses = [plan_json(), cluster_json(1), numbered_card_json(1, make_cards(1, revision=1)[0])]
     responses.extend(cluster_json(index) for index in range(2, 21))
     backend = FakeBackend(responses)
     pipeline = FlashcardPipeline(
@@ -815,7 +823,8 @@ def test_duplicate_card_retry_includes_rejected_card_and_exact_conflict():
     clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
 
     retry_prompt = backend.calls[-1][1]
-    assert "REJECTED JSON:" in retry_prompt
+    assert "REJECTED ONE-CARD JSON" in retry_prompt
+    assert "ORIGINAL REQUEST" not in retry_prompt
     assert duplicate_question in retry_prompt
     assert clusters[1].cards[0] == parse_cards(single_card_json(accepted_card))[0]
     assert clusters[1].cards[1:] == parse_cards(cluster_json(2))[1:]
@@ -865,7 +874,7 @@ def test_true_false_duplicate_repair_restores_locked_prose_outside_schema():
     assert repaired.expalanation == original_card.expalanation
     assert repaired.hint == original_card.hint
     assert repaired.assessment_approach == original_card.assessment_approach
-    assert "TRUE-FALSE DECLARATIVE REQUIREMENT" in backend.calls[-1][1]
+    assert "question must be a declarative statement" in backend.calls[-1][1]
     card_schema = backend.schemas[-1]["properties"]["cards"]["items"]
     assert card_schema["properties"]["assessment_approach"]["enum"] == [
         original_card.assessment_approach

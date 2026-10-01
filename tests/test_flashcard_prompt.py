@@ -317,13 +317,50 @@ def test_cluster_retry_is_compact_and_does_not_nest_original_prompt():
 
     assert "ORIGINAL REQUEST" not in prompt
     assert prompt.count("Design rule fact 1 with enough supporting detail") == 1
-    assert "PARTIAL_CANDIDATE" in prompt
+    assert "PARTIAL_CANDIDATE" not in prompt
+    assert "invalid JSON omitted" in prompt
     assert "Approaches may repeat" in prompt
     assert "positional assessment_approach order" not in prompt
     assert "do not invent a scenario" in prompt.casefold()
     assert "suggested_wrong_option_terms" not in prompt
     assert "already_covered_subjects" not in prompt
     assert len(SYSTEM_PROMPT) + len(prompt) < 30_000
+
+
+def test_cluster_retry_sends_only_flagged_rejected_cards():
+    candidate = json.dumps(
+        {"cards": [{"question": letter} for letter in "ABCDE"]}
+    )
+    prompt = build_cluster_retry_prompt(
+        ModuleIdentity("CPE0021", "1"),
+        concept(),
+        (GraphFact("e1", "binary | uses | base 2"),),
+        (),
+        (),
+        candidate,
+        ["card 2 question reveals the identification answer"],
+    )
+
+    rejected = prompt.split("REJECTED JSON TO CORRECT:\n", 1)[1]
+    rejected_value, _ = json.JSONDecoder().raw_decode(rejected.lstrip())
+    assert rejected_value == {
+        "cards": [{"card_number": 2, "card": {"question": "B"}}]
+    }
+    assert "only the numbered cards" in prompt
+
+
+def test_rejected_json_trimming_drops_whole_entries_and_remains_valid_json():
+    from flashcard_prompt import _trim_rejected_json
+
+    candidate = json.dumps(
+        {"cards": [{"question": str(index) + "x" * 1800} for index in range(5)]}
+    )
+    trimmed, omitted = _trim_rejected_json(candidate)
+
+    assert omitted > 0
+    assert trimmed is not None
+    assert len(trimmed) <= 6000
+    assert isinstance(json.loads(trimmed)["cards"], list)
 
 
 def test_cluster_retry_omits_unusable_partial_output_after_truncation():

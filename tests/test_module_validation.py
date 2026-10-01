@@ -30,6 +30,15 @@ def test_near_duplicate_does_not_confuse_a_substantive_term_substitution():
     )
 
 
+def test_deterministic_duplicate_check_does_not_cover_synonym_swaps():
+    # The global review instruction can flag this surface-only synonym swap;
+    # the deterministic validator intentionally does not count substitutions.
+    assert not are_near_duplicates(
+        "Which component primarily processes digital signals?",
+        "Which component mainly processes digital signals?",
+    )
+
+
 @pytest.mark.parametrize(
     ("left", "right"),
     (

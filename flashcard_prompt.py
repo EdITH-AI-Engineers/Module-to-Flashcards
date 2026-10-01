@@ -334,13 +334,12 @@ def build_concept_plan_retry_prompt(
 
     rejected_block = ""
     if candidate is not None:
-        rejected_json = candidate
-        if len(rejected_json) > MAX_RETRY_CANDIDATE_CHARS:
-            rejected_json = rejected_json[:MAX_RETRY_CANDIDATE_CHARS].rstrip()
-        rejected_block = f"""
-
-    REJECTED JSON TO CORRECT:
-    {rejected_json}"""
+        rejected_json, omitted = _trim_rejected_json(candidate)
+        rejected_block = (
+            "\n\n    REJECTED JSON TO CORRECT:\n    "
+            + (rejected_json or "(invalid JSON omitted)")
+            + (f"\n    ({omitted} whole entries omitted)" if omitted else "")
+        )
 
     return f"""Regenerate one complete replacement concept plan.
 
@@ -425,6 +424,33 @@ MAX_RETRY_ERROR_CHARS = 220
 MAX_RETRY_CANDIDATE_CHARS = 6000
 
 
+def _trim_rejected_json(candidate: str | None) -> tuple[str | None, int]:
+    """Trim whole array entries; never put a sliced JSON fragment in a prompt."""
+    if candidate is None:
+        return None, 0
+    try:
+        value = json.loads(candidate)
+    except (ValueError, TypeError):
+        return None, 1
+    if not isinstance(value, dict):
+        return None, 1
+    compact = _json(value)
+    if len(compact) <= MAX_RETRY_CANDIDATE_CHARS:
+        return compact, 0
+    for key in ("cards", "concepts", "issues"):
+        entries = value.get(key)
+        if not isinstance(entries, list):
+            continue
+        omitted = 0
+        while entries and len(compact) > MAX_RETRY_CANDIDATE_CHARS:
+            entries.pop()
+            omitted += 1
+            compact = _json(value)
+        if len(compact) <= MAX_RETRY_CANDIDATE_CHARS:
+            return compact, omitted
+    return None, 1
+
+
 def _condensed_errors(errors: Sequence[str]) -> tuple[list[str], int]:
     """Dedupe and cap a validation-error list before it goes back to the model.
 
@@ -465,12 +491,10 @@ def build_retry_prompt(
             "omitted here for brevity -- fixing the pattern above resolves them too)"
         )
 
-    rejected_json = candidate or "{}"
-    if len(rejected_json) > MAX_RETRY_CANDIDATE_CHARS:
-        rejected_json = (
-            rejected_json[:MAX_RETRY_CANDIDATE_CHARS].rstrip()
-            + "\n... (truncated; regenerate the full JSON from the ORIGINAL REQUEST, not from this partial excerpt)"
-        )
+    rejected_json, omitted_entries = _trim_rejected_json(candidate)
+    rejected_block = rejected_json or "(rejected JSON omitted because it was unavailable or invalid)"
+    if omitted_entries:
+        rejected_block += f"\n({omitted_entries} whole entries omitted to fit context)"
 
     return f"""Correct the rejected JSON below.
 
@@ -513,7 +537,7 @@ ORIGINAL REQUEST:
 {original_prompt}
 
 REJECTED JSON:
-{rejected_json}
+{rejected_block}
 """
 
 
@@ -623,6 +647,51 @@ def build_cluster_retry_prompt(
                 + "\n".join(forbidden_answers)
             )
 
+    flagged = _flagged_card_positions(error_list)
+    candidate_cards: list[object] = []
+    if candidate is not None:
+        try:
+            candidate_value = json.loads(candidate)
+            if isinstance(candidate_value, dict) and isinstance(candidate_value.get("cards"), list):
+                candidate_cards = candidate_value["cards"]
+        except (ValueError, TypeError):
+            pass
+    if (
+        flagged
+        and len(flagged) < CARDS_PER_CLUSTER
+        and len(candidate_cards) == CARDS_PER_CLUSTER
+    ):
+        numbered = {
+            "cards": [
+                {"card_number": number, "card": candidate_cards[number - 1]}
+                for number in sorted(flagged)
+            ]
+        }
+        rejected_json, omitted = _trim_rejected_json(_json(numbered))
+        payload = _cluster_payload(
+            identity, concept, concept_facts, distractor_facts, prior_signals
+        )
+        return f"""Repair only the numbered cards in REJECTED JSON. Python keeps
+all other cards byte-identical. Return exactly {len(flagged)} entries as
+{{"cards":[{{"card_number":2,"card":{{...}}}}]}}; use only these card numbers:
+{', '.join(str(number) for number in sorted(flagged))}.
+
+VALIDATION ERRORS
+{error_bullets}{answer_leak_guidance}{true_false_guidance}
+
+Keep each repaired card grounded in the facts, preserve its supported learning
+point, use an assessment approach matching the actual reasoning, and do not
+repeat an unchanged question. Follow the per-type JSON schema and keep the
+spelling expalanation.
+
+REJECTED JSON TO CORRECT:
+{rejected_json or '(invalid JSON omitted)'}
+{f'({omitted} whole entries omitted)' if omitted else ''}
+
+INPUT JSON:
+{_json(payload)}
+"""
+
     # Tell the model exactly which cards it is allowed to touch. Without
     # this, "regenerate one complete replacement five-card JSON object"
     # invites the model to silently rewrite cards no error complained
@@ -662,13 +731,12 @@ def build_cluster_retry_prompt(
 
     rejected_block = ""
     if candidate is not None:
-        rejected_json = candidate
-        if len(rejected_json) > MAX_RETRY_CANDIDATE_CHARS:
-            rejected_json = rejected_json[:MAX_RETRY_CANDIDATE_CHARS].rstrip()
-        rejected_block = f"""
-
-    REJECTED JSON TO CORRECT:
-    {rejected_json}"""
+        rejected_json, omitted = _trim_rejected_json(candidate)
+        rejected_block = (
+            "\n\n    REJECTED JSON TO CORRECT:\n    "
+            + (rejected_json or "(invalid JSON omitted)")
+            + (f"\n    ({omitted} whole entries omitted)" if omitted else "")
+        )
 
     return f"""Regenerate one complete replacement five-card JSON object for the supplied concept.
 
@@ -758,6 +826,7 @@ def build_duplicate_card_repair_prompt(
         "course_code": identity.course_code,
         "module_number": identity.module_number,
         "concept": concept.name,
+        "facts": list(concept.facts),
         "cluster_uuid": cluster_id,
         "json_location": {"cluster": cluster_number, "card": card_number},
         "duplicate_findings": list(reasons),
@@ -938,6 +1007,28 @@ def build_duplicate_card_retry_prompt(
         )
     )
     rejected_block = "\n".join(f"    - {q}" for q in rejected) or "    - (none)"
+    context: dict[str, object] = {"card_to_repair": asdict(card)}
+    marker = "INPUT JSON:\n"
+    if marker in original_prompt:
+        try:
+            source, _end = json.JSONDecoder().raw_decode(
+                original_prompt.split(marker, 1)[1].lstrip()
+            )
+            if isinstance(source, dict):
+                context = {
+                    key: source[key]
+                    for key in (
+                        "facts",
+                        "card_to_repair",
+                        "conflicting_questions",
+                        "json_location",
+                    )
+                    if key in source
+                }
+        except (ValueError, TypeError):
+            pass
+    rejected_candidate, omitted = _trim_rejected_json(rejected_json)
+    errors_short, _ = _condensed_errors([str(error) for error in errors])
     return (
         """Retry the one-card paraphrase. The last attempt was rejected because it
     is still a near-duplicate of another question.
@@ -968,10 +1059,20 @@ def build_duplicate_card_retry_prompt(
 
     """
         + _duplicate_retry_edit_rules(card)
-        + """
+        + f"""
 
+    VALIDATION ERRORS
+    {"; ".join(errors_short)}
+
+    REJECTED ONE-CARD JSON
+    {rejected_candidate or "(invalid JSON omitted)"}
+    {f"({omitted} whole entries omitted)" if omitted else ""}
+
+    Return only {{"cards":[{{...one corrected card...}}]}}.
+
+    INPUT JSON:
+    {_json(context)}
     """
-        + build_retry_prompt(original_prompt, rejected_json, errors)
     )
 
 

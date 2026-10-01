@@ -32,12 +32,14 @@ from flashcard_prompt import (
     build_duplicate_review_prompt,
     build_grounding_review_prompt,
     build_retry_prompt,
+    _flagged_card_positions,
 )
 from flashcard_schema import (
     build_card_cluster_schema,
     build_concept_plan_schema,
     build_review_schema,
     build_single_card_schema,
+    build_numbered_card_repair_schema,
 )
 from flashcard_types import (
     ChatBackend,
@@ -435,6 +437,7 @@ class FlashcardPipeline:
         retry_prompt_builder: (
             Callable[[str, str | None, Sequence[str]], str] | None
         ) = None,
+        response_schema_builder: Callable[[int], Mapping[str, object]] | None = None,
     ) -> Parsed:
         build_retry = retry_prompt_builder or build_retry_prompt
         prompt = original_prompt
@@ -454,7 +457,11 @@ class FlashcardPipeline:
             try:
                 completion_kwargs: dict[str, object] = {
                     "max_tokens": max_tokens,
-                    "schema": response_schema,
+                    "schema": (
+                        response_schema_builder(attempt)
+                        if response_schema_builder is not None
+                        else response_schema
+                    ),
                 }
                 if getattr(self.backend, "supports_task_metrics", False):
                     completion_kwargs["task"] = task if attempt == 1 else "retry"
@@ -588,21 +595,43 @@ class FlashcardPipeline:
             distractor_facts,
             prior_signals=prior_signals,
         )
+        original_cards: tuple[FlashcardDraft, ...] | None = None
+        original_candidate: str | None = None
+        original_errors: tuple[str, ...] = ()
+        retry_positions: tuple[int, ...] = ()
 
         def build_cluster_retry(
             original_prompt: str,
             candidate: str | None,
             errors: Sequence[str],
         ) -> str:
-            return build_cluster_retry_prompt(
+            nonlocal original_cards, original_candidate, original_errors, retry_positions
+            if original_cards is None and candidate is not None:
+                flagged = _flagged_card_positions(errors)
+                if flagged and len(flagged) < CARDS_PER_CLUSTER:
+                    try:
+                        parsed_candidate = parse_cards(candidate)
+                    except ValidationError:
+                        parsed_candidate = ()
+                    if len(parsed_candidate) == CARDS_PER_CLUSTER:
+                        original_cards = parsed_candidate
+                        original_candidate = candidate
+                        original_errors = tuple(errors)
+                        retry_positions = tuple(sorted(flagged))
+            retry_prompt = build_cluster_retry_prompt(
                 identity,
                 concept,
                 concept_facts,
                 distractor_facts,
                 prior_signals,
-                candidate,
-                errors,
+                original_candidate if retry_positions else candidate,
+                original_errors if retry_positions else errors,
             )
+            if retry_positions and tuple(errors) != original_errors:
+                retry_prompt += "\nLATEST VALIDATION ERRORS\n" + "\n".join(
+                    f"- {error}" for error in errors
+                )
+            return retry_prompt
 
         if review_feedback:
             rejected = json.dumps(
@@ -612,10 +641,51 @@ class FlashcardPipeline:
             feedback = list(review_feedback)
             if cluster_id:
                 feedback.insert(0, f"cluster UUID {cluster_id} requires regeneration")
-            base_prompt = build_cluster_retry(base_prompt, rejected, feedback)
+            base_prompt = build_cluster_retry_prompt(
+                identity,
+                concept,
+                concept_facts,
+                distractor_facts,
+                prior_signals,
+                rejected,
+                feedback,
+            )
 
         def parse_and_validate(raw: str) -> tuple[FlashcardDraft, ...]:
-            cards = parse_cards(raw)
+            if retry_positions and original_cards is not None:
+                try:
+                    value = json.loads(raw)
+                except ValueError as exc:
+                    raise ValidationError("partial retry must be valid JSON") from exc
+                entries = value.get("cards") if isinstance(value, dict) else None
+                if not isinstance(entries, list) or len(entries) != len(retry_positions):
+                    raise ValidationError(
+                        f"partial retry must contain exactly {len(retry_positions)} numbered cards"
+                    )
+                replacements: dict[int, FlashcardDraft] = {}
+                for entry in entries:
+                    if not isinstance(entry, dict) or type(entry.get("card_number")) is not int:
+                        raise ValidationError("partial retry card_number must be an integer")
+                    number = entry["card_number"]
+                    if number not in retry_positions or number in replacements:
+                        raise ValidationError(f"partial retry has unexpected or repeated card {number}")
+                    try:
+                        replacement = parse_cards(
+                            json.dumps({"cards": [entry.get("card")]}, ensure_ascii=False)
+                        )[0]
+                    except (ValidationError, IndexError) as exc:
+                        raise ValidationError(
+                            f"card {number} partial replacement is invalid: {exc}"
+                        ) from exc
+                    replacements[number] = replacement
+                if set(replacements) != set(retry_positions):
+                    raise ValidationError("partial retry omitted a flagged card")
+                merged_cards = list(original_cards)
+                for number, replacement in replacements.items():
+                    merged_cards[number - 1] = replacement
+                cards = tuple(merged_cards)
+            else:
+                cards = parse_cards(raw)
             for card_position, card in enumerate(cards, start=1):
                 self._progress(
                     f"[{label}] card {card_position}/{len(cards)} generated: "
@@ -656,6 +726,13 @@ class FlashcardPipeline:
             label=label,
             task="cluster",
             response_schema=build_card_cluster_schema(concept.assessment_approaches),
+            response_schema_builder=lambda _attempt: (
+                build_numbered_card_repair_schema(
+                    concept.assessment_approaches, retry_positions
+                )
+                if retry_positions
+                else build_card_cluster_schema(concept.assessment_approaches)
+            ),
             include_rejected_candidate=True,
             retry_prompt_builder=build_cluster_retry,
         )

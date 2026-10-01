@@ -1,4 +1,8 @@
-from flashcard_schema import build_card_cluster_schema, build_single_card_schema
+from flashcard_schema import (
+    build_card_cluster_schema,
+    build_numbered_card_repair_schema,
+    build_single_card_schema,
+)
 from tests.test_flashcard_validator import valid_cards
 
 
@@ -30,3 +34,11 @@ def test_single_card_schema_locks_repair_type_and_metadata():
     assert properties["is_true"]["enum"] == [1]
     assert properties["difficulty"]["enum"] == [original.difficulty]
     assert properties["assessment_approach"]["enum"] == [original.assessment_approach]
+
+
+def test_numbered_repair_schema_requests_only_flagged_positions():
+    schema = build_numbered_card_repair_schema(("recall",), (2, 4))
+    cards = schema["properties"]["cards"]
+    assert cards["minItems"] == cards["maxItems"] == 2
+    assert cards["items"]["properties"]["card_number"]["enum"] == [2, 4]
+    assert len(cards["items"]["properties"]["card"]["oneOf"]) == 3

@@ -146,6 +146,33 @@ def build_single_card_schema(
     return schema
 
 
+def build_numbered_card_repair_schema(
+    assessment_approaches: Sequence[str], card_numbers: Sequence[int]
+) -> dict[str, object]:
+    """Constrain a partial retry to numbered replacement cards only."""
+    if not card_numbers or len(set(card_numbers)) != len(card_numbers):
+        raise ValueError("card_numbers must be a non-empty unique sequence")
+    card = build_card_cluster_schema(assessment_approaches)["properties"]["cards"]["items"]
+    entry = _strict_object(
+        {
+            "card_number": {"type": "integer", "enum": sorted(card_numbers)},
+            "card": card,
+        },
+        ("card_number", "card"),
+    )
+    return _strict_object(
+        {
+            "cards": {
+                "type": "array",
+                "items": entry,
+                "minItems": len(card_numbers),
+                "maxItems": len(card_numbers),
+            }
+        },
+        ("cards",),
+    )
+
+
 def build_review_schema(known_clusters: Sequence[str]) -> dict[str, object]:
     issue = _strict_object(
         {

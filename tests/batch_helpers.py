@@ -5,7 +5,9 @@ import io
 import json
 import time
 
-from flashcard_csv import CSV_COLUMNS
+from flashcard_csv import CSV_COLUMNS, render_module_parts, write_module_parts
+from flashcard_types import ModuleIdentity
+from tests.factories import valid_clusters
 import pipeline
 from batch_pipeline import BatchDependencies, BatchItem
 from structured_module import StructuredModule, StructuredSlide, render_structured_module
@@ -109,10 +111,11 @@ def materialize(item, stage):
             "model": "test",
         }
         item.paths.graph_json.write_text(json.dumps(graph), encoding="utf-8")
-        item.paths.flashcards.parent.mkdir(parents=True, exist_ok=True)
-        item.paths.flashcards.write_text(
-            flashcard_content(item.args.course_code, item.args.module_number),
-            encoding="utf-8",
+        identity = ModuleIdentity(item.args.course_code, item.args.module_number)
+        write_module_parts(
+            item.paths.flashcards,
+            render_module_parts(identity, valid_clusters()),
+            identity,
         )
 
 

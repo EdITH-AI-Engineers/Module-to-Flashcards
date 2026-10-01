@@ -8,7 +8,7 @@ import tempfile
 from typing import Callable, Sequence
 
 from artifact_paths import flashcard_output_path
-from flashcard_csv import render_module, write_module_output
+from flashcard_csv import render_module_parts, write_module_parts
 from flashcard_pipeline import FlashcardPipeline, GenerationError, PipelineConfig
 from flashcard_types import ChatBackend
 from graph_input import (
@@ -169,7 +169,7 @@ def run(
     *,
     backend: ChatBackend | None = None,
     progress: Callable[[str], None] | None = None,
-) -> Path | None:
+) -> tuple[Path, Path] | None:
     graph_path = Path(args.graph)
     unchecked_path = getattr(args, "unchecked_graph", None)
     checked_graph = None
@@ -299,10 +299,11 @@ def run(
         prior_concept_names=prior_concept_names,
         prior_questions=prior_questions,
     )
-    content = render_module(identity, clusters)
-    write_module_output(output, content)
+    parts = render_module_parts(identity, clusters)
+    outputs = write_module_parts(output, parts, identity)
     print(
-        f"[flashcard-pipeline] generated module output: {output.resolve()}\n{content}",
+        "[flashcard-pipeline] generated module outputs: "
+        + ", ".join(str(path.resolve()) for path in outputs),
         file=sys.stderr,
         flush=True,
     )
@@ -318,7 +319,7 @@ def run(
         file=sys.stderr,
         flush=True,
     )
-    return output
+    return outputs
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -339,7 +340,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if output is None:
         print("Qwen smoke test passed.")
     else:
-        print(f"Saved flashcards: {output.resolve()}")
+        for path in output:
+            print(f"Saved flashcards: {path.resolve()}")
     return 0
 
 

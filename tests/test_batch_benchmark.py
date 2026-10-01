@@ -10,7 +10,7 @@ def test_three_file_batch_loads_each_model_once(tmp_path):
 
     result = run_batch(items, dependencies=counting_dependencies(counters))
 
-    assert len(result.outputs) == 3
+    assert len(result.outputs) == 6
     assert counters["qwen_load"] == 1
     assert counters["rebel_load"] == 1
     assert counters["ingest"] == 3
@@ -26,7 +26,7 @@ def test_three_file_batch_reuses_staged_runtimes_instead_of_legacy_loads(tmp_pat
     result = run_batch(items, dependencies=counting_dependencies(staged_counters))
     _run_legacy_nine_load_simulation(items, legacy_counters)
 
-    assert len(result.outputs) == 3
+    assert len(result.outputs) == 6
     assert (staged_counters["qwen_load"], staged_counters["rebel_load"]) == (1, 1)
     assert (legacy_counters["qwen_load"], legacy_counters["rebel_load"]) == (3, 3)
 

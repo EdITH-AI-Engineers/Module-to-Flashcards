@@ -278,7 +278,7 @@ def test_process_files_saves_all_uploads_then_runs_one_batch(monkeypatch, tmp_pa
     def fake_batch(items, **kwargs):
         events.append(("batch", tuple(item.filename for item in items)))
         return BatchResult(
-            outputs=tuple(item.paths.flashcards for item in items),
+            outputs=tuple(path for item in items for path in item.paths.flashcard_parts),
             errors=(),
         )
 
@@ -292,7 +292,10 @@ def test_process_files_saves_all_uploads_then_runs_one_batch(monkeypatch, tmp_pa
         ("save", "CPE-M2.txt"),
         ("batch", ("CPE-M1.txt", "CPE-M2.txt")),
     ]
-    assert len(response["outputs"]) == 2
+    assert len(response["outputs"]) == 4
+    modules = api_server.pipeline_status(Response())["modules"]
+    assert all(len(module["outputs"]) == 2 for module in modules)
+    assert all(module["output"] == module["outputs"][0] for module in modules)
     assert all(upload.closed for upload in uploads)
 
 
@@ -428,7 +431,10 @@ def test_status_endpoint_shows_active_progress_and_module_queue(monkeypatch, tmp
         )
         batch_started.set()
         assert release_batch.wait(timeout=2)
-        return BatchResult(outputs=tuple(item.paths.flashcards for item in items), errors=())
+        return BatchResult(
+            outputs=tuple(path for item in items for path in item.paths.flashcard_parts),
+            errors=(),
+        )
 
     monkeypatch.setattr(api_server, "save_upload", fake_save)
     monkeypatch.setattr(api_server, "run_batch", fake_batch)
@@ -462,6 +468,7 @@ def test_status_endpoint_shows_active_progress_and_module_queue(monkeypatch, tmp
     assert completed["status"] == "idle"
     assert completed["summary"]["completed"] == 2
     assert all(module["output"] for module in completed["modules"])
+    assert all(len(module["outputs"]) == 2 for module in completed["modules"])
 
 
 def test_all_save_failures_still_invoke_empty_batch(monkeypatch):

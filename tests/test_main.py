@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import json
+import csv
 
 import pytest
 
@@ -48,6 +49,17 @@ def test_parse_args_preserves_identity_strings():
     assert args.course_code == "CPE0021"
     assert args.module_number == "01"
     assert args.final_review is False
+
+
+def test_cli_prints_both_flashcard_paths(monkeypatch, tmp_path, capsys):
+    outputs = (tmp_path / "custom-1.csv", tmp_path / "custom-2.csv")
+    monkeypatch.setattr(main, "run", lambda args: outputs)
+
+    assert main.main(["graph.json"]) == 0
+
+    printed = capsys.readouterr().out
+    assert str(outputs[0].resolve()) in printed
+    assert str(outputs[1].resolve()) in printed
 
 
 def test_run_validates_graph_before_model_download(tmp_path, monkeypatch):
@@ -104,8 +116,9 @@ def test_run_writes_pipeline_result(tmp_path, monkeypatch, valid_clusters):
     result = main.run(args)
 
     assert selected == [7]
-    assert result == output_path
-    assert output_path.read_text(encoding="utf-8-sig").startswith("Module 1.1\n")
+    assert result == (tmp_path / "cards-1.csv", tmp_path / "cards-2.csv")
+    assert not output_path.exists()
+    assert [len(list(csv.DictReader(path.open(encoding="utf-8-sig", newline="")))) for path in result] == [50, 50]
 
 
 def test_exhausted_bad_card_counts_do_not_create_output(tmp_path):
@@ -185,7 +198,9 @@ def test_run_reuses_injected_backend(tmp_path, monkeypatch, valid_clusters):
         ]
     )
 
-    assert main.run(args, backend=shared_backend) == output_path
+    assert main.run(args, backend=shared_backend) == (
+        tmp_path / "cards-1.csv", tmp_path / "cards-2.csv"
+    )
 
 
 def test_run_checks_unchecked_graph_before_concept_generation(
@@ -247,7 +262,9 @@ def test_run_checks_unchecked_graph_before_concept_generation(
         ]
     )
 
-    assert main.run(args, backend=Backend()) == output_path
+    assert main.run(args, backend=Backend()) == (
+        tmp_path / "cards-1.csv", tmp_path / "cards-2.csv"
+    )
     assert not unchecked_path.exists()
     assert not (unchecked_dir / "triples.csv").exists()
 
@@ -332,8 +349,8 @@ def test_failed_output_write_does_not_update_course_corpus(
     monkeypatch.setattr(main, "FlashcardPipeline", FakePipeline)
     monkeypatch.setattr(
         main,
-        "write_module_output",
-        lambda output, content: (_ for _ in ()).throw(OSError("write failed")),
+        "write_module_parts",
+        lambda output, parts, identity: (_ for _ in ()).throw(OSError("write failed")),
     )
     args = main.parse_args(
         [
@@ -378,8 +395,11 @@ def test_default_output_uses_resolved_graph_module(tmp_path, monkeypatch, valid_
 
     result = main.run(args)
 
-    assert result == Path("flashcards") / "CPE0021" / "CPE0021_M1.csv"
-    assert result.is_file()
+    assert result == (
+        Path("flashcards") / "CPE0021" / "CPE0021_M1-1.csv",
+        Path("flashcards") / "CPE0021" / "CPE0021_M1-2.csv",
+    )
+    assert all(path.is_file() for path in result)
 
 
 def test_smoke_test_checks_for_exact_json_status(tmp_path, monkeypatch):

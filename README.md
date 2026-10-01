@@ -86,12 +86,13 @@ GET http://localhost:8000/status
 
 It returns the currently active module, the ordered module queue, recent module
 states, and summary counts. Each module includes `stage`, `progressPercent`,
-`message`, `error`, and its output path when complete. The top-level `status` is
+`message`, `error`, and its output paths when complete. The top-level `status` is
 `processing` while any module is active or queued, otherwise it is `idle`.
 
 Uploaded modules are saved under `pipeline_uploads/<course>/`. Intermediate artifacts are stored under
 `pipeline_output/<course>/<module-name>/`, and final files are stored under
-`flashcards/<course>/<course>_M<module>.csv`.
+`flashcards/<course>/<course>_M<module>-1.csv` and
+`flashcards/<course>/<course>_M<module>-2.csv`.
 
 For each batch, the server stages and validates all pending text files, builds
 their knowledge graphs with one REBEL model load, and generates flashcards with
@@ -145,9 +146,13 @@ Run only flashcard generation:
   --course-code COE0041 --module-number 9
 ```
 
-Every successful module produces two labeled CSV blocks with 50 rows each:
+Every successful module produces two standard CSV files with 50 rows each:
 20 graph-supported concept clusters, five questions per cluster, and exactly
-100 questions in total. Partial output is not written when validation fails.
+100 questions in total. Both files have the 13-column header, with no module
+separator lines. Full-module validation finishes before either file is
+published. A receipt ties the exact pair together for safe reuse after an
+interrupted write. Pre-change combined files are retained as legacy backups
+when they are safely converted.
 
 ## Portable Windows release
 

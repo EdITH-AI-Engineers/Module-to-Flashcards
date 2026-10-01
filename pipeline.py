@@ -11,8 +11,14 @@ import tempfile
 import time
 from typing import Callable, Sequence
 
-from artifact_paths import flashcard_output_path, module_file_label, safe_path_component
-from flashcard_csv import parse_rendered_module
+from artifact_paths import (
+    flashcard_output_path,
+    flashcard_part_paths,
+    flashcard_receipt_path,
+    module_file_label,
+    safe_path_component,
+)
+from flashcard_csv import valid_written_parts
 from flashcard_types import ModuleIdentity
 from graph_input import GraphInputError, extract_graph_facts, load_graph
 from knowledge_graph_checker import is_checked_graph
@@ -45,6 +51,14 @@ class PipelinePaths:
     graph_json: Path
     triples_csv: Path
     flashcards: Path
+
+    @property
+    def flashcard_parts(self) -> tuple[Path, Path]:
+        return flashcard_part_paths(self.flashcards)
+
+    @property
+    def flashcard_receipt(self) -> Path:
+        return flashcard_receipt_path(self.flashcards)
 
 
 @dataclass(frozen=True)
@@ -101,7 +115,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         epilog=(
             "Each per-module workspace contains structured_module.txt and the "
             "checked knowledge_graph/knowledge_graph.json. CSV output is written to "
-            "flashcards/<course>/<course>_M<module>.csv. "
+            "flashcards/<course>/<course>_M<module>-1.csv and -2.csv. "
             "Valid completed stages are reused when the sequence resumes."
         ),
     )
@@ -218,7 +232,7 @@ def build_stage_commands(
         StageCommand(
             "knowledge-graph", tuple(stage_two), paths.unchecked_graph_json
         ),
-        StageCommand("flashcards", tuple(stage_three), paths.flashcards),
+        StageCommand("flashcards", tuple(stage_three), paths.flashcard_parts[0]),
     )
 
 
@@ -331,21 +345,11 @@ def _valid_flashcards(
     module_number: str,
     course_code: str | None = None,
 ) -> bool:
-    if not path.is_file():
-        return False
-    try:
-        text = path.read_text(encoding="utf-8-sig")
-    except OSError:
-        return False
-    try:
-        parse_rendered_module(
-            text,
-            ModuleIdentity(str(course_code or ""), str(module_number)),
-            validate_course_code=course_code is not None,
-        )
-    except ValueError:
-        return False
-    return True
+    return valid_written_parts(
+        path,
+        ModuleIdentity(str(course_code or ""), str(module_number)),
+        validate_course_code=course_code is not None,
+    )
 
 
 def _invalidate_artifacts(paths: Sequence[Path]) -> None:
@@ -369,12 +373,13 @@ def _invalidate_downstream_for_stage(stage_name: str, paths: PipelinePaths) -> N
                 paths.unchecked_triples_csv,
                 paths.graph_json,
                 paths.triples_csv,
-                paths.flashcards,
+                *paths.flashcard_parts,
+                paths.flashcard_receipt,
                 manifest,
             )
         )
     elif stage_name == "flashcards":
-        _invalidate_artifacts((paths.flashcards, manifest))
+        _invalidate_artifacts((*paths.flashcard_parts, paths.flashcard_receipt, manifest))
 
 
 def run(
@@ -420,7 +425,7 @@ def run(
         ),
         "flashcards": lambda path: (
             _valid_checked_graph(paths.graph_json)
-            and _valid_flashcards(path, args.module_number, args.course_code)
+            and _valid_flashcards(paths.flashcards, args.module_number, args.course_code)
         ),
     }
     deadline = (
@@ -476,7 +481,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     print(f"Structured TXT: {paths.structured_text.resolve()}")
     print(f"Knowledge graph: {paths.graph_json.resolve()}")
-    print(f"Flashcards: {paths.flashcards.resolve()}")
+    for path in paths.flashcard_parts:
+        print(f"Flashcards: {path.resolve()}")
     return 0
 
 

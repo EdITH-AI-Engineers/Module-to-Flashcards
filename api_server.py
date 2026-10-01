@@ -54,6 +54,7 @@ class _ModuleStatus:
     message: str = "Waiting for an available pipeline slot."
     error: str | None = None
     output: str | None = None
+    outputs: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -99,6 +100,7 @@ class PipelineStatusRegistry:
         message: str | None = None,
         error: str | None = None,
         output: str | None = None,
+        outputs: list[str] | None = None,
     ) -> None:
         with self._lock:
             request = self._requests.get(request_id)
@@ -121,6 +123,8 @@ class PipelineStatusRegistry:
                 module.error = str(error)
             if output is not None:
                 module.output = str(output)
+            if outputs is not None:
+                module.outputs = list(outputs)
 
     def apply_event(
         self,
@@ -203,6 +207,7 @@ class PipelineStatusRegistry:
             "message": module.message,
             "error": module.error,
             "output": module.output,
+            "outputs": list(module.outputs),
         }
 
     def _trim_history(self) -> None:
@@ -592,8 +597,10 @@ async def process_files(
                             )
                         outputs = [str(output.resolve()) for output in batch_result.outputs]
                         for item in items:
-                            output = str(item.paths.flashcards.resolve())
-                            if output in outputs:
+                            item_outputs = [
+                                str(path.resolve()) for path in item.paths.flashcard_parts
+                            ]
+                            if all(path in outputs for path in item_outputs):
                                 _PIPELINE_STATUS.update(
                                     request_id,
                                     item_indexes[item.filename],
@@ -601,7 +608,8 @@ async def process_files(
                                     stage="complete",
                                     progress_percent=100,
                                     message="Module processing complete.",
-                                    output=output,
+                                    output=item_outputs[0],
+                                    outputs=item_outputs,
                                 )
                 finally:
                     _REQUEST_LOCK.release()

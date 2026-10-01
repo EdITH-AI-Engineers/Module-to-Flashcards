@@ -41,7 +41,9 @@ def test_batch_groups_stages_and_reuses_each_runtime(tmp_path):
         ),
     )
 
-    assert len(result.outputs) == 2
+    assert result.outputs == tuple(
+        path for item in items for path in item.paths.flashcard_parts
+    )
     assert not result.errors
     assert [event[0] for event in events] == [
         "ingest",
@@ -70,7 +72,7 @@ def test_batch_reports_module_progress_transitions(tmp_path):
         progress=progress.append,
     )
 
-    assert result.outputs == (item.paths.flashcards,)
+    assert result.outputs == item.paths.flashcard_parts
     assert progress[0].state == "queued"
     assert progress[0].stage == "ingest"
     assert any(
@@ -99,7 +101,7 @@ def test_reused_batch_reports_immediate_completion(tmp_path):
         progress=progress.append,
     )
 
-    assert result.outputs == (item.paths.flashcards,)
+    assert result.outputs == item.paths.flashcard_parts
     assert len(progress) == 1
     assert progress[0].state == "completed"
     assert progress[0].message == "Reused completed module artifacts."
@@ -121,7 +123,7 @@ def test_batch_reuses_valid_artifacts_without_loading_models(tmp_path):
 
     result = run_batch(items, dependencies=dependencies)
 
-    assert result.outputs == tuple(item.paths.flashcards for item in items)
+    assert result.outputs == tuple(path for item in items for path in item.paths.flashcard_parts)
     assert not result.errors
 
 
@@ -143,7 +145,7 @@ def test_failed_module_does_not_stop_other_module(tmp_path):
         ),
     )
 
-    assert result.outputs == (items[1].paths.flashcards,)
+    assert result.outputs == items[1].paths.flashcard_parts
     assert result.errors == (
         {"file": "one.txt", "error": "ingest failed"},
     )
@@ -169,7 +171,7 @@ def test_timeout_counts_only_each_modules_active_work(tmp_path):
 
     result = run_batch(items, dependencies=dependencies, timeout_seconds=5)
 
-    assert result.outputs == (items[1].paths.flashcards,)
+    assert result.outputs == items[1].paths.flashcard_parts
     assert result.errors == (
         {
             "file": "one.txt",
@@ -189,7 +191,7 @@ def test_upstream_recomputation_forces_downstream_recomputation(tmp_path):
 
     result = run_batch(items, dependencies=counting_dependencies(counters))
 
-    assert result.outputs == (item.paths.flashcards,)
+    assert result.outputs == item.paths.flashcard_parts
     assert counters == {
         "qwen_load": 1,
         "ingest": 1,
@@ -221,7 +223,7 @@ def test_invalid_stage_artifact_removes_only_that_item(tmp_path):
 
     result = run_batch(items, dependencies=dependencies)
 
-    assert result.outputs == (items[1].paths.flashcards,)
+    assert result.outputs == items[1].paths.flashcard_parts
     assert result.errors[0]["file"] == "one.txt"
     assert "ingest stage did not create a valid artifact" in result.errors[0]["error"]
 
@@ -446,7 +448,7 @@ def test_artifact_validation_time_is_excluded_from_active_budget(
 
     result = run_batch(items, dependencies=dependencies, timeout_seconds=5)
 
-    assert result.outputs == (items[0].paths.flashcards,)
+    assert result.outputs == items[0].paths.flashcard_parts
     assert not result.errors
 
 
@@ -504,7 +506,7 @@ def test_zero_batch_timeout_is_disabled_without_reading_the_clock(tmp_path):
         timeout_seconds=0,
     )
 
-    assert result.outputs == (items[0].paths.flashcards,)
+    assert result.outputs == items[0].paths.flashcard_parts
     assert not result.errors
 
 
@@ -587,14 +589,15 @@ def test_force_partial_failure_removes_stale_downstream_artifacts_for_resume(tmp
     assert first.errors == ({"file": "one.txt", "error": "graph failed"},)
     assert not item.paths.graph_json.exists()
     assert not item.paths.triples_csv.exists()
-    assert not item.paths.flashcards.exists()
+    assert not any(path.exists() for path in item.paths.flashcard_parts)
+    assert not item.paths.flashcard_receipt.exists()
     assert not manifest.exists()
 
     item.args.force = False
     counters = Counter()
     resumed = run_batch((item,), dependencies=counting_dependencies(counters))
 
-    assert resumed.outputs == (item.paths.flashcards,)
+    assert resumed.outputs == item.paths.flashcard_parts
     assert counters["ingest"] == counters["graph"] == counters["flashcards"] == 1
 
 
@@ -604,7 +607,7 @@ def test_matching_batch_reuse_manifest_skips_all_model_work(tmp_path):
 
     first = run_batch((item,), dependencies=counting_dependencies(first_counters))
 
-    assert first.outputs == (item.paths.flashcards,)
+    assert first.outputs == item.paths.flashcard_parts
     assert (item.paths.workspace / "batch_reuse_manifest.json").is_file()
 
     @contextmanager
@@ -616,7 +619,7 @@ def test_matching_batch_reuse_manifest_skips_all_model_work(tmp_path):
         (item,), dependencies=fake_dependencies([], forbidden_loader, forbidden_loader)
     )
 
-    assert resumed.outputs == (item.paths.flashcards,)
+    assert resumed.outputs == item.paths.flashcard_parts
 
 
 @pytest.mark.parametrize(
@@ -638,7 +641,7 @@ def test_changed_batch_reuse_identity_or_source_forces_all_stages(tmp_path, chan
 
     result = run_batch((item,), dependencies=counting_dependencies(counters))
 
-    assert result.outputs == (item.paths.flashcards,)
+    assert result.outputs == item.paths.flashcard_parts
     assert counters["ingest"] == counters["graph"] == counters["flashcards"] == 1
 
 

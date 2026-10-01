@@ -201,7 +201,8 @@ def _invalidate_for_recomputation(state: _BatchState) -> None:
                 paths.unchecked_triples_csv,
                 paths.graph_json,
                 paths.triples_csv,
-                paths.flashcards,
+                *paths.flashcard_parts,
+                paths.flashcard_receipt,
                 manifest,
             )
         )
@@ -212,12 +213,13 @@ def _invalidate_for_recomputation(state: _BatchState) -> None:
                 paths.unchecked_triples_csv,
                 paths.graph_json,
                 paths.triples_csv,
-                paths.flashcards,
+                *paths.flashcard_parts,
+                paths.flashcard_receipt,
                 manifest,
             )
         )
     elif state.needs_flashcards:
-        _invalidate((paths.flashcards, manifest))
+        _invalidate((*paths.flashcard_parts, paths.flashcard_receipt, manifest))
 
 
 def _configuration_value(args: argparse.Namespace, attribute: str):
@@ -602,12 +604,12 @@ def _stage_output(item: BatchItem, stage_name: str) -> Path:
         return item.paths.structured_text
     if stage_name == "graph":
         return item.paths.unchecked_graph_json
-    return item.paths.flashcards
+    return item.paths.flashcard_parts[0]
 
 
 def _result(states: Sequence[_BatchState]) -> BatchResult:
     outputs = tuple(
-        state.item.paths.flashcards
+        path
         for state in states
         if state.active
         and _valid_checked_graph(state.item.paths.graph_json)
@@ -616,6 +618,7 @@ def _result(states: Sequence[_BatchState]) -> BatchResult:
             state.item.args.module_number,
             state.item.args.course_code,
         )
+        for path in state.item.paths.flashcard_parts
     )
     errors = tuple(
         {"file": state.item.filename, "error": state.error}

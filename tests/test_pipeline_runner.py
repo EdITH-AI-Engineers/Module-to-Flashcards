@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 import pipeline
-from flashcard_csv import render_module
+from flashcard_csv import render_module, render_module_parts, write_module_parts
 from flashcard_types import ModuleIdentity
 from structured_module import StructuredModule, StructuredSlide, render_structured_module
 from tests.batch_helpers import flashcard_content
@@ -98,8 +98,12 @@ def materialize(stage, paths):
     elif stage == "flashcards":
         paths.graph_dir.mkdir(parents=True, exist_ok=True)
         paths.graph_json.write_text(checked_graph_content(), encoding="utf-8")
-        paths.flashcards.parent.mkdir(parents=True, exist_ok=True)
-        paths.flashcards.write_text(flashcard_content(), encoding="utf-8")
+        identity = ModuleIdentity("CPE0021", "01")
+        write_module_parts(
+            paths.flashcards,
+            render_module_parts(identity, valid_clusters()),
+            identity,
+        )
 
 
 def test_pipeline_paths_use_a_sanitized_per_module_workspace(tmp_path):
@@ -112,6 +116,11 @@ def test_pipeline_paths_use_a_sanitized_per_module_workspace(tmp_path):
     assert paths.flashcards == (
         tmp_path / "flashcards" / "CPE0021" / "CPE0021_M1.csv"
     )
+    assert paths.flashcard_parts == (
+        tmp_path / "flashcards" / "CPE0021" / "CPE0021_M1-1.csv",
+        tmp_path / "flashcards" / "CPE0021" / "CPE0021_M1-2.csv",
+    )
+    assert paths.flashcard_receipt.name == "CPE0021_M1.parts.json"
 
 
 def test_build_stage_commands_use_current_python_and_absolute_artifacts(tmp_path):
@@ -373,9 +382,11 @@ def test_stage_failure_stops_the_sequence(tmp_path):
 
 def test_valid_flashcard_reuse_artifact_requires_complete_rendered_structure(tmp_path):
     artifact = tmp_path / "flashcards.txt"
-    artifact.write_text(
-        render_module(ModuleIdentity("CPE0021", "01"), valid_clusters()),
-        encoding="utf-8",
+    identity = ModuleIdentity("CPE0021", "01")
+    write_module_parts(
+        artifact,
+        render_module_parts(identity, valid_clusters()),
+        identity,
     )
 
     assert pipeline._valid_flashcards(artifact, "01", "CPE0021")
@@ -437,6 +448,6 @@ def test_help_documents_artifacts_resume_and_force(capsys):
     assert "--module-number" in help_text
     assert "structured_module.txt" in help_text
     assert "knowledge_graph.json" in help_text
-    assert "<course>_M<module>.csv" in help_text
+    assert "<course>_M<module>-1.csv" in help_text
     assert "resume" in help_text.casefold()
     assert "--force" in help_text

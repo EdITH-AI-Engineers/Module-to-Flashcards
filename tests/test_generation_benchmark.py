@@ -12,12 +12,14 @@ def test_summary_reports_per_task_tokens_failures_and_pass_rate():
             "task": "cluster", "prompt_tokens": 100,
             "completion_tokens": 20, "finish_reason": "stop",
             "exception": None, "max_tokens": 64, "elapsed_seconds": 1.0,
+            "output_chars": 80, "contains_think": False,
         },
         {
             "task": "cluster", "prompt_tokens": 200,
             "completion_tokens": 64, "finish_reason": "length",
             "exception": "CompletionTruncatedError", "max_tokens": 64,
             "elapsed_seconds": 2.0,
+            "output_chars": 256, "contains_think": True,
         },
         {
             "task": "retry", "prompt_tokens": None,
@@ -41,6 +43,8 @@ def test_summary_reports_per_task_tokens_failures_and_pass_rate():
     assert result["tasks"]["cluster"]["length_finishes"] == 1
     assert result["tasks"]["cluster"]["first_attempt_pass_rate"] == 0.5
     assert result["tasks"]["cluster"]["retry_count"] == 1
+    assert result["tasks"]["cluster"]["chars_per_completion_token"] == 4.0
+    assert result["tasks"]["cluster"]["visible_think_markers"] == 1
     assert result["tasks"]["retry"]["context_errors"] == 1
     assert result["overall"]["length_finishes"] == 1
     assert result["overall"]["context_errors"] == 1

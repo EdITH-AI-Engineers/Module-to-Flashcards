@@ -21,6 +21,19 @@ def _token_summary(calls: Sequence[Mapping[str, object]], field: str) -> dict[st
     }
 
 
+def _chars_per_completion_token(calls: Sequence[Mapping[str, object]]) -> float | None:
+    pairs = [
+        (int(call["output_chars"]), int(call["completion_tokens"]))
+        for call in calls
+        if type(call.get("output_chars")) is int
+        and type(call.get("completion_tokens")) is int
+        and int(call["completion_tokens"]) > 0
+    ]
+    if not pairs:
+        return None
+    return sum(chars for chars, _tokens in pairs) / sum(tokens for _chars, tokens in pairs)
+
+
 def _task_summary(
     calls: Sequence[Mapping[str, object]], counts: Mapping[str, int]
 ) -> dict[str, object]:
@@ -31,7 +44,7 @@ def _task_summary(
         "prompt_tokens": _token_summary(calls, "prompt_tokens"),
         "completion_tokens": _token_summary(calls, "completion_tokens"),
         "length_finishes": sum(call.get("finish_reason") == "length" for call in calls),
-        "context_errors": sum(
+        "context_errors": int(counts.get("preflight_context_errors", 0)) + sum(
             call.get("exception") == "ContextWindowExceededError" for call in calls
         ),
         "first_attempts": first_attempts,
@@ -40,6 +53,8 @@ def _task_summary(
             first_passes / first_attempts if first_attempts else None
         ),
         "retry_count": int(counts.get("retries", 0)),
+        "visible_think_markers": sum(call.get("contains_think") is True for call in calls),
+        "chars_per_completion_token": _chars_per_completion_token(calls),
     }
 
 
@@ -58,7 +73,12 @@ def summarize_metrics(
     }
     aggregate = {
         field: sum(int(counts.get(field, 0)) for counts in task_counts.values())
-        for field in ("first_attempts", "first_attempt_passes", "retries")
+        for field in (
+            "first_attempts",
+            "first_attempt_passes",
+            "retries",
+            "preflight_context_errors",
+        )
     }
     return {
         "tasks": tasks,

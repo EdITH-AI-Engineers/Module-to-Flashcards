@@ -14,6 +14,7 @@ from flashcard_pipeline import (
 )
 from flashcard_types import (
     CompletionTruncatedError,
+    ContextWindowExceededError,
     FlashcardCluster,
     FlashcardDraft,
     GraphFact,
@@ -79,7 +80,73 @@ def test_task_metrics_count_first_attempt_failure_and_retry():
         "first_attempts": 1,
         "first_attempt_passes": 0,
         "retries": 1,
+        "preflight_context_errors": 0,
     }
+
+
+def test_preflight_reduces_completion_budget_without_dropping_prompt():
+    class SizedBackend(FakeBackend):
+        context_window = 1700
+
+        def count_prompt_tokens(self, system, user):
+            return 300
+
+    backend = SizedBackend(['{"ok":true}'])
+    pipeline = FlashcardPipeline(backend, progress=lambda _message: None)
+
+    result = pipeline._complete_with_retries(
+        "required facts", json.loads, max_tokens=2048, label="cluster", task="cluster"
+    )
+
+    assert result == {"ok": True}
+    assert backend.calls[0][1] == "required facts"
+    assert backend.calls[0][2] == 1336
+
+
+def test_preflight_reports_unfit_required_payload_before_model_call():
+    class TinyBackend(FakeBackend):
+        context_window = 1100
+
+        def count_prompt_tokens(self, system, user):
+            return 300
+
+    backend = TinyBackend(['{"ok":true}'])
+    pipeline = FlashcardPipeline(backend, progress=lambda _message: None)
+
+    with pytest.raises(ContextWindowExceededError, match="split the task"):
+        pipeline._complete_with_retries(
+            "required facts", json.loads, max_tokens=2048, label="cluster", task="cluster"
+        )
+
+    assert not backend.calls
+    assert pipeline.task_metrics["cluster"]["preflight_context_errors"] == 1
+
+
+def test_truncation_retry_uses_new_headroom_without_parsing_partial_json():
+    class TruncatingBackend(FakeBackend):
+        context_window = 4096
+
+        def count_prompt_tokens(self, system, user):
+            return 1000 if user == "required facts" else 100
+
+        def complete(self, system, user, *, max_tokens, schema=None):
+            self.calls.append((system, user, max_tokens))
+            if len(self.calls) == 1:
+                raise CompletionTruncatedError("length", partial_content='{"bad":')
+            return '{"ok":true}'
+
+    backend = TruncatingBackend(())
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(max_retries=2), progress=lambda _message: None
+    )
+
+    result = pipeline._complete_with_retries(
+        "required facts", json.loads, max_tokens=1536, label="cluster", task="cluster"
+    )
+
+    assert result == {"ok": True}
+    assert [call[2] for call in backend.calls] == [1536, 2304]
+    assert "{\"bad\":" not in backend.calls[1][1]
 
 
 def test_generation_passes_concept_and_cluster_task_names_to_metrics_backend():
@@ -290,7 +357,7 @@ def test_pipeline_uses_largest_balanced_fact_set_that_fits_context():
 
         def count_prompt_tokens(self, system, user):
             payload = review_payload(user)
-            return 1000 + 100 * len(payload["graph_facts"])
+            return 1000 + 100 * len(payload.get("graph_facts", ()))
 
     backend = SizedBackend(
         [plan_json()] + [cluster_json(index) for index in range(1, 21)]

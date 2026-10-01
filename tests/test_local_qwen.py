@@ -200,10 +200,72 @@ def test_backend_records_task_metrics_for_success_truncation_and_context_error()
         ("concept_plan", "context_error", 3),
     ]
     assert events[0]["prompt_tokens"] == 120
+    assert events[0]["output_chars"] == len('{"cards": []}')
+    assert events[0]["contains_think"] is False
     assert events[1]["completion_tokens"] == 64
     assert events[2]["exception"] == "ContextWindowExceededError"
     assert all(item["elapsed_seconds"] >= 0 for item in events)
     assert all("content" not in item for item in events)
+
+
+def test_hard_no_think_path_counts_exact_rendered_prompt_and_uses_schema_grammar():
+    calls = []
+    tokenized = []
+
+    class FakeLlama:
+        def tokenize(self, data, *, add_bos, special):
+            tokenized.append((data.decode("utf-8"), add_bos, special))
+            return [1] * 37
+
+        def create_completion(self, **kwargs):
+            calls.append(kwargs)
+            return {
+                "choices": [{"text": '{"cards":[]}', "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 37, "completion_tokens": 6},
+            }
+
+    backend = LocalQwenBackend.__new__(LocalQwenBackend)
+    backend._llm = FakeLlama()
+    backend._hard_no_think = True
+    backend._temperature = 0.2
+    backend._seed = 42
+    backend._completion_index = 0
+    schema = {"type": "object", "properties": {"cards": {"type": "array"}}, "required": ["cards"]}
+
+    assert backend.count_prompt_tokens("S", "U") == 37
+    assert backend.complete("S", "U", max_tokens=100, schema=schema) == '{"cards":[]}'
+    assert calls[0]["prompt"] == tokenized[0][0]
+    assert tokenized[0][1:] == (False, True)
+    assert "<think>\n\n</think>" in calls[0]["prompt"]
+    assert calls[0]["stop"] == ["<|im_end|>"]
+    assert calls[0]["grammar"] is not None
+
+
+def test_optional_sampling_defaults_are_omitted_and_call_overrides_apply():
+    calls = []
+
+    class FakeLlama:
+        def create_chat_completion(self, **kwargs):
+            calls.append(kwargs)
+            return {"choices": [{"message": {"content": "{}"}}]}
+
+    backend = LocalQwenBackend.__new__(LocalQwenBackend)
+    backend._llm = FakeLlama()
+    backend._temperature = 0.2
+    backend._seed = 42
+    backend._completion_index = 0
+    backend._top_p = 0.8
+    backend._top_k = 20
+    backend._repeat_penalty = 1.05
+    backend._presence_penalty = None
+
+    backend.complete("S", "U", max_tokens=100, top_p=0.9, presence_penalty=0.2)
+
+    assert calls[0]["temperature"] == 0.2
+    assert calls[0]["top_p"] == 0.9
+    assert calls[0]["top_k"] == 20
+    assert calls[0]["repeat_penalty"] == 1.05
+    assert calls[0]["presence_penalty"] == 0.2
 
 
 def test_backend_translates_context_window_overflow():

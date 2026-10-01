@@ -17,6 +17,12 @@ MODEL_REPO = "Qwen/Qwen3-8B-GGUF"
 MODEL_REVISION = "4f02e7c52b572082828edf5058a87e2e7dc3e4d5"
 MODEL_FILENAME = "Qwen3-8B-Q5_K_M.gguf"
 DEFAULT_N_CTX = 12288
+QWEN_NON_THINKING_SAMPLING = {
+    "temperature": 0.7,
+    "top_p": 0.8,
+    "top_k": 20,
+    "repeat_penalty": 1.05,
+}
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -59,6 +65,11 @@ class LocalQwenBackend:
         n_threads: int | None = None,
         temperature: float = 0.2,
         seed: int = 42,
+        hard_no_think: bool = False,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        repeat_penalty: float | None = None,
+        presence_penalty: float | None = None,
     ) -> None:
         try:
             from llama_cpp import Llama
@@ -118,6 +129,11 @@ class LocalQwenBackend:
             else thread_budget_for_workers(self.auto_cluster_workers)
         )
         self._temperature = temperature
+        self._hard_no_think = hard_no_think
+        self._top_p = top_p
+        self._top_k = top_k
+        self._repeat_penalty = repeat_penalty
+        self._presence_penalty = presence_penalty
         self._seed = seed
         self._completion_index = 0
         self._context_window = int(n_ctx)
@@ -134,6 +150,11 @@ class LocalQwenBackend:
             n_threads=self._fork_n_threads,
             temperature=self._temperature,
             seed=self._seed + 100_000 * worker_index,
+            hard_no_think=self._hard_no_think,
+            top_p=self._top_p,
+            top_k=self._top_k,
+            repeat_penalty=self._repeat_penalty,
+            presence_penalty=self._presence_penalty,
         )
         forked._metric_sink = self._metric_sink
         return forked
@@ -151,6 +172,14 @@ class LocalQwenBackend:
 
     def count_prompt_tokens(self, system: str, user: str) -> int:
         """Count the exact chat-template tokens used by the local backend."""
+        if getattr(self, "_hard_no_think", False):
+            return len(
+                self._llm.tokenize(
+                    self._hard_no_think_prompt(system, user).encode("utf-8"),
+                    add_bos=False,
+                    special=True,
+                )
+            )
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": f"{user}\n\n/no_think"},
@@ -198,6 +227,15 @@ class LocalQwenBackend:
             self._llm.tokenize(raw.encode("utf-8"), add_bos=True, special=True)
         ) + 16
 
+    @staticmethod
+    def _hard_no_think_prompt(system: str, user: str) -> str:
+        """Render exactly the ChatML bytes passed to create_completion."""
+        return (
+            f"<|im_start|>system\n{system}<|im_end|>\n"
+            f"<|im_start|>user\n{user}\n\n/no_think<|im_end|>\n"
+            "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+        )
+
     def close(self) -> None:
         close = getattr(self._llm, "close", None)
         if callable(close):
@@ -211,6 +249,10 @@ class LocalQwenBackend:
         max_tokens: int,
         schema: Mapping[str, object] | None = None,
         task: str | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        repeat_penalty: float | None = None,
+        presence_penalty: float | None = None,
     ) -> str:
         call_seed = self._seed + self._completion_index
         self._completion_index += 1
@@ -219,20 +261,52 @@ class LocalQwenBackend:
         completion_tokens: int | None = None
         finish_reason: str | None = None
         exception_name: str | None = None
+        contains_think: bool | None = None
+        output_chars: int | None = None
         response_format: dict[str, object] = {"type": "json_object"}
         if schema is not None:
             response_format["schema"] = dict(schema)
+        sampling = {
+            "top_p": top_p if top_p is not None else getattr(self, "_top_p", None),
+            "top_k": top_k if top_k is not None else getattr(self, "_top_k", None),
+            "repeat_penalty": (
+                repeat_penalty if repeat_penalty is not None
+                else getattr(self, "_repeat_penalty", None)
+            ),
+            "presence_penalty": (
+                presence_penalty if presence_penalty is not None
+                else getattr(self, "_presence_penalty", None)
+            ),
+        }
+        sampling = {key: value for key, value in sampling.items() if value is not None}
         try:
-            response: Any = self._llm.create_chat_completion(
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": f"{user}\n\n/no_think"},
-                ],
-                temperature=self._temperature,
-                seed=call_seed,
-                max_tokens=max_tokens,
-                response_format=response_format,
-            )
+            if getattr(self, "_hard_no_think", False):
+                from llama_cpp import LlamaGrammar
+
+                grammar = LlamaGrammar.from_json_schema(
+                    json.dumps(dict(schema) if schema is not None else {"type": "object"})
+                )
+                response: Any = self._llm.create_completion(
+                    prompt=self._hard_no_think_prompt(system, user),
+                    temperature=self._temperature,
+                    seed=call_seed,
+                    max_tokens=max_tokens,
+                    grammar=grammar,
+                    stop=["<|im_end|>"],
+                    **sampling,
+                )
+            else:
+                response = self._llm.create_chat_completion(
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": f"{user}\n\n/no_think"},
+                    ],
+                    temperature=self._temperature,
+                    seed=call_seed,
+                    max_tokens=max_tokens,
+                    response_format=response_format,
+                    **sampling,
+                )
             usage = response.get("usage", {}) if isinstance(response, dict) else {}
             if isinstance(usage, dict):
                 recorded_prompt = usage.get("prompt_tokens")
@@ -243,10 +317,16 @@ class LocalQwenBackend:
                 )
             try:
                 choice = response["choices"][0]
-                content = choice["message"]["content"]
+                content = (
+                    choice["text"]
+                    if getattr(self, "_hard_no_think", False)
+                    else choice["message"]["content"]
+                )
             except (KeyError, IndexError, TypeError) as exc:
                 raise RuntimeError("Qwen returned an unexpected response shape") from exc
             finish_reason = choice.get("finish_reason")
+            contains_think = isinstance(content, str) and "<think>" in content
+            output_chars = len(content) if isinstance(content, str) else None
             if finish_reason == "length":
                 raise CompletionTruncatedError(
                     "Qwen response was truncated before it completed the requested JSON",
@@ -284,6 +364,8 @@ class LocalQwenBackend:
                 "max_tokens": max_tokens,
                 "elapsed_seconds": perf_counter() - started,
                 "exception": exception_name,
+                "contains_think": contains_think,
+                "output_chars": output_chars,
             }
             _LOGGER.info("Qwen completion: %s", json.dumps(metric, sort_keys=True))
             sink = getattr(self, "_metric_sink", None)

@@ -42,6 +42,7 @@ from flashcard_schema import (
 from flashcard_types import (
     ChatBackend,
     CompletionTruncatedError,
+    ContextWindowExceededError,
     ConceptPlan,
     FlashcardCluster,
     FlashcardDraft,
@@ -85,6 +86,14 @@ class PipelineConfig:
 
 Parsed = TypeVar("Parsed")
 PLAN_CONTEXT_MARGIN = 64
+CALL_CONTEXT_MARGIN = 64
+TASK_COMPLETION_FLOORS = {
+    "concept_plan": 1024,
+    "cluster": 1024,
+    "grounding_review": 256,
+    "duplicate_review": 256,
+    "duplicate_repair": 256,
+}
 
 # Fact `kind` values that mark structural/presentation content (slide titles,
 # section headers, module headings) rather than teachable material. Facts
@@ -343,6 +352,7 @@ class FlashcardPipeline:
                 "first_attempts": counts["first_attempts"],
                 "first_attempt_passes": counts["first_attempt_passes"],
                 "retries": counts["retries"],
+                "preflight_context_errors": counts["preflight_context_errors"],
             }
             for task, counts in sorted(self._task_attempts.items())
         }
@@ -376,6 +386,25 @@ class FlashcardPipeline:
         self._rejected_attempt_count += 1
         categories = {self._rejection_category(error) for error in errors}
         self._rejection_counts.update(categories)
+
+    def _fitted_completion_budget(
+        self, system: str, user: str, desired: int, task: str, configured: int
+    ) -> int:
+        """Reserve context before generation without dropping grounding facts."""
+        counter = getattr(self.backend, "count_prompt_tokens", None)
+        window = getattr(self.backend, "context_window", None)
+        if not callable(counter) or not isinstance(window, int):
+            return desired
+        prompt_tokens = counter(system, user)
+        headroom = window - prompt_tokens - CALL_CONTEXT_MARGIN
+        floor = min(configured, TASK_COMPLETION_FLOORS.get(task, 256))
+        if headroom < floor:
+            raise ContextWindowExceededError(
+                f"{task} needs at least {floor} completion tokens after a "
+                f"{prompt_tokens}-token prompt, but context {window} leaves "
+                f"only {max(0, headroom)}; split the task or increase --n-ctx"
+            )
+        return min(desired, headroom)
 
     def _report_rejection_stats(self) -> None:
         stats = self.rejection_stats
@@ -411,6 +440,7 @@ class FlashcardPipeline:
         prompt = original_prompt
         last_errors: tuple[str, ...] = ()
         task_counts = self._task_attempts.setdefault(task, Counter())
+        desired_tokens = max_tokens
         system = {
             "concept_plan": PLAN_SYSTEM,
             "cluster": CLUSTER_SYSTEM,
@@ -432,6 +462,13 @@ class FlashcardPipeline:
                     REPAIR_SYSTEM if attempt > 1 and task in {"cluster", "duplicate_repair"}
                     else system
                 )
+                try:
+                    completion_kwargs["max_tokens"] = self._fitted_completion_budget(
+                        call_system, prompt, desired_tokens, task, max_tokens
+                    )
+                except ContextWindowExceededError:
+                    task_counts["preflight_context_errors"] += 1
+                    raise
                 candidate = self.backend.complete(call_system, prompt, **completion_kwargs)
             except CompletionTruncatedError as exc:
                 token_detail = ""
@@ -449,6 +486,9 @@ class FlashcardPipeline:
                     f"rejected: {last_errors[0]}"
                 )
                 prompt = build_retry(original_prompt, None, last_errors)
+                # The retry prompt omits unusable partial JSON. Spend the freed
+                # context on a larger completion cap when available.
+                desired_tokens = max(desired_tokens + 256, int(desired_tokens * 1.5))
                 if attempt < self.config.max_retries:
                     self._progress(
                         f"{label}: output length limit reached. Retrying with a "

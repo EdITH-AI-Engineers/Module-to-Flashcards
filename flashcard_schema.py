@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 from flashcard_contract import CARDS_PER_CLUSTER, CONCEPTS_PER_MODULE
 from flashcard_types import FlashcardDraft
-from flashcard_validator import ALLOWED_APPROACHES, ALLOWED_TYPES
+from flashcard_validator import ALLOWED_APPROACHES
 
 
 def _strict_object(
@@ -63,39 +63,35 @@ def build_concept_plan_schema(fact_ids: Sequence[str]) -> dict[str, object]:
 def build_card_cluster_schema(
     assessment_approaches: Sequence[str],
 ) -> dict[str, object]:
-    """Require exactly five card objects with the exact eleven field names."""
+    """Require five complete card shapes while omitting structural constants."""
 
-    card = _strict_object(
-        {
-            "type": {"type": "string", "enum": sorted(ALLOWED_TYPES)},
-            "question": {"type": "string"},
-            "correct_option": {"type": "string"},
-            "wrong_option_1": {"type": "string"},
-            "wrong_option_2": {"type": "string"},
-            "wrong_option_3": {"type": "string"},
-            "is_true": {"type": ["integer", "null"]},
-            "expalanation": {"type": "string"},
-            "hint": {"type": "string"},
-            "difficulty": {"type": "integer", "enum": [1, 2, 3]},
-            "assessment_approach": {
-                "type": "string",
-                "enum": list(assessment_approaches),
-            },
+    common = {
+        "question": {"type": "string"},
+        "expalanation": {"type": "string"},
+        "hint": {"type": "string"},
+        "difficulty": {"type": "integer", "enum": [1, 2, 3]},
+        "assessment_approach": {
+            "type": "string",
+            "enum": list(assessment_approaches),
         },
+    }
+    card_variants: list[dict[str, object]] = []
+    for card_type, specific in (
         (
-            "type",
-            "question",
-            "correct_option",
-            "wrong_option_1",
-            "wrong_option_2",
-            "wrong_option_3",
-            "is_true",
-            "expalanation",
-            "hint",
-            "difficulty",
-            "assessment_approach",
+            "multiple-choice",
+            {
+                "correct_option": {"type": "string"},
+                "wrong_option_1": {"type": "string"},
+                "wrong_option_2": {"type": "string"},
+                "wrong_option_3": {"type": "string"},
+            },
         ),
-    )
+        ("identification", {"correct_option": {"type": "string"}}),
+        ("true-false", {"is_true": {"type": "integer", "enum": [0, 1]}}),
+    ):
+        properties = {"type": {"type": "string", "enum": [card_type]}, **common, **specific}
+        card_variants.append(_strict_object(properties, tuple(properties)))
+    card = {"oneOf": card_variants}
     return _strict_object(
         {
             "cards": {
@@ -118,14 +114,22 @@ def build_single_card_schema(
     cards = schema["properties"]["cards"]
     cards["minItems"] = 1
     cards["maxItems"] = 1
-    properties = cards["items"]["properties"]
+    variants = cards["items"]["oneOf"]
+    selected = next(
+        variant
+        for variant in variants
+        if variant["properties"]["type"]["enum"] == [original_card.type]
+    )
+    cards["items"] = selected
+    properties = selected["properties"]
     for field in (
         "type",
         "is_true",
         "difficulty",
         "assessment_approach",
     ):
-        properties[field] = {"enum": [getattr(original_card, field)]}
+        if field in properties:
+            properties[field] = {"enum": [getattr(original_card, field)]}
     if original_card.type == "true-false":
         for field in (
             "correct_option",
@@ -133,10 +137,12 @@ def build_single_card_schema(
             "wrong_option_2",
             "wrong_option_3",
         ):
-            properties[field] = {"enum": [getattr(original_card, field)]}
+            if field in properties:
+                properties[field] = {"enum": [getattr(original_card, field)]}
     elif original_card.type == "identification":
         for field in ("wrong_option_1", "wrong_option_2", "wrong_option_3"):
-            properties[field] = {"enum": [getattr(original_card, field)]}
+            if field in properties:
+                properties[field] = {"enum": [getattr(original_card, field)]}
     return schema
 
 

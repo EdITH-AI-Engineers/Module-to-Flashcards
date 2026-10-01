@@ -139,9 +139,8 @@ TYPE_SPECIFIC_FIELDS = {
         "wrong_option_1",
         "wrong_option_2",
         "wrong_option_3",
-        "is_true",
     },
-    "identification": {"correct_option", "is_true"},
+    "identification": {"correct_option"},
     "true-false": {"is_true"},
 }
 DEFAULT_ASSESSMENT_APPROACHES = (

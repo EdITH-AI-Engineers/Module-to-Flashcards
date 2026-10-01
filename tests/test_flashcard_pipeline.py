@@ -212,20 +212,9 @@ def test_pipeline_generates_twenty_valid_clusters_without_review():
     card_schema = backend.schemas[1]["properties"]["cards"]
     assert card_schema["minItems"] == card_schema["maxItems"] == 5
     card_item = card_schema["items"]
-    assert set(card_item["required"]) == {
-        "type",
-        "question",
-        "correct_option",
-        "wrong_option_1",
-        "wrong_option_2",
-        "wrong_option_3",
-        "is_true",
-        "expalanation",
-        "hint",
-        "difficulty",
-        "assessment_approach",
-    }
-    assert card_item["additionalProperties"] is False
+    assert len(card_item["oneOf"]) == 3
+    assert all(variant["additionalProperties"] is False for variant in card_item["oneOf"])
+    assert all("expalanation" in variant["required"] for variant in card_item["oneOf"])
 
 
 def test_pipeline_defaults_use_practical_local_token_budgets():

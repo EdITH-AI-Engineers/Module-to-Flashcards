@@ -124,10 +124,12 @@ learning check twice: changing only card type, opening phrase, or one word is
 not enough; a supported negated question is different. Keep each question
 clear and authentic, with difficulty from reasoning rather than obscure wording.
 
-Return one JSON object only. Each card has the eleven canonical fields: type,
+Return one JSON object only. Parsed cards have eleven canonical fields: type,
 question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3,
 is_true, expalanation, hint, difficulty, assessment_approach. Preserve the
-spelling expalanation. Allowed types are multiple-choice, identification, and
+spelling expalanation. Follow the per-type schema: omit fixed empty options
+and null is_true where the schema excludes them; Python fills these before
+validation. Allowed types are multiple-choice, identification, and
 true-false; each five-card cluster has at least one of each and should vary its
 type mix across clusters. Type is structural; scenario analysis and the other
 assessment_approach values are never types.
@@ -150,19 +152,19 @@ correct claim or valid category member as a distractor; narrow a broad stem
 with a supported distinguishing property. All four options must be textually
 different, not paraphrases of one another. Keep wrong answers relevant and
 unambiguously incorrect. Prefer positive stems; never make an invented claim
-correct through NOT or EXCEPT. Set is_true null. Do not put choices or the
+correct through NOT or EXCEPT. is_true is null after parsing. Do not put choices or the
 answer in the stem.
 
 Identification: correct_option is one concise term, name, concept, class,
 principle, process, figure, or title, not a sentence. All three wrong_option
-fields must literally be empty strings and is_true null. Ask directly without
+fields are empty strings and is_true null after parsing. Ask directly without
 the answer or its abbreviation anywhere in the question, even inside a longer
 phrase; describe its supported function, purpose, defining trait, or relation
 instead of repeating its name or full definition.
 
 True-false: question is a declarative statement, not an instruction or
 question. Use only a supplied fact that explicitly asserts a claim, never an
-unresolved question. All four option fields are empty strings; is_true is
+unresolved question. All four option fields are empty strings after parsing; is_true is
 integer 1 for true or 0 for false. False claims must be plausible errors the
 facts resolve. Do not add True/False labels to the stem.
 
@@ -210,10 +212,11 @@ key spelling expalanation.
 
 Allowed types: multiple-choice, identification, true-false. Multiple-choice
 has exactly one correct answer, three distinct, same-category incorrect
-answers, and null is_true. Identification has one concise answer absent from
-its direct question, three empty wrong options, and null is_true. True-false
+answers, and null is_true after parsing. Identification has one concise answer absent from
+its direct question, three empty wrong options, and null is_true after parsing. True-false
 has a declarative statement based on an asserted fact, all option fields
-empty, and integer is_true of 0 or 1. Scenario analysis is an approach, not
+empty after parsing, and integer is_true of 0 or 1. Omit fixed fields the
+schema excludes. Scenario analysis is an approach, not
 a type, and must use a supported case only when helpful. The approach must
 match the actual reasoning. expalanation states the supported relationship,
 not generic filler; hint clues the reasoning without giving the answer.
@@ -392,8 +395,8 @@ CRITICAL REMINDER
 - Use only supported facts for answers; exactly one multiple-choice option may be correct.
 - Make five meaningfully distinct learning checks, not one-word rewrites.
 - Include multiple-choice, identification, and true-false types; scenario analysis is an approach.
-- Identification has three empty wrong options and no answer text in its question.
-- True-false is declarative, has four empty options, and uses integer is_true.
+- Identification parses to three empty wrong options and has no answer text in its question.
+- True-false is declarative, parses to four empty options, and uses integer is_true.
 - Keep expalanation grounded; no provenance wording or internal labels.
 INPUT JSON:
 {_json(payload)}
@@ -709,7 +712,8 @@ def build_cluster_retry_prompt(
       re-describing the same definition again.
     - Each expalanation must explain the supported relationship or distinction,
       not merely say that an answer is correct or a statement is true or false.
-    - Include all eleven required fields and preserve expalanation spelling.
+    - Follow the per-type JSON schema; Python fills omitted structural constants
+      before validation. Preserve expalanation spelling.
     - Return JSON only with the shape {{"cards":[...]}}.
 
     INPUT JSON:
@@ -780,7 +784,8 @@ def build_duplicate_card_repair_prompt(
       direction).
     - Do not change the assessment approach. Copy every field not explicitly
       permitted by the type-specific edit limits exactly.
-    - Keep the eleven required fields and preserve the key spelling expalanation.
+    - Follow the per-type JSON schema; Python fills omitted structural constants.
+      Preserve the key spelling expalanation.
     - Return one card only, with no Markdown or surrounding text.
 
     """

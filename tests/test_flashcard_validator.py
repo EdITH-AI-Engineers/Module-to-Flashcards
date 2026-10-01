@@ -133,6 +133,23 @@ def test_cards_parser_creates_typed_records():
     assert parse_cards(cards_json()) == valid_cards()
 
 
+def test_cards_parser_fills_omitted_structural_constants_before_validation():
+    payload = json.loads(cards_json())
+    payload["cards"][0].pop("is_true")
+    for index in (1, 2, 4):
+        card = payload["cards"][index]
+        for field in ("correct_option", "wrong_option_1", "wrong_option_2", "wrong_option_3"):
+            if card[field] == "":
+                del card[field]
+        if card["type"] == "identification":
+            del card["is_true"]
+
+    parsed = parse_cards(json.dumps(payload))
+
+    assert parsed == valid_cards()
+    assert validate_cluster(parsed, valid_concept(), ()) == ()
+
+
 def test_cards_parser_normalizes_smart_and_mojibake_apostrophes():
     payload = json.loads(cards_json())
     payload["cards"][0]["question"] = "Which of Norman\u2019s principles applies?"

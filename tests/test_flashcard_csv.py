@@ -9,6 +9,7 @@ import flashcard_csv
 from flashcard_csv import CSV_COLUMNS, render_module, write_module_output
 from flashcard_types import ModuleIdentity
 from tests.factories import valid_clusters, with_question
+from artifact_paths import flashcard_part_paths, flashcard_receipt_path
 
 
 def split_blocks(text):
@@ -169,3 +170,54 @@ def test_write_module_output_uses_utf8_bom_for_spreadsheet_compatibility(tmp_pat
 
     assert target.read_bytes().startswith(b"\xef\xbb\xbf")
     assert target.read_text(encoding="utf-8-sig") == "Norman's principles"
+
+
+def test_custom_output_base_generates_two_expected_names(tmp_path):
+    assert flashcard_part_paths(tmp_path / "custom.csv") == (
+        tmp_path / "custom-1.csv",
+        tmp_path / "custom-2.csv",
+    )
+    assert flashcard_receipt_path(tmp_path / "custom.csv") == (
+        tmp_path / "custom.parts.json"
+    )
+
+
+def test_rendered_parts_are_standard_fifty_card_csvs_with_disjoint_clusters():
+    identity = ModuleIdentity("CPE0021", "1")
+    parts = flashcard_csv.render_module_parts(identity, valid_clusters())
+    rows = [list(csv.reader(io.StringIO(part))) for part in parts]
+
+    assert [len(part) for part in rows] == [51, 51]
+    assert [tuple(part[0]) for part in rows] == [CSV_COLUMNS, CSV_COLUMNS]
+    assert [len({row[10] for row in part[1:]}) for part in rows] == [10, 10]
+    assert {row[10] for row in rows[0][1:]}.isdisjoint(
+        {row[10] for row in rows[1][1:]}
+    )
+    assert all("Module 1." not in part for part in parts)
+    assert "expalanation" in parts[0].splitlines()[0]
+    assert tuple(len(block) for block in flashcard_csv.parse_rendered_parts(parts, identity)) == (50, 50)
+
+
+def test_pair_parser_rejects_cross_part_question_duplicate():
+    identity = ModuleIdentity("CPE0021", "1")
+    clusters = valid_clusters()
+    first, second = flashcard_csv.render_module_parts(identity, clusters)
+    second = second.replace(clusters[10].cards[0].question, clusters[0].cards[0].question, 1)
+
+    with pytest.raises(ValueError, match="near-duplicate"):
+        flashcard_csv.parse_rendered_parts((first, second), identity)
+
+
+def test_pair_receipt_rejects_mixed_generations(tmp_path):
+    identity = ModuleIdentity("CPE0021", "1")
+    base = tmp_path / "cards.csv"
+    parts = flashcard_csv.render_module_parts(identity, valid_clusters())
+
+    paths = flashcard_csv.write_module_parts(base, parts, identity)
+    assert paths == flashcard_part_paths(base)
+    assert flashcard_csv.valid_written_parts(base, identity)
+    assert all(path.read_bytes().startswith(b"\xef\xbb\xbf") for path in paths)
+
+    paths[0].write_bytes(paths[0].read_bytes() + b"\n")
+    assert not flashcard_csv.valid_written_parts(base, identity)
+    assert flashcard_receipt_path(base).is_file()

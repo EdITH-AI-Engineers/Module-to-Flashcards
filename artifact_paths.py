@@ -26,3 +26,13 @@ def flashcard_output_path(
     course = safe_path_component(course_code, fallback="course")
     module = module_file_label(module_number)
     return Path(flashcards_root) / course / f"{course}_M{module}.csv"
+
+
+def flashcard_part_paths(base: Path) -> tuple[Path, Path]:
+    """Derive the two normal CSV outputs from the legacy/base artifact path."""
+    base = Path(base)
+    return tuple(base.with_name(f"{base.stem}-{part}.csv") for part in (1, 2))
+
+
+def flashcard_receipt_path(base: Path) -> Path:
+    return Path(base).with_suffix(".parts.json")

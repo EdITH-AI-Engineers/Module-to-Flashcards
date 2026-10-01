@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from collections import Counter
 import csv
+import hashlib
 import io
+import json
 from pathlib import Path
 import tempfile
 from typing import Iterable, Sequence
 from uuid import UUID
+
+from artifact_paths import flashcard_part_paths, flashcard_receipt_path
 
 from flashcard_contract import (
     CARDS_PER_BLOCK,
@@ -15,7 +19,7 @@ from flashcard_contract import (
     CLUSTERS_PER_MODULE,
 )
 from flashcard_types import FlashcardCluster, ModuleIdentity
-from flashcard_validator import validate_module
+from flashcard_validator import are_near_duplicates, validate_module
 
 
 CSV_COLUMNS = (
@@ -174,6 +178,162 @@ def render_module(
     )
     parse_rendered_module(content, identity)
     return content
+
+
+def render_module_parts(
+    identity: ModuleIdentity,
+    clusters: Sequence[FlashcardCluster],
+) -> tuple[str, str]:
+    errors = validate_module(clusters)
+    if errors:
+        raise ValueError("cannot render invalid module: " + "; ".join(errors))
+    parts = (
+        _render_csv(identity, clusters[:CLUSTERS_PER_BLOCK]),
+        _render_csv(identity, clusters[CLUSTERS_PER_BLOCK:]),
+    )
+    parse_rendered_parts(parts, identity)
+    return parts
+
+
+def parse_rendered_parts(
+    parts: tuple[str, str],
+    identity: ModuleIdentity,
+    *,
+    validate_course_code: bool = True,
+) -> tuple[tuple[tuple[str, ...], ...], ...]:
+    """Validate both standard CSVs together, including cross-part uniqueness."""
+    if len(parts) != 2:
+        raise ValueError("module must contain exactly two CSV parts")
+    blocks = []
+    cluster_counts: Counter[str] = Counter()
+    questions: list[str] = []
+    for position, content in enumerate(parts, start=1):
+        try:
+            rows = list(csv.reader(io.StringIO(content, newline=""), strict=True))
+        except csv.Error as exc:
+            raise ValueError(f"part {position} is not valid CSV") from exc
+        if not rows or tuple(rows[0]) != CSV_COLUMNS:
+            raise ValueError(f"part {position} must begin with the flashcard CSV header")
+        data_rows = tuple(tuple(row) for row in rows[1:])
+        if len(data_rows) != CARDS_PER_BLOCK:
+            raise ValueError(
+                f"part {position} must contain exactly {CARDS_PER_BLOCK} flashcards, "
+                f"received {len(data_rows)}"
+            )
+        block_counts: Counter[str] = Counter()
+        for card_position, row in enumerate(data_rows, start=1):
+            prefix = f"part {position} card {card_position}"
+            if len(row) != len(CSV_COLUMNS):
+                raise ValueError(f"{prefix} must contain exactly {len(CSV_COLUMNS)} columns")
+            if validate_course_code and row[11] != identity.course_code:
+                raise ValueError(f"{prefix} has an incorrect course code")
+            if row[12] != identity.module_number:
+                raise ValueError(f"{prefix} has an incorrect module number")
+            try:
+                cluster = str(UUID(row[10]))
+            except (AttributeError, ValueError) as exc:
+                raise ValueError(f"{prefix} has an invalid cluster UUID") from exc
+            if cluster != row[10].casefold():
+                raise ValueError(f"{prefix} has a noncanonical cluster UUID")
+            cluster_counts[cluster] += 1
+            block_counts[cluster] += 1
+            questions.append(row[1])
+        if len(block_counts) != CLUSTERS_PER_BLOCK or any(
+            count != CARDS_PER_CLUSTER for count in block_counts.values()
+        ):
+            raise ValueError(f"part {position} must contain exactly ten complete clusters")
+        blocks.append(data_rows)
+    if len(cluster_counts) != CLUSTERS_PER_MODULE or any(
+        count != CARDS_PER_CLUSTER for count in cluster_counts.values()
+    ):
+        raise ValueError("parts must contain twenty distinct complete clusters")
+    for index, left in enumerate(questions):
+        for right in questions[index + 1 :]:
+            if are_near_duplicates(left, right):
+                raise ValueError("parts contain near-duplicate questions")
+    return tuple(blocks)
+
+
+def write_module_parts(
+    base: Path,
+    parts: tuple[str, str],
+    identity: ModuleIdentity,
+) -> tuple[Path, Path]:
+    """Publish two staged CSVs, then a receipt that certifies the exact pair."""
+    parse_rendered_parts(parts, identity)
+    paths = flashcard_part_paths(base)
+    receipt = flashcard_receipt_path(base)
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    staged: list[Path] = []
+    try:
+        digests = []
+        for path, content in zip(paths, parts):
+            data = content.encode("utf-8-sig")
+            with tempfile.NamedTemporaryFile(
+                mode="wb", delete=False, dir=path.parent,
+                prefix=f".{path.name}.", suffix=".tmp",
+            ) as handle:
+                temporary = Path(handle.name)
+                staged.append(temporary)
+                handle.write(data)
+                handle.flush()
+            digests.append(hashlib.sha256(data).hexdigest())
+        receipt_data = {
+            "version": 1,
+            "course_code": identity.course_code,
+            "module_number": identity.module_number,
+            "parts": [
+                {"name": path.name, "sha256": digest}
+                for path, digest in zip(paths, digests)
+            ],
+        }
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", delete=False, dir=receipt.parent,
+            prefix=f".{receipt.name}.", suffix=".tmp",
+        ) as handle:
+            staged_receipt = Path(handle.name)
+            staged.append(staged_receipt)
+            json.dump(receipt_data, handle, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+        for path, temporary in zip(paths, staged[:2]):
+            temporary.replace(path)
+        staged_receipt.replace(receipt)
+    finally:
+        for temporary in staged:
+            temporary.unlink(missing_ok=True)
+    return paths
+
+
+def valid_written_parts(
+    base: Path,
+    identity: ModuleIdentity,
+    *,
+    validate_course_code: bool = True,
+) -> bool:
+    paths = flashcard_part_paths(base)
+    receipt = flashcard_receipt_path(base)
+    try:
+        manifest = json.loads(receipt.read_text(encoding="utf-8"))
+        expected = {
+            "version": 1,
+            "course_code": identity.course_code,
+            "module_number": identity.module_number,
+            "parts": [
+                {"name": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                for path in paths
+            ],
+        }
+        if manifest != expected:
+            return False
+        parse_rendered_parts(
+            tuple(path.read_text(encoding="utf-8-sig") for path in paths),
+            identity,
+            validate_course_code=validate_course_code,
+        )
+        return True
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return False
 
 
 def write_module_output(path: Path, content: str) -> None:

@@ -1,0 +1,4 @@
+# Local graphs are derived from user-supplied module text and stay off Git.
+modules.json
+inputs/
+runs/

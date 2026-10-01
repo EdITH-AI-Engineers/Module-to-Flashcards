@@ -160,6 +160,52 @@ def test_backend_reports_length_limited_response_as_truncation():
     assert captured.value.completion_tokens == 1792
 
 
+def test_backend_records_task_metrics_for_success_truncation_and_context_error():
+    responses = iter(
+        (
+            {
+                "choices": [{"message": {"content": '{"cards": []}'}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 120, "completion_tokens": 15},
+            },
+            {
+                "choices": [{"message": {"content": '{"cards": ['}, "finish_reason": "length"}],
+                "usage": {"prompt_tokens": 130, "completion_tokens": 64},
+            },
+        )
+    )
+
+    class FakeLlama:
+        def create_chat_completion(self, **kwargs):
+            if kwargs["max_tokens"] == 3:
+                raise ValueError("Requested tokens exceed context window")
+            return next(responses)
+
+    events = []
+    backend = LocalQwenBackend.__new__(LocalQwenBackend)
+    backend._llm = FakeLlama()
+    backend._temperature = 0.2
+    backend._seed = 42
+    backend._completion_index = 0
+    backend._metric_sink = events.append
+
+    assert backend.complete("S", "U", max_tokens=16, task="cluster") == '{"cards": []}'
+    with pytest.raises(CompletionTruncatedError):
+        backend.complete("S", "U", max_tokens=64, task="retry")
+    with pytest.raises(ContextWindowExceededError):
+        backend.complete("S", "U", max_tokens=3, task="concept_plan")
+
+    assert [(item["task"], item["finish_reason"], item["max_tokens"]) for item in events] == [
+        ("cluster", "stop", 16),
+        ("retry", "length", 64),
+        ("concept_plan", "context_error", 3),
+    ]
+    assert events[0]["prompt_tokens"] == 120
+    assert events[1]["completion_tokens"] == 64
+    assert events[2]["exception"] == "ContextWindowExceededError"
+    assert all(item["elapsed_seconds"] >= 0 for item in events)
+    assert all("content" not in item for item in events)
+
+
 def test_backend_translates_context_window_overflow():
     class FakeLlama:
         def create_chat_completion(self, **kwargs):
@@ -208,7 +254,10 @@ def test_fork_creates_separate_model_context_with_worker_seed(monkeypatch, tmp_p
 
     monkeypatch.setitem(sys.modules, "llama_cpp", SimpleNamespace(Llama=FakeLlama))
     path = tmp_path / "model.gguf"
+    metrics = []
+    sink = metrics.append
     backend = LocalQwenBackend(path, n_ctx=4096, n_gpu_layers=12, seed=42)
+    backend.set_metric_sink(sink)
 
     forked = backend.fork(2)
 
@@ -219,6 +268,7 @@ def test_fork_creates_separate_model_context_with_worker_seed(monkeypatch, tmp_p
          "seed": 200042, "verbose": False},
     ]
     assert forked is not backend
+    assert forked._metric_sink is sink
     forked.close()
     assert forked._llm.closed is True
     assert backend._llm.closed is False

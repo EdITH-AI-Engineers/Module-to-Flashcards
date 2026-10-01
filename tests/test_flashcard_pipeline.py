@@ -17,7 +17,7 @@ from flashcard_types import (
     GraphFact,
     ModuleIdentity,
 )
-from flashcard_validator import parse_cards, validate_cluster
+from flashcard_validator import ValidationError, parse_cards, validate_cluster
 from tests.factories import (
     cluster_json,
     graph_facts,
@@ -44,6 +44,67 @@ class FakeBackend:
 
 def empty_review():
     return json.dumps({"issues": []})
+
+
+def test_task_metrics_count_first_attempt_failure_and_retry():
+    class MetricsBackend:
+        supports_task_metrics = True
+
+        def __init__(self):
+            self.responses = iter(("invalid", '{"ok": true}'))
+            self.tasks = []
+
+        def complete(self, system, user, *, max_tokens, schema=None, task=None):
+            self.tasks.append(task)
+            return next(self.responses)
+
+    backend = MetricsBackend()
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(max_retries=2), progress=lambda _message: None
+    )
+
+    def parse(raw):
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValidationError("invalid JSON") from exc
+
+    assert pipeline._complete_with_retries(
+        "prompt", parse, max_tokens=32, label="concept plan", task="concept_plan"
+    ) == {"ok": True}
+    assert backend.tasks == ["concept_plan", "retry"]
+    assert pipeline.task_metrics["concept_plan"] == {
+        "first_attempts": 1,
+        "first_attempt_passes": 0,
+        "retries": 1,
+    }
+
+
+def test_generation_passes_concept_and_cluster_task_names_to_metrics_backend():
+    class MetricsBackend(FakeBackend):
+        supports_task_metrics = True
+
+        def __init__(self, responses):
+            super().__init__(responses)
+            self.tasks = []
+
+        def complete(self, system, user, *, max_tokens, schema=None, task=None):
+            self.tasks.append(task)
+            return super().complete(system, user, max_tokens=max_tokens, schema=schema)
+
+    backend = MetricsBackend(
+        [plan_json()] + [cluster_json(index) for index in range(1, 21)]
+    )
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(final_review=False), progress=lambda _message: None
+    )
+
+    pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert backend.tasks == ["concept_plan"] + ["cluster"] * 20
+    assert pipeline.task_metrics["concept_plan"]["first_attempt_passes"] == 1
+    assert pipeline.task_metrics["cluster"]["first_attempt_passes"] == 20
+    assert pipeline.cluster_generation_seconds is not None
 
 
 def test_pipeline_excludes_question_shaped_facts_from_factual_authority():

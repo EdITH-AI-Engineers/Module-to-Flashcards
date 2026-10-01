@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+import logging
 import os
 from pathlib import Path
-from typing import Any, Mapping
+from time import perf_counter
+from typing import Any, Callable, Mapping
 
 from huggingface_hub import hf_hub_download
 
@@ -14,6 +17,7 @@ MODEL_REPO = "Qwen/Qwen3-8B-GGUF"
 MODEL_REVISION = "4f02e7c52b572082828edf5058a87e2e7dc3e4d5"
 MODEL_FILENAME = "Qwen3-8B-Q5_K_M.gguf"
 DEFAULT_N_CTX = 12288
+_LOGGER = logging.getLogger(__name__)
 
 
 def thread_budget_for_workers(workers: int) -> int | None:
@@ -44,6 +48,8 @@ def ensure_model(model_dir: Path, *, allow_download: bool = True) -> Path:
 
 
 class LocalQwenBackend:
+    supports_task_metrics = True
+
     def __init__(
         self,
         model_path: Path,
@@ -115,12 +121,13 @@ class LocalQwenBackend:
         self._seed = seed
         self._completion_index = 0
         self._context_window = int(n_ctx)
+        self._metric_sink: Callable[[dict[str, object]], None] | None = None
 
     def fork(self, worker_index: int) -> LocalQwenBackend:
         """Load an independent inference context for one cluster worker."""
         if worker_index < 1:
             raise ValueError("worker_index must be positive")
-        return LocalQwenBackend(
+        forked = LocalQwenBackend(
             self._model_path,
             n_ctx=self._n_ctx,
             n_gpu_layers=self._n_gpu_layers,
@@ -128,6 +135,15 @@ class LocalQwenBackend:
             temperature=self._temperature,
             seed=self._seed + 100_000 * worker_index,
         )
+        forked._metric_sink = self._metric_sink
+        return forked
+
+    def set_metric_sink(
+        self, sink: Callable[[dict[str, object]], None] | None
+    ) -> None:
+        """Register a metrics collector without changing generation settings."""
+
+        self._metric_sink = sink
 
     @property
     def context_window(self) -> int:
@@ -194,9 +210,15 @@ class LocalQwenBackend:
         *,
         max_tokens: int,
         schema: Mapping[str, object] | None = None,
+        task: str | None = None,
     ) -> str:
         call_seed = self._seed + self._completion_index
         self._completion_index += 1
+        started = perf_counter()
+        prompt_tokens: int | None = None
+        completion_tokens: int | None = None
+        finish_reason: str | None = None
+        exception_name: str | None = None
         response_format: dict[str, object] = {"type": "json_object"}
         if schema is not None:
             response_format["schema"] = dict(schema)
@@ -211,32 +233,62 @@ class LocalQwenBackend:
                 max_tokens=max_tokens,
                 response_format=response_format,
             )
+            usage = response.get("usage", {}) if isinstance(response, dict) else {}
+            if isinstance(usage, dict):
+                recorded_prompt = usage.get("prompt_tokens")
+                recorded_completion = usage.get("completion_tokens")
+                prompt_tokens = recorded_prompt if isinstance(recorded_prompt, int) else None
+                completion_tokens = (
+                    recorded_completion if isinstance(recorded_completion, int) else None
+                )
+            try:
+                choice = response["choices"][0]
+                content = choice["message"]["content"]
+            except (KeyError, IndexError, TypeError) as exc:
+                raise RuntimeError("Qwen returned an unexpected response shape") from exc
+            finish_reason = choice.get("finish_reason")
+            if finish_reason == "length":
+                raise CompletionTruncatedError(
+                    "Qwen response was truncated before it completed the requested JSON",
+                    partial_content=content if isinstance(content, str) else "",
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                )
+            if not isinstance(content, str) or not content.strip():
+                raise RuntimeError("Qwen returned empty assistant content")
+            return content.strip()
         except ValueError as exc:
             if "exceed context window" in str(exc):
+                if prompt_tokens is None:
+                    try:
+                        prompt_tokens = self.count_prompt_tokens(system, user)
+                    except Exception:
+                        pass
+                exception_name = "ContextWindowExceededError"
+                finish_reason = "context_error"
                 raise ContextWindowExceededError(
                     "Qwen prompt exceeded the configured context window; "
                     "reduce the prompt or increase --n-ctx"
                 ) from exc
+            exception_name = type(exc).__name__
             raise
-        try:
-            choice = response["choices"][0]
-            content = choice["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError("Qwen returned an unexpected response shape") from exc
-        usage = response.get("usage", {}) if isinstance(response, dict) else {}
-        prompt_tokens = usage.get("prompt_tokens") if isinstance(usage, dict) else None
-        completion_tokens = (
-            usage.get("completion_tokens") if isinstance(usage, dict) else None
-        )
-        if choice.get("finish_reason") == "length":
-            raise CompletionTruncatedError(
-                "Qwen response was truncated before it completed the requested JSON",
-                partial_content=content if isinstance(content, str) else "",
-                prompt_tokens=(prompt_tokens if isinstance(prompt_tokens, int) else None),
-                completion_tokens=(
-                    completion_tokens if isinstance(completion_tokens, int) else None
-                ),
-            )
-        if not isinstance(content, str) or not content.strip():
-            raise RuntimeError("Qwen returned empty assistant content")
-        return content.strip()
+        except Exception as exc:
+            exception_name = type(exc).__name__
+            raise
+        finally:
+            metric: dict[str, object] = {
+                "task": task or "unspecified",
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "finish_reason": finish_reason,
+                "max_tokens": max_tokens,
+                "elapsed_seconds": perf_counter() - started,
+                "exception": exception_name,
+            }
+            _LOGGER.info("Qwen completion: %s", json.dumps(metric, sort_keys=True))
+            sink = getattr(self, "_metric_sink", None)
+            if sink is not None:
+                try:
+                    sink(metric)
+                except Exception:
+                    _LOGGER.exception("Could not record Qwen completion metric")

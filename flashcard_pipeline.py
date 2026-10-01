@@ -314,6 +314,8 @@ class FlashcardPipeline:
         self._attempt_count = 0
         self._rejected_attempt_count = 0
         self._rejection_counts: Counter[str] = Counter()
+        self._task_attempts: dict[str, Counter[str]] = {}
+        self.cluster_generation_seconds: float | None = None
 
     @property
     def rejection_stats(self) -> dict[str, object]:
@@ -329,6 +331,19 @@ class FlashcardPipeline:
             "rejected_attempts": self._rejected_attempt_count,
             "rejection_rate": rate,
             "categories": dict(sorted(self._rejection_counts.items())),
+        }
+
+    @property
+    def task_metrics(self) -> dict[str, dict[str, int]]:
+        """Per-task first-attempt and retry counts for benchmarks."""
+
+        return {
+            task: {
+                "first_attempts": counts["first_attempts"],
+                "first_attempt_passes": counts["first_attempt_passes"],
+                "retries": counts["retries"],
+            }
+            for task, counts in sorted(self._task_attempts.items())
         }
 
     @staticmethod
@@ -384,6 +399,7 @@ class FlashcardPipeline:
         *,
         max_tokens: int,
         label: str,
+        task: str = "cluster",
         response_schema: Mapping[str, object] | None = None,
         include_rejected_candidate: bool = True,
         retry_prompt_builder: (
@@ -393,15 +409,18 @@ class FlashcardPipeline:
         build_retry = retry_prompt_builder or build_retry_prompt
         prompt = original_prompt
         last_errors: tuple[str, ...] = ()
+        task_counts = self._task_attempts.setdefault(task, Counter())
         for attempt in range(1, self.config.max_retries + 1):
             self._attempt_count += 1
+            task_counts["first_attempts" if attempt == 1 else "retries"] += 1
             try:
-                candidate = self.backend.complete(
-                    SYSTEM_PROMPT,
-                    prompt,
-                    max_tokens=max_tokens,
-                    schema=response_schema,
-                )
+                completion_kwargs: dict[str, object] = {
+                    "max_tokens": max_tokens,
+                    "schema": response_schema,
+                }
+                if getattr(self.backend, "supports_task_metrics", False):
+                    completion_kwargs["task"] = task if attempt == 1 else "retry"
+                candidate = self.backend.complete(SYSTEM_PROMPT, prompt, **completion_kwargs)
             except CompletionTruncatedError as exc:
                 token_detail = ""
                 if exc.prompt_tokens is not None and exc.completion_tokens is not None:
@@ -430,7 +449,10 @@ class FlashcardPipeline:
                 f"generated output:\n{candidate}"
             )
             try:
-                return parser(candidate)
+                parsed = parser(candidate)
+                if attempt == 1:
+                    task_counts["first_attempt_passes"] += 1
+                return parsed
             except InsufficientContentError as exc:
                 raise GenerationError(f"more content is required: {exc}") from exc
             except ValidationError as exc:
@@ -580,6 +602,7 @@ class FlashcardPipeline:
             parse_and_validate,
             max_tokens=self.config.cluster_max_tokens,
             label=label,
+            task="cluster",
             response_schema=build_card_cluster_schema(concept.assessment_approaches),
             include_rejected_candidate=True,
             retry_prompt_builder=build_cluster_retry,
@@ -705,6 +728,8 @@ class FlashcardPipeline:
                 self._attempt_count += worker._attempt_count
                 self._rejected_attempt_count += worker._rejected_attempt_count
                 self._rejection_counts.update(worker._rejection_counts)
+                for task, counts in worker._task_attempts.items():
+                    self._task_attempts.setdefault(task, Counter()).update(counts)
             ordered: list[FlashcardCluster | None] = [None] * len(concepts)
             for batch in results:
                 for position, cluster in batch:
@@ -720,6 +745,7 @@ class FlashcardPipeline:
         known_clusters: set[str],
         *,
         label: str,
+        task: str,
         require_duplicate_locations: bool = False,
     ) -> tuple[ReviewIssue, ...]:
         def parse(raw: str) -> tuple[ReviewIssue, ...]:
@@ -763,6 +789,7 @@ class FlashcardPipeline:
             parse,
             max_tokens=self.config.review_max_tokens,
             label=label,
+            task=task,
             response_schema=build_review_schema(tuple(known_clusters)),
         )
 
@@ -790,6 +817,7 @@ class FlashcardPipeline:
                 build_grounding_review_prompt(group),
                 {cluster.cluster for cluster in group},
                 label=f"grounding review {group_number}",
+                task="grounding_review",
             )
             self._merge_issues(merged, issues)
             grounding_clusters.update(issue.cluster for issue in issues)
@@ -799,6 +827,7 @@ class FlashcardPipeline:
             build_duplicate_review_prompt(clusters),
             {cluster.cluster for cluster in clusters},
             label="global duplicate review",
+            task="duplicate_review",
             require_duplicate_locations=True,
         )
         self._merge_issues(merged, global_issues)
@@ -1002,6 +1031,7 @@ class FlashcardPipeline:
                     f"duplicate repair {item.cluster_index + 1} card "
                     f"{item.card_index + 1} ({old.concept.name})"
                 ),
+                task="duplicate_repair",
                 response_schema=build_single_card_schema(original_card),
                 retry_prompt_builder=lambda original, rejected, errors: (
                     build_duplicate_card_retry_prompt(
@@ -1029,6 +1059,8 @@ class FlashcardPipeline:
         self._attempt_count = 0
         self._rejected_attempt_count = 0
         self._rejection_counts.clear()
+        self._task_attempts.clear()
+        self.cluster_generation_seconds = None
         facts = _exclude_non_assertive_facts(facts)
         eligible_plan_facts = _exclude_structural_facts(facts)
         plan_facts = _context_fitted_plan_facts(
@@ -1070,6 +1102,7 @@ class FlashcardPipeline:
             lambda raw: parse_concept_plan(raw, plan_facts),
             max_tokens=self.config.plan_max_tokens,
             label="concept plan",
+            task="concept_plan",
             response_schema=build_concept_plan_schema(
                 tuple(fact.fact_id for fact in plan_facts)
             ),
@@ -1092,6 +1125,7 @@ class FlashcardPipeline:
                     )
                 )
         cluster_elapsed = monotonic() - cluster_start
+        self.cluster_generation_seconds = cluster_elapsed
         cluster_rate = (
             len(clusters) * 60 / cluster_elapsed if cluster_elapsed > 0 else 0.0
         )

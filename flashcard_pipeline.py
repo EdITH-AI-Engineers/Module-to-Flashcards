@@ -19,7 +19,10 @@ from flashcard_contract import (
     CONCEPTS_PER_MODULE,
 )
 from flashcard_prompt import (
-    SYSTEM_PROMPT,
+    CLUSTER_SYSTEM,
+    PLAN_SYSTEM,
+    REPAIR_SYSTEM,
+    REVIEW_SYSTEM,
     build_cluster_prompt,
     build_cluster_retry_prompt,
     build_concept_plan_prompt,
@@ -184,7 +187,7 @@ def _context_fitted_plan_facts(
             ordered[:middle],
             prior_concept_names,
         )
-        if count_prompt_tokens(SYSTEM_PROMPT, prompt) <= prompt_budget:
+        if count_prompt_tokens(PLAN_SYSTEM, prompt) <= prompt_budget:
             low = middle
         else:
             high = middle - 1
@@ -408,6 +411,13 @@ class FlashcardPipeline:
         prompt = original_prompt
         last_errors: tuple[str, ...] = ()
         task_counts = self._task_attempts.setdefault(task, Counter())
+        system = {
+            "concept_plan": PLAN_SYSTEM,
+            "cluster": CLUSTER_SYSTEM,
+            "grounding_review": REVIEW_SYSTEM,
+            "duplicate_review": REVIEW_SYSTEM,
+            "duplicate_repair": REPAIR_SYSTEM,
+        }.get(task, CLUSTER_SYSTEM)
         for attempt in range(1, self.config.max_retries + 1):
             self._attempt_count += 1
             task_counts["first_attempts" if attempt == 1 else "retries"] += 1
@@ -418,7 +428,11 @@ class FlashcardPipeline:
                 }
                 if getattr(self.backend, "supports_task_metrics", False):
                     completion_kwargs["task"] = task if attempt == 1 else "retry"
-                candidate = self.backend.complete(SYSTEM_PROMPT, prompt, **completion_kwargs)
+                call_system = (
+                    REPAIR_SYSTEM if attempt > 1 and task in {"cluster", "duplicate_repair"}
+                    else system
+                )
+                candidate = self.backend.complete(call_system, prompt, **completion_kwargs)
             except CompletionTruncatedError as exc:
                 token_detail = ""
                 if exc.prompt_tokens is not None and exc.completion_tokens is not None:

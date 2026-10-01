@@ -4,6 +4,8 @@ import json
 
 import pytest
 
+from flashcard_prompt import CLUSTER_SYSTEM, PLAN_SYSTEM, REVIEW_SYSTEM
+
 from flashcard_pipeline import (
     FlashcardPipeline,
     GenerationError,
@@ -105,6 +107,21 @@ def test_generation_passes_concept_and_cluster_task_names_to_metrics_backend():
     assert pipeline.task_metrics["concept_plan"]["first_attempt_passes"] == 1
     assert pipeline.task_metrics["cluster"]["first_attempt_passes"] == 20
     assert pipeline.cluster_generation_seconds is not None
+
+
+def test_generation_uses_stable_task_specific_system_prompts():
+    backend = FakeBackend(
+        [plan_json()] + [cluster_json(index) for index in range(1, 21)]
+    )
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(final_review=False), progress=lambda _message: None
+    )
+
+    pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert backend.calls[0][0] == PLAN_SYSTEM
+    assert all(call[0] == CLUSTER_SYSTEM for call in backend.calls[1:])
+    assert "equation" not in REVIEW_SYSTEM
 
 
 def test_pipeline_excludes_question_shaped_facts_from_factual_authority():

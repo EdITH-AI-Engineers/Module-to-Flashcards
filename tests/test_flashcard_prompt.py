@@ -1,6 +1,10 @@
 import json
 
 from flashcard_prompt import (
+    CLUSTER_SYSTEM,
+    PLAN_SYSTEM,
+    REPAIR_SYSTEM,
+    REVIEW_SYSTEM,
     SYSTEM_PROMPT,
     build_cluster_prompt,
     build_cluster_retry_prompt,
@@ -124,8 +128,8 @@ def test_prompts_treat_scenario_analysis_as_an_approach_not_a_card_type():
 
     assert "Use only multiple-choice, identification, and true-false." in SYSTEM_PROMPT
     assert '"type":"scenario analysis"' not in prompt
-    assert "Scenario analysis may use any allowed structural type" in prompt
-    assert "do not invent a story to force the label" in prompt
+    assert "scenario analysis and the other" in CLUSTER_SYSTEM
+    assert "Never invent a story merely to use a label" in CLUSTER_SYSTEM
 
 
 def test_plan_prompt_serializes_relationships_without_provenance():
@@ -141,7 +145,7 @@ def test_plan_prompt_serializes_relationships_without_provenance():
         "graph_facts": ["e1: binary | uses | base 2"],
     }
     assert "slide" not in prompt.casefold()
-    assert "array must contain exactly 20 concept objects" in prompt.casefold()
+    assert "concepts array of exactly 20" in prompt.casefold()
     assert 'key "fact_ids" literally' in prompt
     assert "choose exactly 5 distinct approaches" in prompt.casefold()
     assert "array of exactly 5 distinct allowed approaches" in prompt.casefold()
@@ -191,8 +195,8 @@ def test_cluster_prompt_allows_planned_approaches_in_any_card_order():
     assert "suggested_wrong_option_terms" not in payload
     assert "suggested wrong option terms" not in prompt.casefold()
     assert "already_covered_subjects" not in payload
-    assert "same semantic category" in prompt
-    assert "need not appear in the facts" in prompt
+    assert "same semantic category" in CLUSTER_SYSTEM
+    assert "absent from the facts" in " ".join(CLUSTER_SYSTEM.split())
     assert "at least one exact" not in prompt
     assert payload["assessment_approaches"] == list(
         concept().assessment_approaches
@@ -200,15 +204,15 @@ def test_cluster_prompt_allows_planned_approaches_in_any_card_order():
     for approach in concept().assessment_approaches:
         assert f'- "{approach}"' in prompt
     normalized_prompt = " ".join(prompt.split())
-    assert "Approaches may repeat" in prompt
+    assert "approaches may repeat" in prompt
     assert "a listed approach does not have to appear" in normalized_prompt
-    assert "no approach is tied to a numbered card position" in normalized_prompt
+    assert "not card positions" in normalized_prompt
     assert "POSITIONAL ASSESSMENT APPROACHES" not in prompt
     assert "Card 1: assessment_approach" not in prompt
-    assert "REPEATED CRITICAL RULES" in prompt
-    assert 'must literally be ""' in prompt
-    assert "no wrong_option may repeat" in prompt
-    assert "internal generation details" in prompt
+    assert "CRITICAL REMINDER" in prompt
+    assert "empty strings" in CLUSTER_SYSTEM
+    assert "not paraphrases of one another" in CLUSTER_SYSTEM
+    assert "internal generation details" in CLUSTER_SYSTEM
 
 
 def test_cluster_prompt_prioritizes_distinct_supported_learning_checks():
@@ -221,14 +225,13 @@ def test_cluster_prompt_prioritizes_distinct_supported_learning_checks():
     normalized_prompt = " ".join(prompt.split())
 
     assert "meaningfully distinct learning checks" in prompt
-    assert "same concept from supported angles" in prompt
-    assert "exactly one option" in prompt
-    assert "arguably correct" in prompt
-    assert "changing only the card type" in normalized_prompt
-    assert "is the correct answer here" in prompt
-    assert "this statement is true" in prompt
-    assert "another valid member of the requested category" in prompt
-    assert "supported distinguishing property" in prompt
+    assert "learning check twice" in CLUSTER_SYSTEM.casefold()
+    assert "exactly one multiple-choice option" in prompt
+    assert "arguably" in CLUSTER_SYSTEM.casefold()
+    assert "changing only card type" in CLUSTER_SYSTEM.casefold()
+    assert "generic 'X is correct'" in CLUSTER_SYSTEM
+    assert "valid category member" in CLUSTER_SYSTEM
+    assert "supported distinguishing property" in CLUSTER_SYSTEM
 
 
 def test_cluster_prompt_does_not_force_a_concrete_scenario_template():
@@ -241,7 +244,14 @@ def test_cluster_prompt_does_not_force_a_concrete_scenario_template():
 
     assert "must present a concrete situation" not in prompt
     assert "build a short, concrete situation" not in prompt
-    assert "do not invent a story" in prompt
+    assert "never invent a story" in CLUSTER_SYSTEM.casefold()
+
+
+def test_task_system_prompts_are_stable_and_task_scoped():
+    assert "wrong_option" not in PLAN_SYSTEM
+    assert "equation" not in REVIEW_SYSTEM
+    assert "You repair college-level flashcards" in REPAIR_SYSTEM
+    assert len(CLUSTER_SYSTEM) < len(SYSTEM_PROMPT)
 
 
 def test_retry_prompt_targets_named_cards_and_repeats_critical_checks():

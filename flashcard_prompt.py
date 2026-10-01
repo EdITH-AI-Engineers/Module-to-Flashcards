@@ -101,6 +101,124 @@ Use plain text only: + - * / ^ = < > <= >= sqrt(...) ( ). Do not use LaTeX, Math
 Before returning JSON, silently check every item against the supplied facts and all requested constraints. Never expose that check.
 """
 
+# SYSTEM_PROMPT remains available to older callers. Generation uses stable,
+# task-specific instructions so reviews and planning do not prefill card rules.
+PLAN_SYSTEM = """You plan college-level flashcard concepts from graph facts.
+Use only the supplied facts as factual authority. Treat each module separately.
+Choose distinct assessable learning points, not titles, slide labels, source
+metadata, or the same relationship renamed. Never invent facts to fill a quota;
+report insufficient_content when fewer than twenty distinct concepts are
+supported. A source question without an asserted answer is not a fact.
+Return JSON only, using exactly the requested keys. Copy fact_ids exactly;
+Python resolves them to statements. Select five distinct assessment approaches
+per concept from the allowed list. An approach describes reasoning, not a card
+type. Do not repeat a prior module's underlying learning point.
+"""
+
+CLUSTER_SYSTEM = """You write college-level assessment cards. Use only supplied
+facts for questions, correct answers, true-false decisions, explanations, and
+hints. Never infer truth from an unresolved source question or outside knowledge.
+Multiple-choice distractors may be familiar related domain terms absent from
+the facts; absence alone does not make one incorrect. Never assess the same
+learning check twice: changing only card type, opening phrase, or one word is
+not enough; a supported negated question is different. Keep each question
+clear and authentic, with difficulty from reasoning rather than obscure wording.
+
+Return one JSON object only. Each card has the eleven canonical fields: type,
+question, correct_option, wrong_option_1, wrong_option_2, wrong_option_3,
+is_true, expalanation, hint, difficulty, assessment_approach. Preserve the
+spelling expalanation. Allowed types are multiple-choice, identification, and
+true-false; each five-card cluster has at least one of each and should vary its
+type mix across clusters. Type is structural; scenario analysis and the other
+assessment_approach values are never types.
+
+Approach meanings: recall retrieves an explicit fact; comparison contrasts
+supported things; classification places an item in a supported category;
+application uses a rule or relationship; scenario analysis interprets a
+supported case only when helpful; cause/effect connects a supported cause and
+result; misconception detection corrects an unsupported belief; conditions
+tests requirements; consequences tests an outcome; reversed reasoning infers
+a cause or rule from a supported result. The assessment_approach label must
+describe the actual reasoning. Approaches may repeat; no planned approach is
+required to appear. A definition question is recall or classification, not
+scenario analysis. Never invent a story merely to use a label.
+
+Multiple-choice: supply exactly one concise correct option and three plausible,
+distinct, incorrect options of the same semantic category and answer shape.
+Exactly one may satisfy the stem. Never use another supported or arguably
+correct claim or valid category member as a distractor; narrow a broad stem
+with a supported distinguishing property. All four options must be textually
+different, not paraphrases of one another. Keep wrong answers relevant and
+unambiguously incorrect. Prefer positive stems; never make an invented claim
+correct through NOT or EXCEPT. Set is_true null. Do not put choices or the
+answer in the stem.
+
+Identification: correct_option is one concise term, name, concept, class,
+principle, process, figure, or title, not a sentence. All three wrong_option
+fields must literally be empty strings and is_true null. Ask directly without
+the answer or its abbreviation anywhere in the question, even inside a longer
+phrase; describe its supported function, purpose, defining trait, or relation
+instead of repeating its name or full definition.
+
+True-false: question is a declarative statement, not an instruction or
+question. Use only a supplied fact that explicitly asserts a claim, never an
+unresolved question. All four option fields are empty strings; is_true is
+integer 1 for true or 0 for false. False claims must be plausible errors the
+facts resolve. Do not add True/False labels to the stem.
+
+Identification starts with What, Which, Who, Where, When, Why, or How.
+Multiple-choice may start with a direct question or a concrete supported
+context. Both end in a question mark; true-false statements do not. Avoid
+vague subjective wording and provenance wrappers such as 'according to the
+facts' or 'based on the material'. Never expose fact IDs, input labels, prior
+subjects, or internal generation details. Ordinary subject-matter uses of
+module, document, file, slide, source, citation, or URL are allowed.
+
+When facts supply equations, numerical relationships, or defined quantities,
+use supported problem solving for an appropriate approach. Use only supplied
+variables, units, relationships, and operations; state every needed value and
+derive the answer deterministically. Do not force numerical work without
+enough information. Equations use plain-text + - * / ^ = < > <= >= sqrt(...) ( ),
+not LaTeX, HTML math, superscript glyphs, or images.
+
+Difficulty 1 is recall or straightforward understanding; 2 is interpretation,
+comparison, classification, application, or distinction; 3 is analysis,
+complex or multi-step application, competing explanations, or a fully supported
+unfamiliar scenario. expalanation states the supported relationship making the
+answer correct, not generic 'X is correct' filler; for a false claim identify
+the error when useful. hint gives a useful clue without the answer. Neither
+field mentions provenance or presentation metadata.
+"""
+
+REVIEW_SYSTEM = """You review college-level flashcards using only supplied
+facts and requested review criteria. Report defects, not rewrites. A related
+term absent from supplied facts is not automatically an invalid distractor;
+judge whether it is plausible, same-category, and unambiguously incorrect.
+Do not confuse a shared topic with a near-duplicate question. Use only the
+short cluster indices shown in the request. Return JSON only with an issues
+array; use an empty array when there are no defects.
+"""
+
+REPAIR_SYSTEM = """You repair college-level flashcards. Use only supplied
+facts for questions, correct answers, true-false truth, explanations, and
+hints; closely related distractor terms may be absent from the facts but must
+be plausible and unambiguously incorrect. Preserve the supported learning
+point and all fields locked by the request. Make the corrected question
+distinct, not a one-word or opening-phrase change. Never mention input labels,
+fact IDs, or provenance. Return JSON only, with the exact requested shape and
+key spelling expalanation.
+
+Allowed types: multiple-choice, identification, true-false. Multiple-choice
+has exactly one correct answer, three distinct, same-category incorrect
+answers, and null is_true. Identification has one concise answer absent from
+its direct question, three empty wrong options, and null is_true. True-false
+has a declarative statement based on an asserted fact, all option fields
+empty, and integer is_true of 0 or 1. Scenario analysis is an approach, not
+a type, and must use a supported case only when helpful. The approach must
+match the actual reasoning. expalanation states the supported relationship,
+not generic filler; hint clues the reasoning without giving the answer.
+"""
+
 
 def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
@@ -145,11 +263,7 @@ def build_concept_plan_prompt(
 
     Each graph_facts line starts with an exact fact_id followed by a colon. For each concept, copy one or more of those fact_ids exactly. Do not copy or rewrite fact statements; Python will resolve the selected IDs to their exact statements.{context_guidance} Choose exactly {CARDS_PER_CLUSTER} distinct approaches from: recall, comparison, classification, application, scenario analysis, cause/effect, misconception detection, conditions, consequences, reversed reasoning.
 
-    Return one JSON object whose top-level key is "concepts" and whose value is an array. The array must contain exactly {CONCEPTS_PER_MODULE} concept objects before its closing bracket. Every concept object has these keys: name (string), fact_ids (non-empty string array), and assessment_approaches (array of exactly {CARDS_PER_CLUSTER} distinct allowed approaches). Do not treat a one-object shape illustration as a complete answer.
-
-    Fill all {CONCEPTS_PER_MODULE} positions in this checklist before closing the concepts array:
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20.
-    Do not stop after 11 or 12 objects. Do not add a 21st object. Each position must have a unique concept name.
+    Return one JSON object with a concepts array of exactly {CONCEPTS_PER_MODULE} uniquely named objects. Each object has name (string), fact_ids (non-empty string array), and assessment_approaches (array of exactly {CARDS_PER_CLUSTER} distinct allowed approaches).
     Use the JSON key "fact_ids" literally, with a normal underscore and no backslash. Every concept must copy at least one exact fact_id from graph_facts.
 
     Only if fewer than {CONCEPTS_PER_MODULE} distinct concepts are genuinely supported, return an object with the single key insufficient_content. Its value must specifically state how many concepts are supportable and why, using at least five words. Never copy generic placeholder wording into that field.
@@ -270,73 +384,20 @@ def build_cluster_prompt(
         f'- "{approach}"' for approach in concept.assessment_approaches
     )
     return f"""Generate exactly {CARDS_PER_CLUSTER} cards for this concept.
-
-    PLANNED ASSESSMENT APPROACHES
-    {approach_list}
-    For each card, select whichever listed approach best describes the actual
-    reasoning required. Approaches may repeat, and a listed approach does not
-    have to appear. The list order is not the card order, and no approach is
-    tied to a numbered card position. Do not mislabel a recall or definition
-    question merely to force approach coverage.
-
-    FACT SCOPE
-    - Questions, correct answers, explanations, and hints must be supported by
-      the supplied facts.
-    - The five cards must be meaningfully distinct learning checks. They may
-      assess the same concept from supported angles, but changing only the card
-      type, opening phrase, or one word is not a different question. A negated
-      form of a question is a different question.
-    - Each multiple-choice wrong_option must be plausible, unambiguously
-      incorrect, and relevant to the question and subject domain. It must use
-      the same semantic category and answer shape as the correct option. A
-      closely related distractor need not appear in the facts.
-    - Exactly one option may satisfy a multiple-choice question; never use
-      another supported or arguably correct claim as a wrong option.
-    - Never use another valid member of the requested category as a distractor.
-      If several candidates satisfy a broad stem, narrow the question with a
-      supported distinguishing property or choose clearly invalid alternatives.
-    - Prefer positive questions. Do not use NOT or EXCEPT to make an invented
-      claim the correct answer.
-    - When the facts supply an equation or numerical relationship, an
-      assigned application or scenario approach may test it using only supplied
-      variables, values, units, and operations.
-
-    REPEATED CRITICAL RULES
-    - Use only multiple-choice, identification, and true-false as type values.
-      Include at least one of each. Scenario analysis is an assessment_approach,
-      never a type.
-    - Multiple-choice: correct_option and all three wrong_option values must be
-      four different strings; no wrong_option may repeat or closely restate
-      another option. Set is_true to null.
-    - Identification: wrong_option_1, wrong_option_2, and wrong_option_3
-      must literally be "". Set is_true to null. The question must not reveal the
-      answer or its abbreviation.
-    - True-false: use a declarative statement, keep all option fields "", and
-      set is_true to integer 0 or 1.
-    - Every question must be clear and end in ? except true-false statements.
-      Do not cite the input with provenance wrappers such as "According to the facts" or "Based on the supplied material". Named subject-matter authorities and rules are allowed when relevant.
-    - Never expose internal generation details, input labels, fact IDs, or
-      source-reference wording. Ordinary domain uses of words such as module,
-      document, file, slide, source, citation, and URL are allowed.
-    - Every expalanation must state the relationship or distinction that makes
-      the answer correct. Never write "X is the correct answer here," "This statement is true,"
-      or "This statement is false."
-    - Keep all eleven keys in every object and preserve the spelling expalanation.
-    - Return one complete JSON object only, with no Markdown or surrounding text.
-
-    Required top-level shape:
-    {{"cards":[...exactly {CARDS_PER_CLUSTER} complete card objects...]}}
-
-    Every card object must contain exactly:
-    type, question, correct_option, wrong_option_1, wrong_option_2,
-    wrong_option_3, is_true, expalanation, hint, difficulty,
-    assessment_approach
-
-    Scenario analysis may use any allowed structural type. Use a supported case
-    only when it improves assessment; do not invent a story to force the label.
-
-    INPUT JSON:
-    """ + _json(payload)
+PLANNED ASSESSMENT APPROACHES (not card positions):
+{approach_list}
+Choose the label matching each card's actual reasoning; a listed approach does
+not have to appear, and approaches may repeat.
+CRITICAL REMINDER
+- Use only supported facts for answers; exactly one multiple-choice option may be correct.
+- Make five meaningfully distinct learning checks, not one-word rewrites.
+- Include multiple-choice, identification, and true-false types; scenario analysis is an approach.
+- Identification has three empty wrong options and no answer text in its question.
+- True-false is declarative, has four empty options, and uses integer is_true.
+- Keep expalanation grounded; no provenance wording or internal labels.
+INPUT JSON:
+{_json(payload)}
+"""
 
 
 def _cluster_payload(

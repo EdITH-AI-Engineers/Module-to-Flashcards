@@ -1,7 +1,7 @@
 # Module to Flashcards
 
 This project accepts UTF-8 text module reports, extracts a relationship
-graph with REBEL, and uses a local Qwen model to generate validated,
+graph with REBEL, and uses a local Ministral model to generate validated,
 copy-paste-ready assessment CSV files.
 
 Current release: 1.1.0
@@ -96,11 +96,11 @@ Uploaded modules are saved under `pipeline_uploads/<course>/`. Intermediate arti
 
 For each batch, the server stages and validates all pending text files, builds
 their knowledge graphs with one REBEL model load, and generates flashcards with
-one Qwen model load. Heavy inference is sequential. A failure in one module is
+one generator-model load. Heavy inference is sequential. A failure in one module is
 reported without preventing the other modules from completing. Re-sending an
 unchanged module reuses valid completed artifacts.
 
-Qwen uses a 12,288-token context window by default. Concept planning no longer
+Ministral uses an 8,192-token context window by default. Concept planning no longer
 uses a fixed fact-count ceiling: it balances eligible facts across slides and
 topics, then keeps the largest set that fits while reserving the complete
 3,072-token planning response budget.
@@ -121,11 +121,11 @@ The timeout is disabled by default. `--force` recomputes the graph and
 flashcards instead of resuming from valid artifacts.
 
 Cluster generation defaults to `--cluster-workers auto`. It measures available
-GPU memory before and after loading Qwen, reserves headroom, and selects up to
+GPU memory before and after loading the generator model, reserves headroom, and selects up to
 20 independent cluster workers. CPU-only runs, partial GPU offload, and runs
 without a reliable memory reading default to one worker. Use an explicit count
 from `1` to `20` to override this policy; the local API uses the same setting
-through `MODULE_FLASHCARDS_CLUSTER_WORKERS`. Each worker loads a separate Qwen
+through `MODULE_FLASHCARDS_CLUSTER_WORKERS`. Each worker loads a separate model
 context. If an extra context fails to load, generation continues with the
 contexts already available. Progress reports selected and actual worker counts.
 More workers are not a guaranteed speedup, so measure throughput on the target
@@ -157,7 +157,7 @@ when they are safely converted.
 ## Portable Windows release
 
 The Windows release is a fully offline, one-directory application for Windows
-11 x64. It bundles the Python runtime, Qwen3-4B-Instruct-2507 Q5_K_M model,
+11 x64. It bundles the Python runtime, Ministral-3-3B-Instruct-2512 Q4_K_M model,
 REBEL model, and the required CUDA libraries. Keep the complete extracted
 directory together:
 
@@ -166,7 +166,7 @@ ModuleToFlashcards/
   ModuleToFlashcards.exe
   runtime/
   models/
-    Qwen_Qwen3-4B-Instruct-2507-Q5_K_M.gguf
+    Ministral-3-3B-Instruct-2512-Q4_K_M.gguf
     rebel-large/
     manifest.json
   licenses/
@@ -198,7 +198,7 @@ failures are recorded under `data/logs/` when that directory is writable.
 
 Maintainer builds require Windows x64, Python 3.11 or 3.12, the project and
 PyInstaller dependencies, CUDA-enabled PyTorch and `llama-cpp-python` builds,
-and internet access while staging the locked Qwen and REBEL models.
+and internet access while staging the locked Ministral and REBEL models.
 
 ```powershell
 python -m venv .venv

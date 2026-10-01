@@ -1,21 +1,22 @@
 from pathlib import Path
+import inspect
 import sys
 from types import SimpleNamespace
 
 import pytest
 
-from local_qwen import (
+from local_model import (
     MODEL_FILENAME,
     MODEL_REPO,
     MODEL_REVISION,
-    LocalQwenBackend,
+    LocalModelBackend,
     ensure_model,
     thread_budget_for_workers,
 )
 from flashcard_types import CompletionTruncatedError, ContextWindowExceededError
 
 
-def test_ensure_model_downloads_exact_qwen3_4b_instruct_checkpoint(
+def test_ensure_model_downloads_exact_ministral_3b_instruct_checkpoint(
     tmp_path, monkeypatch
 ):
     calls = []
@@ -26,21 +27,21 @@ def test_ensure_model_downloads_exact_qwen3_4b_instruct_checkpoint(
         target.write_bytes(b"gguf")
         return str(target)
 
-    monkeypatch.setattr("local_qwen.hf_hub_download", fake_download)
+    monkeypatch.setattr("local_model.hf_hub_download", fake_download)
 
     path = ensure_model(tmp_path)
 
-    assert path.name == "Qwen_Qwen3-4B-Instruct-2507-Q5_K_M.gguf"
+    assert path.name == "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf"
     assert calls == [
         {
-            "repo_id": "bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF",
-            "revision": "ae44f08e1392f39c0e474af10c3ff8355c8b6688",
-            "filename": "Qwen_Qwen3-4B-Instruct-2507-Q5_K_M.gguf",
+            "repo_id": "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
+            "revision": "eb599d408350ea2bb60452cb86be7c7b2fc28227",
+            "filename": "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
             "local_dir": str(tmp_path),
         }
     ]
-    assert MODEL_REPO == "bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF"
-    assert MODEL_REVISION == "ae44f08e1392f39c0e474af10c3ff8355c8b6688"
+    assert MODEL_REPO == "mistralai/Ministral-3-3B-Instruct-2512-GGUF"
+    assert MODEL_REVISION == "eb599d408350ea2bb60452cb86be7c7b2fc28227"
 
 
 def test_existing_model_is_reused(tmp_path, monkeypatch):
@@ -50,7 +51,7 @@ def test_existing_model_is_reused(tmp_path, monkeypatch):
     def fail_download(**kwargs):
         raise AssertionError("existing model should not be downloaded")
 
-    monkeypatch.setattr("local_qwen.hf_hub_download", fail_download)
+    monkeypatch.setattr("local_model.hf_hub_download", fail_download)
 
     assert ensure_model(tmp_path) == path
 
@@ -59,11 +60,11 @@ def test_missing_bundled_model_never_downloads_when_download_is_disabled(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(
-        "local_qwen.hf_hub_download",
+        "local_model.hf_hub_download",
         lambda **kwargs: pytest.fail("portable mode must never download a model"),
     )
 
-    with pytest.raises(FileNotFoundError, match="bundled Qwen model"):
+    with pytest.raises(FileNotFoundError, match="bundled local model"):
         ensure_model(tmp_path, allow_download=False)
 
 
@@ -75,7 +76,7 @@ def test_backend_uses_unmodified_user_prompts_and_varies_deterministic_call_seed
             calls.append(kwargs)
             return {"choices": [{"message": {"content": '{"cards": []}'}}]}
 
-    backend = LocalQwenBackend.__new__(LocalQwenBackend)
+    backend = LocalModelBackend.__new__(LocalModelBackend)
     backend._llm = FakeLlama()
     backend._temperature = 0.2
     backend._seed = 42
@@ -121,7 +122,7 @@ def test_backend_rejects_empty_assistant_content():
         def create_chat_completion(self, **kwargs):
             return {"choices": [{"message": {"content": "  "}}]}
 
-    backend = LocalQwenBackend.__new__(LocalQwenBackend)
+    backend = LocalModelBackend.__new__(LocalModelBackend)
     backend._llm = FakeLlama()
     backend._temperature = 0.2
     backend._seed = 42
@@ -148,7 +149,7 @@ def test_backend_reports_length_limited_response_as_truncation():
                 "usage": {"prompt_tokens": 6400, "completion_tokens": 1792},
             }
 
-    backend = LocalQwenBackend.__new__(LocalQwenBackend)
+    backend = LocalModelBackend.__new__(LocalModelBackend)
     backend._llm = FakeLlama()
     backend._temperature = 0.2
     backend._seed = 42
@@ -183,7 +184,7 @@ def test_backend_records_task_metrics_for_success_truncation_and_context_error()
             return next(responses)
 
     events = []
-    backend = LocalQwenBackend.__new__(LocalQwenBackend)
+    backend = LocalModelBackend.__new__(LocalModelBackend)
     backend._llm = FakeLlama()
     backend._temperature = 0.2
     backend._seed = 42
@@ -210,41 +211,8 @@ def test_backend_records_task_metrics_for_success_truncation_and_context_error()
     assert all("content" not in item for item in events)
 
 
-def test_raw_completion_path_uses_plain_chatml_and_schema_grammar():
-    calls = []
-    tokenized = []
-
-    class FakeLlama:
-        def tokenize(self, data, *, add_bos, special):
-            tokenized.append((data.decode("utf-8"), add_bos, special))
-            return [1] * 37
-
-        def create_completion(self, **kwargs):
-            calls.append(kwargs)
-            return {
-                "choices": [{"text": '{"cards":[]}', "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": 37, "completion_tokens": 6},
-            }
-
-    backend = LocalQwenBackend.__new__(LocalQwenBackend)
-    backend._llm = FakeLlama()
-    backend._hard_no_think = True
-    backend._temperature = 0.2
-    backend._seed = 42
-    backend._completion_index = 0
-    schema = {"type": "object", "properties": {"cards": {"type": "array"}}, "required": ["cards"]}
-
-    assert backend.count_prompt_tokens("S", "U") == 37
-    assert backend.complete("S", "U", max_tokens=100, schema=schema) == '{"cards":[]}'
-    assert calls[0]["prompt"] == tokenized[0][0]
-    assert tokenized[0][1:] == (False, True)
-    assert calls[0]["prompt"] == (
-        "<|im_start|>system\nS<|im_end|>\n"
-        "<|im_start|>user\nU<|im_end|>\n"
-        "<|im_start|>assistant\n"
-    )
-    assert calls[0]["stop"] == ["<|im_end|>"]
-    assert calls[0]["grammar"] is not None
+def test_backend_has_no_qwen_only_hard_no_think_mode():
+    assert "hard_no_think" not in inspect.signature(LocalModelBackend).parameters
 
 
 def test_optional_sampling_defaults_are_omitted_and_call_overrides_apply():
@@ -255,7 +223,7 @@ def test_optional_sampling_defaults_are_omitted_and_call_overrides_apply():
             calls.append(kwargs)
             return {"choices": [{"message": {"content": "{}"}}]}
 
-    backend = LocalQwenBackend.__new__(LocalQwenBackend)
+    backend = LocalModelBackend.__new__(LocalModelBackend)
     backend._llm = FakeLlama()
     backend._temperature = 0.2
     backend._seed = 42
@@ -279,7 +247,7 @@ def test_backend_translates_context_window_overflow():
         def create_chat_completion(self, **kwargs):
             raise ValueError("Requested tokens (8741) exceed context window of 8192")
 
-    backend = LocalQwenBackend.__new__(LocalQwenBackend)
+    backend = LocalModelBackend.__new__(LocalModelBackend)
     backend._llm = FakeLlama()
     backend._temperature = 0.2
     backend._seed = 42
@@ -289,7 +257,7 @@ def test_backend_translates_context_window_overflow():
         backend.complete("SYSTEM", "USER", max_tokens=1536)
 
 
-def test_backend_defaults_to_12k_context_and_can_close(monkeypatch, tmp_path):
+def test_backend_defaults_to_8k_context_and_low_temperature(monkeypatch, tmp_path):
     captured = {}
 
     class FakeLlama:
@@ -301,10 +269,11 @@ def test_backend_defaults_to_12k_context_and_can_close(monkeypatch, tmp_path):
             self.closed = True
 
     monkeypatch.setitem(sys.modules, "llama_cpp", SimpleNamespace(Llama=FakeLlama))
-    backend = LocalQwenBackend(tmp_path / "model.gguf")
+    backend = LocalModelBackend(tmp_path / "model.gguf")
 
-    assert captured["n_ctx"] == 12288
-    assert backend.context_window == 12288
+    assert captured["n_ctx"] == 8192
+    assert backend.context_window == 8192
+    assert backend._temperature == 0.05
     backend.close()
     assert backend._llm.closed is True
 
@@ -324,7 +293,7 @@ def test_fork_creates_separate_model_context_with_worker_seed(monkeypatch, tmp_p
     path = tmp_path / "model.gguf"
     metrics = []
     sink = metrics.append
-    backend = LocalQwenBackend(path, n_ctx=4096, n_gpu_layers=12, seed=42)
+    backend = LocalModelBackend(path, n_ctx=4096, n_gpu_layers=12, seed=42)
     backend.set_metric_sink(sink)
 
     forked = backend.fork(2)
@@ -350,10 +319,10 @@ def test_parallel_model_contexts_share_the_available_cpu_threads(monkeypatch, tm
             calls.append(kwargs)
 
     monkeypatch.setitem(sys.modules, "llama_cpp", SimpleNamespace(Llama=FakeLlama))
-    monkeypatch.setattr("local_qwen.os.cpu_count", lambda: 16)
+    monkeypatch.setattr("local_model.os.cpu_count", lambda: 16)
 
     budget = thread_budget_for_workers(5)
-    backend = LocalQwenBackend(tmp_path / "model.gguf", n_threads=budget)
+    backend = LocalModelBackend(tmp_path / "model.gguf", n_threads=budget)
     backend.fork(1)
 
     assert budget == 3
@@ -381,7 +350,7 @@ def test_full_gpu_load_measures_context_and_selects_more_than_five(monkeypatch, 
         SimpleNamespace(Llama=FakeLlama, llama_supports_gpu_offload=lambda: True),
     )
 
-    backend = LocalQwenBackend(tmp_path / "model.gguf")
+    backend = LocalModelBackend(tmp_path / "model.gguf")
 
     assert backend.auto_cluster_workers == 7
     assert "VRAM" in backend.auto_cluster_workers_reason
@@ -405,7 +374,7 @@ def test_auto_workers_without_cuda_uses_one_and_does_not_probe_vram(
         SimpleNamespace(Llama=FakeLlama, llama_supports_gpu_offload=lambda: True),
     )
 
-    backend = LocalQwenBackend(tmp_path / "model.gguf")
+    backend = LocalModelBackend(tmp_path / "model.gguf")
 
     assert backend.auto_cluster_workers == 1
     assert "GPU" in backend.auto_cluster_workers_reason

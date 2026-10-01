@@ -15,7 +15,7 @@ from tests.factories import valid_clusters
 def test_parse_args_defaults_to_12k_context(tmp_path):
     assert pipeline.parse_args(
         [str(tmp_path / "module.txt"), "--course-code", "CPE0021", "--module-number", "1"]
-    ).n_ctx == 12288
+    ).n_ctx == 8192
 
 
 def test_timeout_defaults_to_disabled(tmp_path):

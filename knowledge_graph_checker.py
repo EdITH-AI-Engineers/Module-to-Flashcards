@@ -10,7 +10,7 @@ from structured_module import is_unresolved_question_statement
 
 
 class KnowledgeGraphCheckError(RuntimeError):
-    """Raised when Qwen cannot return a safe graph-pruning decision."""
+    """Raised when the local model cannot return a safe graph-pruning decision."""
 
 
 _SYSTEM_PROMPT = """You are a University Professor and a conservative knowledge-graph quality checker.
@@ -78,7 +78,7 @@ def _candidate_rows(
 
 
 # One boolean is returned for every row. The schema fixes the exact array
-# length, preventing Qwen from looping over an unconstrained list until it hits
+# length, preventing the model from looping over an unconstrained list until it hits
 # max_tokens. The budget still leaves ample room for JSON punctuation and
 # tokenization differences.
 _BASE_MAX_TOKENS = 64
@@ -175,7 +175,7 @@ def _review_batch(
             if attempt == max_retries:
                 break
     raise KnowledgeGraphCheckError(
-        f"Qwen {item_kind} review failed after {max_retries} attempts: {last_error}"
+        f"Local model {item_kind} review failed after {max_retries} attempts: {last_error}"
     )
 
 
@@ -188,7 +188,7 @@ def check_knowledge_graph(
     progress: Callable[[str], None] | None = None,
     on_batch_failure: str = "keep",
 ) -> dict[str, object]:
-    """Use Qwen to prune graph noise without rewriting grounded content.
+    """Use the local model to prune graph noise without rewriting grounded content.
 
     ``on_batch_failure`` decides what happens when one batch cannot be reviewed
     after all retries: "keep" leaves that batch's items in the graph (the
@@ -264,7 +264,7 @@ def check_knowledge_graph(
     original_facts = graph.get("facts", [])
     if isinstance(original_facts, list) and original_facts and not checked["facts"]:
         raise KnowledgeGraphCheckError(
-            "Qwen marked every lesson fact irrelevant; refusing to save an empty graph"
+            "Local model marked every lesson fact irrelevant; refusing to save an empty graph"
         )
     original_edges = graph.get("edges", [])
     if (
@@ -274,7 +274,7 @@ def check_knowledge_graph(
         and not checked["edges"]
     ):
         raise KnowledgeGraphCheckError(
-            "Qwen marked every relationship irrelevant; refusing to save an empty graph"
+            "Local model marked every relationship irrelevant; refusing to save an empty graph"
         )
 
     referenced_nodes = {
@@ -299,7 +299,7 @@ def check_knowledge_graph(
             "edge_count": len(checked["edges"]),
             "fact_count": len(checked["facts"]),
             "graph_checker": {
-                "model": "Qwen3-4B-Instruct-2507-Q5_K_M",
+                "model": "Ministral-3-3B-Instruct-2512-Q4_K_M",
                 "status": "checked",
                 "removed_facts": len(removed_positions["facts"]),
                 "removed_edges": len(removed_positions["edges"]),

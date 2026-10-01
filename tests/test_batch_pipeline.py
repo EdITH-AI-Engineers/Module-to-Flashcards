@@ -23,11 +23,11 @@ def test_batch_groups_stages_and_reuses_each_runtime(tmp_path):
     events = []
 
     @contextmanager
-    def qwen_loader(args):
+    def model_loader(args):
         phase_backend = object()
-        events.append(("qwen-load", phase_backend))
+        events.append(("model-load", phase_backend))
         yield phase_backend
-        events.append(("qwen-release", phase_backend))
+        events.append(("model-release", phase_backend))
 
     @contextmanager
     def rebel_loader(args):
@@ -40,7 +40,7 @@ def test_batch_groups_stages_and_reuses_each_runtime(tmp_path):
         items,
         dependencies=fake_dependencies(
             events,
-            qwen_loader=qwen_loader,
+            model_loader=model_loader,
             rebel_loader=rebel_loader,
         ),
     )
@@ -56,10 +56,10 @@ def test_batch_groups_stages_and_reuses_each_runtime(tmp_path):
         "graph",
         "graph",
         "rebel-release",
-        "qwen-load",
+        "model-load",
         "flashcards",
         "flashcards",
-        "qwen-release",
+        "model-release",
     ]
     assert events[0][2] is None and events[1][2] is None
     assert events[3][2] is events[4][2]
@@ -197,7 +197,7 @@ def test_upstream_recomputation_forces_downstream_recomputation(tmp_path):
 
     assert result.outputs == item.paths.flashcard_parts
     assert counters == {
-        "qwen_load": 1,
+        "model_load": 1,
         "ingest": 1,
         "rebel_load": 1,
         "graph": 1,
@@ -217,7 +217,7 @@ def test_invalid_stage_artifact_removes_only_that_item(tmp_path):
             materialize(item, "ingest")
 
     dependencies = BatchDependencies(
-        qwen_loader=loader,
+        model_loader=loader,
         rebel_loader=loader,
         ingest_stage=ingest,
         graph_stage=lambda item, runtime: materialize(item, "graph"),
@@ -263,13 +263,13 @@ def test_production_loaders_release_their_owned_runtimes(monkeypatch, tmp_path):
     runtime = object()
     released = []
 
-    monkeypatch.setattr(batch_pipeline, "ensure_model", lambda model_dir: tmp_path / "qwen.gguf")
-    monkeypatch.setattr(batch_pipeline, "LocalQwenBackend", lambda *a, **k: backend)
+    monkeypatch.setattr(batch_pipeline, "ensure_model", lambda model_dir: tmp_path / "model.gguf")
+    monkeypatch.setattr(batch_pipeline, "LocalModelBackend", lambda *a, **k: backend)
     monkeypatch.setattr(batch_pipeline, "load_runtime", lambda *a, **k: runtime)
     monkeypatch.setattr(batch_pipeline, "release_runtime", released.append)
 
     with pytest.raises(RuntimeError, match="stage failed"):
-        with batch_pipeline.PRODUCTION_DEPENDENCIES.qwen_loader(items[0].args):
+        with batch_pipeline.PRODUCTION_DEPENDENCIES.model_loader(items[0].args):
             raise RuntimeError("stage failed")
     with pytest.raises(RuntimeError, match="stage failed"):
         with batch_pipeline.PRODUCTION_DEPENDENCIES.rebel_loader(items[0].args):
@@ -283,7 +283,7 @@ def test_production_loaders_disable_network_for_portable_items(monkeypatch, tmp_
     item = make_items(tmp_path, "one.txt")[0]
     item.args.portable = True
     item.args.rebel_model = tmp_path / "models" / "rebel-large"
-    qwen_calls = []
+    model_calls = []
     rebel_calls = []
     backend = type("Backend", (), {"close": lambda self: None})()
     runtime = object()
@@ -291,10 +291,10 @@ def test_production_loaders_disable_network_for_portable_items(monkeypatch, tmp_
     monkeypatch.setattr(
         batch_pipeline,
         "ensure_model",
-        lambda model_dir, **kwargs: qwen_calls.append((model_dir, kwargs))
-        or tmp_path / "qwen.gguf",
+        lambda model_dir, **kwargs: model_calls.append((model_dir, kwargs))
+        or tmp_path / "model.gguf",
     )
-    monkeypatch.setattr(batch_pipeline, "LocalQwenBackend", lambda *a, **k: backend)
+    monkeypatch.setattr(batch_pipeline, "LocalModelBackend", lambda *a, **k: backend)
     monkeypatch.setattr(
         batch_pipeline,
         "load_runtime",
@@ -303,12 +303,12 @@ def test_production_loaders_disable_network_for_portable_items(monkeypatch, tmp_
     )
     monkeypatch.setattr(batch_pipeline, "release_runtime", lambda value: None)
 
-    with batch_pipeline.PRODUCTION_DEPENDENCIES.qwen_loader(item.args):
+    with batch_pipeline.PRODUCTION_DEPENDENCIES.model_loader(item.args):
         pass
     with batch_pipeline.PRODUCTION_DEPENDENCIES.rebel_loader(item.args):
         pass
 
-    assert qwen_calls == [(item.args.model_dir, {"allow_download": False})]
+    assert model_calls == [(item.args.model_dir, {"allow_download": False})]
     assert rebel_calls == [
         (item.args.rebel_model, item.args.kg_device, {"local_files_only": True})
     ]
@@ -317,8 +317,8 @@ def test_production_loaders_disable_network_for_portable_items(monkeypatch, tmp_
 @pytest.mark.parametrize(
     ("failing_loader", "failure_point"),
     (
-        ("qwen", "entry"),
-        ("qwen", "exit"),
+        ("model", "entry"),
+        ("model", "exit"),
         ("rebel", "entry"),
         ("rebel", "exit"),
     ),
@@ -328,7 +328,7 @@ def test_loader_failure_aborts_all_remaining_heavy_stages(
 ):
     items = make_items(tmp_path, "one.txt", "two.txt")
     events = []
-    if failing_loader == "qwen":
+    if failing_loader == "model":
         for item in items:
             materialize(item, "ingest")
             materialize(item, "graph")
@@ -340,14 +340,14 @@ def test_loader_failure_aborts_all_remaining_heavy_stages(
         batch_pipeline._write_manifest(item)
 
     @contextmanager
-    def qwen_loader(args):
-        events.append("qwen-entry")
-        if failing_loader == "qwen" and failure_point == "entry":
-            raise RuntimeError("qwen entry failed")
+    def model_loader(args):
+        events.append("model-entry")
+        if failing_loader == "model" and failure_point == "entry":
+            raise RuntimeError("model entry failed")
         yield object()
-        events.append("qwen-exit")
-        if failing_loader == "qwen" and failure_point == "exit":
-            raise RuntimeError("qwen exit failed")
+        events.append("model-exit")
+        if failing_loader == "model" and failure_point == "exit":
+            raise RuntimeError("model exit failed")
 
     @contextmanager
     def rebel_loader(args):
@@ -361,7 +361,7 @@ def test_loader_failure_aborts_all_remaining_heavy_stages(
 
     result = run_batch(
         items,
-        dependencies=fake_dependencies(events, qwen_loader, rebel_loader),
+        dependencies=fake_dependencies(events, model_loader, rebel_loader),
     )
 
     loader_events = [event for event in events if isinstance(event, str)]
@@ -395,7 +395,7 @@ def test_errors_are_returned_in_input_order_across_stages(tmp_path):
         raise RuntimeError("first failed graph generation")
 
     dependencies = BatchDependencies(
-        qwen_loader=loader,
+        model_loader=loader,
         rebel_loader=loader,
         ingest_stage=ingest,
         graph_stage=graph,
@@ -441,7 +441,7 @@ def test_artifact_validation_time_is_excluded_from_active_budget(
         original_ingest(item, backend)
 
     dependencies = BatchDependencies(
-        qwen_loader=dependencies.qwen_loader,
+        model_loader=dependencies.model_loader,
         rebel_loader=dependencies.rebel_loader,
         ingest_stage=ingest,
         graph_stage=dependencies.graph_stage,
@@ -462,8 +462,8 @@ def test_exact_timeout_boundary_stops_before_the_next_stage(tmp_path):
     clock_values = iter([0, 5])
 
     @contextmanager
-    def qwen_loader(args):
-        events.append("qwen")
+    def model_loader(args):
+        events.append("model")
         yield object()
 
     @contextmanager
@@ -475,7 +475,7 @@ def test_exact_timeout_boundary_stops_before_the_next_stage(tmp_path):
         items,
         dependencies=fake_dependencies(
             events,
-            qwen_loader,
+            model_loader,
             rebel_loader,
             monotonic=lambda: next(clock_values),
         ),
@@ -483,7 +483,7 @@ def test_exact_timeout_boundary_stops_before_the_next_stage(tmp_path):
     )
 
     assert "rebel" in events
-    assert "qwen" not in events
+    assert "model" not in events
     assert result.errors == (
         {
             "file": "one.txt",
@@ -579,7 +579,7 @@ def test_force_partial_failure_removes_stale_downstream_artifacts_for_resume(tmp
     first = run_batch(
         (item,),
         dependencies=BatchDependencies(
-            qwen_loader=loader,
+            model_loader=loader,
             rebel_loader=loader,
             ingest_stage=lambda current, backend: materialize(current, "ingest"),
             graph_stage=lambda current, runtime: (_ for _ in ()).throw(
@@ -646,14 +646,14 @@ def _legacy_item(tmp_path):
     return item
 
 
-def test_batch_converts_matching_legacy_output_without_qwen(tmp_path):
+def test_batch_converts_matching_legacy_output_without_model(tmp_path):
     item = _legacy_item(tmp_path)
 
     result = run_batch(
         (item,),
         dependencies=fake_dependencies(
             [],
-            lambda args: pytest.fail("Qwen must not load"),
+            lambda args: pytest.fail("Local model must not load"),
             lambda args: pytest.fail("REBEL must not load"),
         ),
     )
@@ -673,7 +673,7 @@ def test_batch_changed_source_does_not_migrate_legacy_output(tmp_path):
     result = run_batch((item,), dependencies=counting_dependencies(counters))
 
     assert result.outputs == item.paths.flashcard_parts
-    assert counters["qwen_load"] == 1
+    assert counters["model_load"] == 1
 
 
 def test_corrupt_legacy_output_regenerates(tmp_path):
@@ -684,7 +684,7 @@ def test_corrupt_legacy_output_regenerates(tmp_path):
     result = run_batch((item,), dependencies=counting_dependencies(counters))
 
     assert result.outputs == item.paths.flashcard_parts
-    assert counters["qwen_load"] == 1
+    assert counters["model_load"] == 1
 
 
 def test_retained_legacy_backup_never_replaces_newer_batch_pair(tmp_path):
@@ -700,7 +700,7 @@ def test_retained_legacy_backup_never_replaces_newer_batch_pair(tmp_path):
     result = run_batch((item,), dependencies=counting_dependencies(counters))
 
     assert result.outputs == item.paths.flashcard_parts
-    assert counters["qwen_load"] == 1
+    assert counters["model_load"] == 1
 
 
 def test_explicit_worker_change_prevents_legacy_migration(tmp_path):
@@ -711,7 +711,7 @@ def test_explicit_worker_change_prevents_legacy_migration(tmp_path):
     result = run_batch((item,), dependencies=counting_dependencies(counters))
 
     assert result.outputs == item.paths.flashcard_parts
-    assert counters["qwen_load"] == 1
+    assert counters["model_load"] == 1
 
 
 @pytest.mark.parametrize(

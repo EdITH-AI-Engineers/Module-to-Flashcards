@@ -1,4 +1,4 @@
-"""Benchmark Qwen flashcard generation on fixed graph inputs.
+"""Benchmark local-model flashcard generation on fixed graph inputs.
 
 Run with ``python -m benchmarks.run --manifest benchmarks/modules.json``.
 The manifest's ``modules`` array contains graph paths, course codes, and module
@@ -27,10 +27,9 @@ from flashcard_csv import render_module_parts, write_module_parts
 from flashcard_pipeline import FlashcardPipeline, PipelineConfig
 from flashcard_types import ModuleIdentity
 from graph_input import extract_graph_facts, load_graph
-from local_qwen import (
+from local_model import (
     DEFAULT_N_CTX,
-    QWEN_NON_THINKING_SAMPLING,
-    LocalQwenBackend,
+    LocalModelBackend,
     ensure_model,
 )
 from worker_budget import parse_cluster_workers
@@ -100,16 +99,7 @@ def benchmark(
     clusters_per_call: int = 1,
     max_retries: int = 3,
     final_review: bool = True,
-    hard_no_think: bool = False,
-    sampling_preset: str = "current",
 ) -> dict[str, object]:
-    if sampling_preset not in {"current", "qwen_non_thinking"}:
-        raise ValueError(f"unknown sampling preset: {sampling_preset}")
-    sampling = (
-        QWEN_NON_THINKING_SAMPLING
-        if sampling_preset == "qwen_non_thinking"
-        else {}
-    )
     model_path = ensure_model(model_dir, allow_download=False)
     events: list[dict[str, object]] = []
     event_lock = Lock()
@@ -126,13 +116,11 @@ def benchmark(
         for index, case in enumerate(cases, start=1):
             graph_bytes = case.graph.read_bytes()
             facts = extract_graph_facts(load_graph(case.graph))
-            backend = LocalQwenBackend(
+            backend = LocalModelBackend(
                 model_path,
                 seed=seed,
                 n_ctx=n_ctx,
                 n_gpu_layers=n_gpu_layers,
-                hard_no_think=hard_no_think,
-                **sampling,
             )
             backend.set_metric_sink(collect)
             actual_workers = (
@@ -236,8 +224,6 @@ def benchmark(
             "clusters_per_call": clusters_per_call,
             "max_retries": max_retries,
             "final_review": final_review,
-            "hard_no_think": hard_no_think,
-            "sampling_preset": sampling_preset,
         },
         "modules": module_results,
         "valid_clusters_per_minute": (
@@ -264,12 +250,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--clusters-per-call", type=int, choices=(1, 2, 5), default=1)
     parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--skip-final-review", action="store_true")
-    parser.add_argument("--hard-no-think", action="store_true")
-    parser.add_argument(
-        "--sampling-preset",
-        choices=("current", "qwen_non_thinking"),
-        default="current",
-    )
     return parser.parse_args(argv)
 
 
@@ -286,8 +266,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         clusters_per_call=args.clusters_per_call,
         max_retries=args.max_retries,
         final_review=not args.skip_final_review,
-        hard_no_think=args.hard_no_think,
-        sampling_preset=args.sampling_preset,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(

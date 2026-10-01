@@ -16,7 +16,7 @@ from flashcard_pipeline import GenerationError
 from flashcard_csv import migrate_legacy_module
 from flashcard_types import ModuleIdentity
 from graph_input import GraphInputError
-from local_qwen import LocalQwenBackend, ensure_model, thread_budget_for_workers
+from local_model import LocalModelBackend, ensure_model, thread_budget_for_workers
 import main as flashcard_generator
 from pipeline import (
     PipelinePaths,
@@ -65,7 +65,7 @@ class BatchProgressEvent:
 
 @dataclass(frozen=True)
 class BatchDependencies:
-    qwen_loader: Loader
+    model_loader: Loader
     rebel_loader: Loader
     ingest_stage: Stage
     graph_stage: Stage
@@ -137,7 +137,7 @@ def _manifest_settings(args: argparse.Namespace) -> dict[str, object]:
         "graph_overlap_tokens": getattr(args, "overlap_tokens", 64),
         "graph_max_new_tokens": getattr(args, "max_new_tokens", 192),
         "graph_model": DEFAULT_MODEL,
-        "graph_checker": "qwen-conservative-v1",
+        "graph_checker": "local-model-conservative-v1",
     }
     workers = getattr(args, "cluster_workers", "auto")
     if workers != 1:
@@ -280,12 +280,12 @@ def _configuration_error(items: Sequence[BatchItem]) -> str | None:
 
 
 @contextmanager
-def _qwen_loader(args: argparse.Namespace):
+def _model_loader(args: argparse.Namespace):
     if getattr(args, "portable", False):
         model_path = ensure_model(args.model_dir, allow_download=False)
     else:
         model_path = ensure_model(args.model_dir)
-    backend = LocalQwenBackend(
+    backend = LocalModelBackend(
         model_path,
         n_ctx=args.n_ctx,
         n_gpu_layers=args.n_gpu_layers,
@@ -357,7 +357,7 @@ def _flashcard_stage(item: BatchItem, backend: object) -> Path | None:
 
 
 PRODUCTION_DEPENDENCIES = BatchDependencies(
-    qwen_loader=_qwen_loader,
+    model_loader=_model_loader,
     rebel_loader=_rebel_loader,
     ingest_stage=_ingest_stage,
     graph_stage=_graph_stage,
@@ -823,7 +823,7 @@ def run_batch(
         states,
         needs_attribute="needs_flashcards",
         stage_name="flashcards",
-        loader=dependencies.qwen_loader,
+        loader=dependencies.model_loader,
         stage=dependencies.flashcard_stage,
         validator=lambda item: _valid_flashcards(
             item.paths.flashcards,

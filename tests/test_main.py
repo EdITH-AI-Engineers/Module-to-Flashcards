@@ -30,8 +30,17 @@ def test_load_course_corpus_tolerates_missing_and_corrupt_files(tmp_path):
     assert main.load_course_corpus(tmp_path) == ([], [])
 
 
-def test_parse_args_defaults_to_12k_context():
-    assert main.parse_args(["graph.json"]).n_ctx == 12288
+def test_parse_args_defaults_to_8k_context():
+    assert main.parse_args(["graph.json"]).n_ctx == 8192
+
+
+def test_cli_help_names_ministral_without_qwen(capsys):
+    with pytest.raises(SystemExit):
+        main.parse_args(["--help"])
+
+    help_text = capsys.readouterr().out
+    assert "Ministral-3-3B-Instruct-2512 Q4_K_M" in help_text
+    assert "Qwen" not in help_text
 
 
 def test_parse_args_preserves_identity_strings():
@@ -90,7 +99,7 @@ def test_run_writes_pipeline_result(tmp_path, monkeypatch, valid_clusters):
         auto_cluster_workers = 7
         auto_cluster_workers_reason = "GPU VRAM budget selected 7 cluster workers"
 
-    monkeypatch.setattr(main, "LocalQwenBackend", lambda *args, **kwargs: FakeBackend())
+    monkeypatch.setattr(main, "LocalModelBackend", lambda *args, **kwargs: FakeBackend())
     selected = []
 
     class FakePipeline:
@@ -381,7 +390,7 @@ def test_default_output_uses_resolved_graph_module(tmp_path, monkeypatch, valid_
     )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(main, "ensure_model", lambda path: tmp_path / "model.gguf")
-    monkeypatch.setattr(main, "LocalQwenBackend", lambda *args, **kwargs: object())
+    monkeypatch.setattr(main, "LocalModelBackend", lambda *args, **kwargs: object())
 
     class FakePipeline:
         def __init__(self, backend, config, **kwargs):
@@ -418,7 +427,7 @@ def test_smoke_test_checks_for_exact_json_status(tmp_path, monkeypatch):
         def complete(self, system, user, *, max_tokens):
             return '{"status":"ok"}'
 
-    monkeypatch.setattr(main, "LocalQwenBackend", FakeBackend)
+    monkeypatch.setattr(main, "LocalModelBackend", FakeBackend)
     args = main.parse_args(
         [
             str(graph_path),

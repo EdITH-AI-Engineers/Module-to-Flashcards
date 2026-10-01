@@ -152,7 +152,7 @@ def flashcard_content(course_code="CPE0021", module_number="01"):
 
 def fake_dependencies(
     events,
-    qwen_loader,
+    model_loader,
     rebel_loader,
     *,
     fail_ingest=None,
@@ -173,7 +173,7 @@ def fake_dependencies(
         materialize(item, "flashcards")
 
     return BatchDependencies(
-        qwen_loader=qwen_loader,
+        model_loader=model_loader,
         rebel_loader=rebel_loader,
         ingest_stage=ingest,
         graph_stage=graph,
@@ -184,8 +184,8 @@ def fake_dependencies(
 
 def counting_dependencies(counters: Counter):
     @contextmanager
-    def qwen_loader(args):
-        counters["qwen_load"] += 1
+    def model_loader(args):
+        counters["model_load"] += 1
         yield object()
 
     @contextmanager
@@ -206,7 +206,7 @@ def counting_dependencies(counters: Counter):
         materialize(item, "flashcards")
 
     return BatchDependencies(
-        qwen_loader=qwen_loader,
+        model_loader=model_loader,
         rebel_loader=rebel_loader,
         ingest_stage=ingest,
         graph_stage=graph,

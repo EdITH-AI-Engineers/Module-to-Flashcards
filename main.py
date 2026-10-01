@@ -17,9 +17,9 @@ from graph_input import (
     load_graph,
     resolve_identity,
 )
-from local_qwen import (
+from local_model import (
     DEFAULT_N_CTX,
-    LocalQwenBackend,
+    LocalModelBackend,
     ensure_model,
     thread_budget_for_workers,
 )
@@ -93,7 +93,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Generate validated assessment CSV from a knowledge graph with a "
-            "local Qwen3-4B-Instruct-2507 Q5_K_M model."
+            "local Ministral-3-3B-Instruct-2512 Q4_K_M model."
         )
     )
     parser.add_argument("graph", type=Path, help="knowledge_graph.json path")
@@ -101,7 +101,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--unchecked-graph",
         type=Path,
         help=(
-            "unchecked REBEL graph to prune with Qwen before publishing the "
+            "unchecked REBEL graph to prune with the local model before publishing the "
             "positional knowledge_graph.json"
         ),
     )
@@ -147,7 +147,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--cluster-workers",
         type=parse_cluster_workers,
         default="auto",
-        help="parallel Qwen contexts: auto GPU-memory budget or 1–20 (default: auto)",
+        help="parallel model contexts: auto GPU-memory budget or 1–20 (default: auto)",
     )
     parser.add_argument(
         "--clusters-per-call", type=int, choices=(1, 2, 5), default=1,
@@ -190,7 +190,7 @@ def run(
         try:
             model_path = ensure_model(args.model_dir)
             setting = getattr(args, "cluster_workers", "auto")
-            backend = LocalQwenBackend(
+            backend = LocalModelBackend(
                 model_path,
                 n_ctx=args.n_ctx,
                 n_gpu_layers=args.n_gpu_layers,
@@ -202,7 +202,7 @@ def run(
                 seed=args.seed,
             )
         except Exception as exc:
-            raise RuntimeError(f"local Qwen setup failed: {exc}") from exc
+            raise RuntimeError(f"local model setup failed: {exc}") from exc
 
     if args.smoke_test:
         raw = backend.complete(
@@ -213,9 +213,9 @@ def run(
         try:
             smoke_value = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise RuntimeError("Qwen smoke test did not return valid JSON") from exc
+            raise RuntimeError("Local model smoke test did not return valid JSON") from exc
         if smoke_value != {"status": "ok"}:
-            raise RuntimeError("Qwen smoke test returned an unexpected JSON value")
+            raise RuntimeError("Local model smoke test returned an unexpected JSON value")
         return None
 
     if checked_graph is None:
@@ -343,7 +343,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     if output is None:
-        print("Qwen smoke test passed.")
+        print("Local model smoke test passed.")
     else:
         for path in output:
             print(f"Saved flashcards: {path.resolve()}")

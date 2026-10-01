@@ -78,7 +78,9 @@ def _declared_model_files(repo_root: Path) -> tuple[PurePosixPath, tuple[PurePos
     lock_path = repo_root / "packaging" / "model-lock.json"
     try:
         lock = json.loads(lock_path.read_text(encoding="utf-8"))
-        qwen = _safe_declared_path(lock["qwen"]["filename"], "Qwen filename")
+        generator = _safe_declared_path(
+            lock["generator"]["filename"], "generator filename"
+        )
         rebel = tuple(
             _safe_declared_path(item, "REBEL allow pattern")
             for item in lock["rebel"]["allow_patterns"]
@@ -87,16 +89,18 @@ def _declared_model_files(repo_root: Path) -> tuple[PurePosixPath, tuple[PurePos
         raise ValueError(f"could not read asset declarations: {lock_path}") from exc
     if len({item.as_posix().casefold() for item in rebel}) != len(rebel):
         raise ValueError("REBEL asset declarations contain duplicate paths")
-    return qwen, rebel
+    return generator, rebel
 
 
 def _copy_declared_models(repo_root: Path, source: Path, destination: Path) -> None:
-    qwen, rebel_files = _declared_model_files(repo_root)
+    generator, rebel_files = _declared_model_files(repo_root)
     destination.mkdir()
-    qwen_source = source.joinpath(*qwen.parts)
-    if not qwen_source.is_file():
-        raise ValueError(f"staged Qwen model is missing: {qwen.as_posix()}")
-    shutil.copy2(qwen_source, destination.joinpath(*qwen.parts))
+    generator_source = source.joinpath(*generator.parts)
+    if not generator_source.is_file():
+        raise ValueError(
+            f"staged generator model is missing: {generator.as_posix()}"
+        )
+    shutil.copy2(generator_source, destination.joinpath(*generator.parts))
 
     rebel_source = source / "rebel-large"
     rebel_destination = destination / "rebel-large"

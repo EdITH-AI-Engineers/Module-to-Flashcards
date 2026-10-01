@@ -11,7 +11,7 @@ def test_three_file_batch_loads_each_model_once(tmp_path):
     result = run_batch(items, dependencies=counting_dependencies(counters))
 
     assert len(result.outputs) == 6
-    assert counters["qwen_load"] == 1
+    assert counters["model_load"] == 1
     assert counters["rebel_load"] == 1
     assert counters["ingest"] == 3
     assert counters["graph"] == 3
@@ -27,8 +27,8 @@ def test_three_file_batch_reuses_staged_runtimes_instead_of_legacy_loads(tmp_pat
     _run_legacy_nine_load_simulation(items, legacy_counters)
 
     assert len(result.outputs) == 6
-    assert (staged_counters["qwen_load"], staged_counters["rebel_load"]) == (1, 1)
-    assert (legacy_counters["qwen_load"], legacy_counters["rebel_load"]) == (3, 3)
+    assert (staged_counters["model_load"], staged_counters["rebel_load"]) == (1, 1)
+    assert (legacy_counters["model_load"], legacy_counters["rebel_load"]) == (3, 3)
 
 
 def _run_legacy_nine_load_simulation(items, counters):
@@ -38,5 +38,5 @@ def _run_legacy_nine_load_simulation(items, counters):
         dependencies.ingest_stage(item, None)
         with dependencies.rebel_loader(item.args) as runtime:
             dependencies.graph_stage(item, runtime)
-        with dependencies.qwen_loader(item.args) as backend:
+        with dependencies.model_loader(item.args) as backend:
             dependencies.flashcard_stage(item, backend)

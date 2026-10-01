@@ -1,11 +1,11 @@
 {
-  "schema_version": 1,
-  "qwen": {
-    "repo_id": "bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF",
-    "revision": "ae44f08e1392f39c0e474af10c3ff8355c8b6688",
-    "filename": "Qwen_Qwen3-4B-Instruct-2507-Q5_K_M.gguf",
-    "size": 2889513696,
-    "sha256": "66713ce35a58a82fe87642d4ec13425bf9b9a46800fff5c49a665ef5701439dc"
+  "schema_version": 2,
+  "generator": {
+    "repo_id": "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
+    "revision": "eb599d408350ea2bb60452cb86be7c7b2fc28227",
+    "filename": "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+    "size": 2147023008,
+    "sha256": "9ed150d4367e68df0ac8e1540f6ddc65b42d0ee26378329d1ecbca60f93fc5f8"
   },
   "rebel": {
     "repo_id": "Babelscape/rebel-large",

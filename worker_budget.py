@@ -1,4 +1,4 @@
-"""Conservative concurrency budget for independent Qwen cluster contexts."""
+"""Conservative concurrency budget for independent local-model contexts."""
 
 from flashcard_contract import CLUSTERS_PER_MODULE
 
@@ -40,7 +40,7 @@ def choose_cluster_workers(
         return 1, "GPU memory measurement is unavailable; using one cluster worker"
     footprint = before[0] - after[0]
     if footprint <= 0:
-        return 1, "Qwen context GPU footprint is not measurable; using one cluster worker"
+        return 1, "Model context GPU footprint is not measurable; using one cluster worker"
     reserve = max(GIB, (after[1] + 9) // 10)
     per_extra = (footprint * 5 + 3) // 4
     count = min(cluster_count, 1 + max(0, after[0] - reserve) // per_extra)

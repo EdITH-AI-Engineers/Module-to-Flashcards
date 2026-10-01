@@ -35,14 +35,15 @@ def _valid_lock() -> dict:
     return json.loads((ROOT / "packaging" / "model-lock.json").read_text(encoding="utf-8"))
 
 
-def test_model_lock_selects_exact_qwen3_4b_instruct_checkpoint():
-    assert set(_valid_lock()) == {"schema_version", "qwen", "rebel"}
-    assert _valid_lock()["qwen"] == {
-        "repo_id": "bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF",
-        "revision": "ae44f08e1392f39c0e474af10c3ff8355c8b6688",
-        "filename": "Qwen_Qwen3-4B-Instruct-2507-Q5_K_M.gguf",
-        "size": 2889513696,
-        "sha256": "66713ce35a58a82fe87642d4ec13425bf9b9a46800fff5c49a665ef5701439dc",
+def test_model_lock_selects_exact_ministral_3b_instruct_checkpoint():
+    assert set(_valid_lock()) == {"schema_version", "generator", "rebel"}
+    assert _valid_lock()["schema_version"] == 2
+    assert _valid_lock()["generator"] == {
+        "repo_id": "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
+        "revision": "eb599d408350ea2bb60452cb86be7c7b2fc28227",
+        "filename": "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+        "size": 2147023008,
+        "sha256": "9ed150d4367e68df0ac8e1540f6ddc65b42d0ee26378329d1ecbca60f93fc5f8",
     }
 
 
@@ -54,11 +55,11 @@ def test_prepare_rejects_moving_rebel_revision():
         prepare_assets_module.validate_model_lock(lock)
 
 
-def test_prepare_rejects_changed_qwen_digest():
+def test_prepare_rejects_changed_generator_digest():
     lock = _valid_lock()
-    lock["qwen"]["sha256"] = "0" * 64
+    lock["generator"]["sha256"] = "0" * 64
 
-    with pytest.raises(ValueError, match="locked Qwen digest"):
+    with pytest.raises(ValueError, match="locked generator digest"):
         prepare_assets_module.validate_model_lock(lock)
 
 
@@ -77,7 +78,7 @@ def _fake_assets(repo: Path) -> Path:
     (repo / "packaging" / "model-lock.json").write_text(
         json.dumps(lock), encoding="utf-8"
     )
-    (assets / "models" / lock["qwen"]["filename"]).write_bytes(b"qwen")
+    (assets / "models" / lock["generator"]["filename"]).write_bytes(b"model")
     for relative in lock["rebel"]["allow_patterns"]:
         target = assets / "models" / "rebel-large" / relative
         target.parent.mkdir(parents=True, exist_ok=True)

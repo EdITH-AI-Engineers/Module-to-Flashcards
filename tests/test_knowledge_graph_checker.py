@@ -58,7 +58,7 @@ def sample_graph():
     }
 
 
-def test_qwen_checker_prunes_only_selected_items_and_updates_graph_counts():
+def test_model_checker_prunes_only_selected_items_and_updates_graph_counts():
     backend = Responses('{"remove":[false,true]}', '{"remove":[false,true]}')
 
     checked = check_knowledge_graph(sample_graph(), backend)
@@ -74,7 +74,7 @@ def test_qwen_checker_prunes_only_selected_items_and_updates_graph_counts():
     assert all(call[3] is not None for call in backend.calls)
 
 
-def test_qwen_checker_retries_wrong_decision_count_then_accepts_valid_json():
+def test_model_checker_retries_wrong_decision_count_then_accepts_valid_json():
     backend = Responses(
         '{"remove":[false]}',
         '{"remove":[false,false]}',
@@ -87,7 +87,7 @@ def test_qwen_checker_retries_wrong_decision_count_then_accepts_valid_json():
     assert len(backend.calls) == 3
 
 
-def test_qwen_checker_refuses_to_publish_a_graph_with_no_lesson_facts():
+def test_model_checker_refuses_to_publish_a_graph_with_no_lesson_facts():
     backend = Responses('{"remove":[true,true]}', '{"remove":[false,false]}')
 
     with pytest.raises(KnowledgeGraphCheckError, match="every lesson fact"):
@@ -144,7 +144,7 @@ def test_checker_retries_a_length_truncation_with_bounded_larger_budget():
     )
 
 
-def test_checker_prunes_unresolved_question_facts_before_qwen_review():
+def test_checker_prunes_unresolved_question_facts_before_model_review():
     value = sample_graph()
     value["facts"] = [
         {

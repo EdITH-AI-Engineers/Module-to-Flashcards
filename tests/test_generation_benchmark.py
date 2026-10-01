@@ -1,4 +1,5 @@
 import json
+import inspect
 
 import pytest
 
@@ -90,6 +91,17 @@ def test_benchmark_accepts_optional_cluster_batch_size():
     assert parse_args(["--clusters-per-call", "5"]).clusters_per_call == 5
     with pytest.raises(SystemExit):
         parse_args(["--clusters-per-call", "3"])
+
+
+def test_benchmark_removes_qwen_only_modes():
+    from benchmarks.run import benchmark
+
+    assert "hard_no_think" not in inspect.signature(benchmark).parameters
+    assert "sampling_preset" not in inspect.signature(benchmark).parameters
+    with pytest.raises(SystemExit):
+        parse_args(["--hard-no-think"])
+    with pytest.raises(SystemExit):
+        parse_args(["--sampling-preset", "qwen_non_thinking"])
 
 
 def test_benchmark_uses_per_cluster_first_attempt_rate_not_batch_call_rate():

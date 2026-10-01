@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from batch_pipeline import BatchItem, BatchProgressEvent, run_batch
 from artifact_paths import module_file_label
-from local_qwen import DEFAULT_N_CTX
+from local_model import DEFAULT_N_CTX
 from pipeline import pipeline_paths
 from portable_paths import PortablePaths, build_paths
 from structured_module import (
@@ -35,7 +35,7 @@ OUTPUT_ROOT = _RUNTIME_PATHS.outputs
 MODEL_DIR = _RUNTIME_PATHS.models
 REBEL_MODEL = _RUNTIME_PATHS.rebel_model
 PORTABLE_MODE = _RUNTIME_PATHS.portable
-QWEN_GPU_LAYERS = -1
+MODEL_GPU_LAYERS = -1
 KG_DEVICE = "auto"
 _REQUEST_LOCK = threading.Lock()
 _REQUEST_LOCK_EXECUTOR = ThreadPoolExecutor(
@@ -243,10 +243,10 @@ def configure_api_storage(paths: PortablePaths) -> None:
 
 
 def configure_api_runtime(*, n_gpu_layers: int, kg_device: str) -> None:
-    global QWEN_GPU_LAYERS, KG_DEVICE
+    global MODEL_GPU_LAYERS, KG_DEVICE
     if kg_device not in {"auto", "cpu", "cuda"}:
         raise ValueError(f"unsupported knowledge-graph device: {kg_device}")
-    QWEN_GPU_LAYERS = int(n_gpu_layers)
+    MODEL_GPU_LAYERS = int(n_gpu_layers)
     KG_DEVICE = kg_device
 
 
@@ -420,7 +420,7 @@ def pipeline_args(source: Path, course_code: str, module_number: str) -> Namespa
         portable=PORTABLE_MODE,
         attempts=3,
         seed=42,
-        n_gpu_layers=QWEN_GPU_LAYERS,
+        n_gpu_layers=MODEL_GPU_LAYERS,
         n_ctx=DEFAULT_N_CTX,
         cluster_workers=cluster_workers,
         clusters_per_call=clusters_per_call,

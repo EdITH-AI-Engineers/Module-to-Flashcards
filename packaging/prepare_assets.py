@@ -20,12 +20,12 @@ LOCK_PATH = Path(__file__).with_name("model-lock.json")
 ASSETS_DIR = Path(__file__).with_name("assets")
 _REVISION_PATTERN = re.compile(r"[0-9a-f]{40}")
 
-_QWEN_LOCK = {
-    "repo_id": "bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF",
-    "revision": "ae44f08e1392f39c0e474af10c3ff8355c8b6688",
-    "filename": "Qwen_Qwen3-4B-Instruct-2507-Q5_K_M.gguf",
-    "size": 2889513696,
-    "sha256": "66713ce35a58a82fe87642d4ec13425bf9b9a46800fff5c49a665ef5701439dc",
+_GENERATOR_LOCK = {
+    "repo_id": "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
+    "revision": "eb599d408350ea2bb60452cb86be7c7b2fc28227",
+    "filename": "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+    "size": 2147023008,
+    "sha256": "9ed150d4367e68df0ac8e1540f6ddc65b42d0ee26378329d1ecbca60f93fc5f8",
 }
 _REBEL_REQUIRED = {
     "config.json",
@@ -45,18 +45,18 @@ def _mapping(value: object, label: str) -> Mapping[str, Any]:
 
 def validate_model_lock(lock: object) -> Mapping[str, Any]:
     payload = _mapping(lock, "model")
-    if payload.get("schema_version") != 1:
+    if payload.get("schema_version") != 2:
         raise ValueError("unsupported model-lock schema")
 
-    qwen = _mapping(payload.get("qwen"), "Qwen")
-    revision = qwen.get("revision")
+    generator = _mapping(payload.get("generator"), "generator")
+    revision = generator.get("revision")
     if not isinstance(revision, str) or not _REVISION_PATTERN.fullmatch(revision):
-        raise ValueError("Qwen requires an immutable revision")
+        raise ValueError("generator requires an immutable revision")
     for key in ("repo_id", "revision", "filename", "size"):
-        if qwen.get(key) != _QWEN_LOCK[key]:
-            raise ValueError(f"unexpected locked Qwen {key}")
-    if qwen.get("sha256") != _QWEN_LOCK["sha256"]:
-        raise ValueError("unexpected locked Qwen digest")
+        if generator.get(key) != _GENERATOR_LOCK[key]:
+            raise ValueError(f"unexpected locked generator {key}")
+    if generator.get("sha256") != _GENERATOR_LOCK["sha256"]:
+        raise ValueError("unexpected locked generator digest")
 
     rebel = _mapping(payload.get("rebel"), "REBEL")
     rebel_revision = rebel.get("revision")
@@ -102,7 +102,7 @@ def prepare_assets(
     *,
     repo_root: Path = PROJECT_ROOT,
     assets_dir: Path | None = None,
-    qwen_download: Callable[..., str] | None = None,
+    model_download: Callable[..., str] | None = None,
     rebel_download: Callable[..., str] | None = None,
 ) -> Path:
     repo_root = Path(repo_root).resolve()
@@ -114,32 +114,32 @@ def prepare_assets(
     )
     lock = load_model_lock(packaging_root / "model-lock.json")
 
-    if qwen_download is None or rebel_download is None:
+    if model_download is None or rebel_download is None:
         from huggingface_hub import hf_hub_download, snapshot_download
 
-        qwen_download = qwen_download or hf_hub_download
+        model_download = model_download or hf_hub_download
         rebel_download = rebel_download or snapshot_download
 
     models = destination / "models"
     models.mkdir(parents=True, exist_ok=True)
-    qwen = lock["qwen"]
-    qwen_result = Path(
-        qwen_download(
-            repo_id=qwen["repo_id"],
-            revision=qwen["revision"],
-            filename=qwen["filename"],
+    generator = lock["generator"]
+    model_result = Path(
+        model_download(
+            repo_id=generator["repo_id"],
+            revision=generator["revision"],
+            filename=generator["filename"],
             local_dir=str(models),
         )
     )
-    qwen_target = models / str(qwen["filename"])
-    if not qwen_target.is_file() and qwen_result.is_file():
-        shutil.copy2(qwen_result, qwen_target)
-    if not qwen_target.is_file():
-        raise ValueError(f"Qwen download did not produce {qwen_target.name}")
-    if qwen_target.stat().st_size != qwen["size"]:
-        raise ValueError("downloaded Qwen size does not match model lock")
-    if _sha256(qwen_target) != qwen["sha256"]:
-        raise ValueError("downloaded Qwen digest does not match model lock")
+    model_target = models / str(generator["filename"])
+    if not model_target.is_file() and model_result.is_file():
+        shutil.copy2(model_result, model_target)
+    if not model_target.is_file():
+        raise ValueError(f"model download did not produce {model_target.name}")
+    if model_target.stat().st_size != generator["size"]:
+        raise ValueError("downloaded model size does not match model lock")
+    if _sha256(model_target) != generator["sha256"]:
+        raise ValueError("downloaded model digest does not match model lock")
 
     rebel = lock["rebel"]
     rebel_target = models / "rebel-large"

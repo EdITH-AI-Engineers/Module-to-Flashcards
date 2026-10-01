@@ -13,16 +13,10 @@ from flashcard_types import CompletionTruncatedError, ContextWindowExceededError
 from worker_budget import choose_cluster_workers
 
 
-MODEL_REPO = "bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF"
-MODEL_REVISION = "ae44f08e1392f39c0e474af10c3ff8355c8b6688"
-MODEL_FILENAME = "Qwen_Qwen3-4B-Instruct-2507-Q5_K_M.gguf"
-DEFAULT_N_CTX = 12288
-QWEN_NON_THINKING_SAMPLING = {
-    "temperature": 0.7,
-    "top_p": 0.8,
-    "top_k": 20,
-    "repeat_penalty": 1.05,
-}
+MODEL_REPO = "mistralai/Ministral-3-3B-Instruct-2512-GGUF"
+MODEL_REVISION = "eb599d408350ea2bb60452cb86be7c7b2fc28227"
+MODEL_FILENAME = "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf"
+DEFAULT_N_CTX = 8192
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -34,7 +28,7 @@ def thread_budget_for_workers(workers: int) -> int | None:
 
 
 def ensure_model(model_dir: Path, *, allow_download: bool = True) -> Path:
-    """Return the exact local Q5 model path, downloading it when absent."""
+    """Return the exact local generator model, downloading it when absent."""
     model_dir = Path(model_dir)
     model_dir.mkdir(parents=True, exist_ok=True)
     target = model_dir / MODEL_FILENAME
@@ -42,7 +36,7 @@ def ensure_model(model_dir: Path, *, allow_download: bool = True) -> Path:
         return target
 
     if not allow_download:
-        raise FileNotFoundError(f"bundled Qwen model not found: {target}")
+        raise FileNotFoundError(f"bundled local model not found: {target}")
 
     downloaded = hf_hub_download(
         repo_id=MODEL_REPO,
@@ -53,7 +47,7 @@ def ensure_model(model_dir: Path, *, allow_download: bool = True) -> Path:
     return Path(downloaded)
 
 
-class LocalQwenBackend:
+class LocalModelBackend:
     supports_task_metrics = True
 
     def __init__(
@@ -63,9 +57,8 @@ class LocalQwenBackend:
         n_ctx: int = DEFAULT_N_CTX,
         n_gpu_layers: int = -1,
         n_threads: int | None = None,
-        temperature: float = 0.2,
+        temperature: float = 0.05,
         seed: int = 42,
-        hard_no_think: bool = False,
         top_p: float | None = None,
         top_k: int | None = None,
         repeat_penalty: float | None = None,
@@ -129,7 +122,6 @@ class LocalQwenBackend:
             else thread_budget_for_workers(self.auto_cluster_workers)
         )
         self._temperature = temperature
-        self._hard_no_think = hard_no_think
         self._top_p = top_p
         self._top_k = top_k
         self._repeat_penalty = repeat_penalty
@@ -139,18 +131,17 @@ class LocalQwenBackend:
         self._context_window = int(n_ctx)
         self._metric_sink: Callable[[dict[str, object]], None] | None = None
 
-    def fork(self, worker_index: int) -> LocalQwenBackend:
+    def fork(self, worker_index: int) -> LocalModelBackend:
         """Load an independent inference context for one cluster worker."""
         if worker_index < 1:
             raise ValueError("worker_index must be positive")
-        forked = LocalQwenBackend(
+        forked = LocalModelBackend(
             self._model_path,
             n_ctx=self._n_ctx,
             n_gpu_layers=self._n_gpu_layers,
             n_threads=self._fork_n_threads,
             temperature=self._temperature,
             seed=self._seed + 100_000 * worker_index,
-            hard_no_think=self._hard_no_think,
             top_p=self._top_p,
             top_k=self._top_k,
             repeat_penalty=self._repeat_penalty,
@@ -172,14 +163,6 @@ class LocalQwenBackend:
 
     def count_prompt_tokens(self, system: str, user: str) -> int:
         """Count the exact chat-template tokens used by the local backend."""
-        if getattr(self, "_hard_no_think", False):
-            return len(
-                self._llm.tokenize(
-                    self._hard_no_think_prompt(system, user).encode("utf-8"),
-                    add_bos=False,
-                    special=True,
-                )
-            )
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -220,21 +203,12 @@ class LocalQwenBackend:
                 )
             )
 
-        # The pinned Qwen GGUF contains a chat template. This fallback keeps
+        # The pinned Ministral GGUF contains a chat template. This fallback keeps
         # alternate/test models conservative when that metadata is absent.
         raw = f"System:\n{system}\nUser:\n{user}\nAssistant:\n"
         return len(
             self._llm.tokenize(raw.encode("utf-8"), add_bos=True, special=True)
         ) + 16
-
-    @staticmethod
-    def _hard_no_think_prompt(system: str, user: str) -> str:
-        """Render exactly the ChatML bytes passed to create_completion."""
-        return (
-            f"<|im_start|>system\n{system}<|im_end|>\n"
-            f"<|im_start|>user\n{user}<|im_end|>\n"
-            "<|im_start|>assistant\n"
-        )
 
     def close(self) -> None:
         close = getattr(self._llm, "close", None)
@@ -280,33 +254,17 @@ class LocalQwenBackend:
         }
         sampling = {key: value for key, value in sampling.items() if value is not None}
         try:
-            if getattr(self, "_hard_no_think", False):
-                from llama_cpp import LlamaGrammar
-
-                grammar = LlamaGrammar.from_json_schema(
-                    json.dumps(dict(schema) if schema is not None else {"type": "object"})
-                )
-                response: Any = self._llm.create_completion(
-                    prompt=self._hard_no_think_prompt(system, user),
-                    temperature=self._temperature,
-                    seed=call_seed,
-                    max_tokens=max_tokens,
-                    grammar=grammar,
-                    stop=["<|im_end|>"],
-                    **sampling,
-                )
-            else:
-                response = self._llm.create_chat_completion(
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    temperature=self._temperature,
-                    seed=call_seed,
-                    max_tokens=max_tokens,
-                    response_format=response_format,
-                    **sampling,
-                )
+            response: Any = self._llm.create_chat_completion(
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                temperature=self._temperature,
+                seed=call_seed,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                **sampling,
+            )
             usage = response.get("usage", {}) if isinstance(response, dict) else {}
             if isinstance(usage, dict):
                 recorded_prompt = usage.get("prompt_tokens")
@@ -317,25 +275,21 @@ class LocalQwenBackend:
                 )
             try:
                 choice = response["choices"][0]
-                content = (
-                    choice["text"]
-                    if getattr(self, "_hard_no_think", False)
-                    else choice["message"]["content"]
-                )
+                content = choice["message"]["content"]
             except (KeyError, IndexError, TypeError) as exc:
-                raise RuntimeError("Qwen returned an unexpected response shape") from exc
+                raise RuntimeError("Local model returned an unexpected response shape") from exc
             finish_reason = choice.get("finish_reason")
             contains_think = isinstance(content, str) and "<think>" in content
             output_chars = len(content) if isinstance(content, str) else None
             if finish_reason == "length":
                 raise CompletionTruncatedError(
-                    "Qwen response was truncated before it completed the requested JSON",
+                    "Local model response was truncated before it completed the requested JSON",
                     partial_content=content if isinstance(content, str) else "",
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                 )
             if not isinstance(content, str) or not content.strip():
-                raise RuntimeError("Qwen returned empty assistant content")
+                raise RuntimeError("Local model returned empty assistant content")
             return content.strip()
         except ValueError as exc:
             if "exceed context window" in str(exc):
@@ -347,7 +301,7 @@ class LocalQwenBackend:
                 exception_name = "ContextWindowExceededError"
                 finish_reason = "context_error"
                 raise ContextWindowExceededError(
-                    "Qwen prompt exceeded the configured context window; "
+                    "Local model prompt exceeded the configured context window; "
                     "reduce the prompt or increase --n-ctx"
                 ) from exc
             exception_name = type(exc).__name__
@@ -367,10 +321,10 @@ class LocalQwenBackend:
                 "contains_think": contains_think,
                 "output_chars": output_chars,
             }
-            _LOGGER.info("Qwen completion: %s", json.dumps(metric, sort_keys=True))
+            _LOGGER.info("Local model completion: %s", json.dumps(metric, sort_keys=True))
             sink = getattr(self, "_metric_sink", None)
             if sink is not None:
                 try:
                     sink(metric)
                 except Exception:
-                    _LOGGER.exception("Could not record Qwen completion metric")
+                    _LOGGER.exception("Could not record local model completion metric")

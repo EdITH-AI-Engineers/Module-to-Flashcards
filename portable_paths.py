@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 import sys
 
-from local_qwen import MODEL_FILENAME
+from local_model import MODEL_FILENAME
 
 
 @dataclass(frozen=True)
@@ -13,7 +13,7 @@ class PortablePaths:
     root: Path
     portable: bool
     models: Path
-    qwen_model: Path
+    generator_model: Path
     rebel_model: Path
     data: Path
     uploads: Path
@@ -43,7 +43,7 @@ def build_paths(
         root=resolved_root,
         portable=portable,
         models=resolved_root / "models",
-        qwen_model=resolved_root / "models" / MODEL_FILENAME,
+        generator_model=resolved_root / "models" / MODEL_FILENAME,
         rebel_model=resolved_root / "models" / "rebel-large",
         data=data,
         uploads=data / "uploads" if portable else resolved_root / "pipeline_uploads",

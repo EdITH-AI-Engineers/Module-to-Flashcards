@@ -24,7 +24,7 @@ from flashcard_csv import migrate_legacy_module, valid_written_parts
 from flashcard_types import ModuleIdentity
 from graph_input import GraphInputError, extract_graph_facts, load_graph
 from knowledge_graph_checker import is_checked_graph
-from local_qwen import DEFAULT_N_CTX
+from local_model import DEFAULT_N_CTX
 from worker_budget import parse_cluster_workers
 from structured_module import (
     graph_ready_text,
@@ -140,7 +140,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--cluster-workers",
         type=parse_cluster_workers,
         default="auto",
-        help="parallel Qwen contexts: auto GPU-memory budget or 1–20 (default: auto)",
+        help="parallel model contexts: auto GPU-memory budget or 1–20 (default: auto)",
     )
     parser.add_argument(
         "--clusters-per-call", type=int, choices=(1, 2, 5), default=1,
@@ -173,7 +173,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--skip-final-review",
         action="store_true",
-        help="skip Qwen's final flashcard review calls",
+        help="skip the local model's final flashcard review calls",
     )
     parser.add_argument(
         "--force",

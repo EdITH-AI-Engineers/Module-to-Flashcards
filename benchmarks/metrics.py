@@ -1,4 +1,4 @@
-"""Summaries for task-tagged local Qwen calls."""
+"""Summaries for task-tagged local model calls."""
 
 from __future__ import annotations
 

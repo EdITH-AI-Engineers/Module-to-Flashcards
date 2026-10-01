@@ -96,6 +96,47 @@ def test_cluster_worker_count_must_be_between_one_and_twenty():
         PipelineConfig(cluster_workers=21)
 
 
+def test_parallel_workers_receive_whole_five_cluster_batches():
+    class BatchBackend:
+        def __init__(self, shared=None):
+            self.shared = shared or {"lock": threading.Lock(), "groups": []}
+
+        def fork(self, _worker_index):
+            return BatchBackend(self.shared)
+
+        def close(self):
+            pass
+
+        def complete(self, _system, user, *, max_tokens, schema=None):
+            del max_tokens, schema
+            if "Generate one independent five-card cluster" not in user:
+                return plan_json()
+            payload = json.loads(user.split("INPUT JSON:\n", 1)[1])
+            positions = [entry["number"] for entry in payload["concepts"]]
+            with self.shared["lock"]:
+                self.shared["groups"].append(positions)
+            return json.dumps({
+                "clusters": [
+                    {"number": position, "cards": [asdict(card) for card in make_cards(position)]}
+                    for position in positions
+                ]
+            })
+
+    backend = BatchBackend()
+    pipeline = FlashcardPipeline(
+        backend,
+        PipelineConfig(cluster_workers=5, clusters_per_call=5, final_review=False),
+        progress=lambda _message: None,
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert len(clusters) == 20
+    assert sorted(backend.shared["groups"]) == [
+        list(range(start, start + 5)) for start in (1, 6, 11, 16)
+    ]
+
+
 def test_parallel_progress_reports_completed_count():
     backend = ConcurrentBackend()
     messages = []

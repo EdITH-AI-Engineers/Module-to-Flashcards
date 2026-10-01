@@ -6,6 +6,7 @@ from flashcard_prompt import (
     REPAIR_SYSTEM,
     REVIEW_SYSTEM,
     SYSTEM_PROMPT,
+    build_cluster_batch_prompt,
     build_cluster_prompt,
     build_cluster_retry_prompt,
     build_concept_plan_prompt,
@@ -347,6 +348,23 @@ def test_cluster_retry_sends_only_flagged_rejected_cards():
         "cards": [{"card_number": 2, "card": {"question": "B"}}]
     }
     assert "only the numbered cards" in prompt
+
+
+def test_batch_prompt_keeps_each_concepts_facts_and_approaches_separate():
+    second = ConceptPlan(
+        "Decimal base", ("e2",), ("decimal | uses | base 10",), ("application",)
+    )
+    prompt = build_cluster_batch_prompt(
+        ((1, concept(), (GraphFact("e1", "binary | uses | base 2"),)),
+         (2, second, (GraphFact("e2", "decimal | uses | base 10"),)))
+    )
+    payload = json.loads(prompt.split("INPUT JSON:\n", 1)[1])
+
+    assert payload["concepts"][0]["number"] == 1
+    assert payload["concepts"][0]["facts"] == ["binary | uses | base 2"]
+    assert payload["concepts"][1]["number"] == 2
+    assert payload["concepts"][1]["assessment_approaches"] == ["application"]
+    assert payload["concepts"][1]["facts"] == ["decimal | uses | base 10"]
 
 
 def test_rejected_json_trimming_drops_whole_entries_and_remains_valid_json():

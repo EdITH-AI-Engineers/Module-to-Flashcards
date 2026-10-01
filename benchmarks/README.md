@@ -27,3 +27,17 @@ Stage 4 comparisons can use `--hard-no-think` and `--sampling-preset qwen_non_th
 `chars_per_completion_token` compares visible response length with recorded completion tokens; `visible_think_markers` counts responses containing a literal `<think>` marker. These metrics can detect visible reasoning leakage, but cannot prove whether an engine internally spent unreported tokens on reasoning.
 
 A failed module is recorded with its exception type and makes the command exit nonzero. Full failure details go to the console, not the JSON report, so card content is not captured in committed metrics. No benchmark report should be treated as representative of future course modules solely because it passed three available samples.
+
+## Optional multi-cluster calls
+
+`--clusters-per-call` accepts `1`, `2`, or `5`; `1` remains the default. For a controlled comparison on the RTX 3060, run all three sizes with the same graph manifest, model, context, worker count, and review setting. For example, use `--workers 1` to isolate the effect of batching, then repeat with a fixed worker count the 3060 can actually load:
+
+```powershell
+.\.venv\Scripts\python.exe -m benchmarks.run --manifest benchmarks/modules.json --workers 1 --clusters-per-call 1 --output benchmarks/after_stage6_batch1.json
+.\.venv\Scripts\python.exe -m benchmarks.run --manifest benchmarks/modules.json --workers 1 --clusters-per-call 2 --output benchmarks/after_stage6_batch2.json
+.\.venv\Scripts\python.exe -m benchmarks.run --manifest benchmarks/modules.json --workers 1 --clusters-per-call 5 --output benchmarks/after_stage6_batch5.json
+```
+
+Check each report's `settings`, top-level `first_attempt_cluster_pass_rate`, `metrics.overall.retry_count`, length/context error counts, and `cluster_generation_per_minute`. The generic `metrics.overall.first_attempt_pass_rate` is per model call, so it is not comparable across batch sizes. A five-cluster call may be split into smaller calls automatically if it cannot reserve its completion budget or its output is truncated. Count only completed, validated clusters when judging speed; a lower number of model calls alone is not a speedup. Keep size `1` in production unless the 3060 evidence meets the quality and truncation gates in `REPORT.md`.
+
+For the end-to-end CLI, pass `--clusters-per-call 2` or `5` to `pipeline.py` or `main.py`. The API's corresponding environment variable is `MODULE_FLASHCARDS_CLUSTERS_PER_CALL`; it also accepts only `1`, `2`, or `5` and defaults to `1`. The API enables final grounding review when batching is requested, because one batch prompt contains multiple concepts' facts.

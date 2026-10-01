@@ -143,6 +143,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="parallel Qwen contexts: auto GPU-memory budget or 1–20 (default: auto)",
     )
     parser.add_argument(
+        "--clusters-per-call", type=int, choices=(1, 2, 5), default=1,
+        help="experimental concepts per model call (default: 1)",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=0,
@@ -227,6 +231,8 @@ def build_stage_commands(
         str(args.n_ctx),
         "--cluster-workers",
         str(args.cluster_workers),
+        "--clusters-per-call",
+        str(args.clusters_per_call),
     ]
     if args.skip_final_review:
         stage_three.append("--skip-final-review")
@@ -368,6 +374,7 @@ def _pipeline_manifest_contents(args: argparse.Namespace, source: Path) -> dict[
             "n_gpu_layers": args.n_gpu_layers,
             "n_ctx": args.n_ctx,
             "cluster_workers": args.cluster_workers,
+            "clusters_per_call": args.clusters_per_call,
             "kg_device": args.kg_device,
             "kg_batch_size": args.kg_batch_size,
             "kg_num_beams": args.kg_num_beams,

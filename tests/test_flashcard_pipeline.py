@@ -49,6 +49,144 @@ def empty_review():
     return json.dumps({"issues": []})
 
 
+def batch_json(*positions: int) -> str:
+    return json.dumps(
+        {
+            "clusters": [
+                {"number": position, "cards": [asdict(card) for card in make_cards(position)]}
+                for position in positions
+            ]
+        }
+    )
+
+
+@pytest.mark.parametrize("size", (2, 5))
+def test_cluster_batch_uses_one_generation_call_per_group(size):
+    responses = [plan_json()] + [
+        batch_json(*range(start, start + size))
+        for start in range(1, 21, size)
+    ]
+    backend = FakeBackend(responses)
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(final_review=False, clusters_per_call=size),
+        progress=lambda _message: None,
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert len(backend.calls) == 1 + 20 // size
+    assert [cluster.concept.name for cluster in clusters] == [
+        make_concept(position).name for position in range(1, 21)
+    ]
+    assert pipeline.batch_stats["first_attempt_passes"] == 20
+
+
+def test_cluster_batch_retries_only_invalid_cluster():
+    first = json.loads(batch_json(1, 2))
+    first["clusters"][1]["cards"] = []
+    backend = FakeBackend(
+        [plan_json(), json.dumps(first), cluster_json(2)]
+        + [batch_json(*range(start, start + 2)) for start in range(3, 21, 2)]
+    )
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(final_review=False, clusters_per_call=2),
+        progress=lambda _message: None,
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert len(clusters) == 20
+    assert len(backend.calls) == 12
+    assert backend.calls[2][1].startswith("Generate exactly 5 cards")
+    assert pipeline.batch_stats["first_attempt_passes"] == 19
+    assert pipeline.task_metrics["cluster"]["retries"] == 1
+    assert pipeline.task_metrics["cluster"]["first_attempts"] == 0
+    assert sum(counts["retries"] for counts in pipeline.task_metrics.values()) == 1
+
+
+def test_cluster_batch_preserves_valid_entry_when_another_number_is_missing():
+    partial = json.loads(batch_json(1, 2))
+    partial["clusters"].pop()
+    backend = FakeBackend(
+        [plan_json(), json.dumps(partial), cluster_json(2)]
+        + [batch_json(*range(start, start + 2)) for start in range(3, 21, 2)]
+    )
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(final_review=False, clusters_per_call=2),
+        progress=lambda _message: None,
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert len(clusters) == 20
+    assert len(backend.calls) == 12
+    assert backend.calls[2][1].startswith("Generate exactly 5 cards")
+    assert pipeline.batch_stats["first_attempt_passes"] == 19
+
+
+def test_truncated_cluster_batch_splits_without_parsing_partial_output():
+    def truncate(_system, _user, _max_tokens):
+        raise CompletionTruncatedError("length", partial_content='{"clusters":[')
+
+    backend = FakeBackend(
+        [plan_json(), truncate, batch_json(1, 2), batch_json(3, 4, 5)]
+        + [batch_json(*range(start, start + 5)) for start in range(6, 21, 5)]
+    )
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(final_review=False, clusters_per_call=5),
+        progress=lambda _message: None,
+    )
+
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+
+    assert len(clusters) == 20
+    assert len(backend.calls) == 1 + 1 + 2 + 3
+    assert all('{"clusters":[' not in call[1] for call in backend.calls)
+
+
+def test_cluster_batch_preflight_split_is_counted_as_context_error():
+    class SizedBackend(FakeBackend):
+        context_window = 3000
+
+        def count_prompt_tokens(self, _system, _user):
+            return 100
+
+    backend = SizedBackend([cluster_json(1), cluster_json(2)])
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(clusters_per_call=2), progress=lambda _message: None
+    )
+
+    result = pipeline._generate_positioned_batch(
+        ((1, make_concept(1)), (2, make_concept(2))),
+        ModuleIdentity("CPE0021", "1"), graph_facts(), (),
+    )
+
+    assert len(result) == 2
+    assert len(backend.calls) == 2
+    assert pipeline.task_metrics["cluster_batch"]["preflight_context_errors"] == 1
+
+
+def test_truncated_two_cluster_batch_counts_singleton_fallbacks_as_retries():
+    def truncate(_system, _user, _max_tokens):
+        raise CompletionTruncatedError("length", partial_content='{"clusters":[')
+
+    backend = FakeBackend([truncate, cluster_json(1), cluster_json(2)])
+    pipeline = FlashcardPipeline(
+        backend, PipelineConfig(clusters_per_call=2), progress=lambda _message: None
+    )
+
+    result = pipeline._generate_positioned_batch(
+        ((1, make_concept(1)), (2, make_concept(2))),
+        ModuleIdentity("CPE0021", "1"), graph_facts(), (),
+    )
+
+    assert len(result) == 2
+    assert pipeline.task_metrics["cluster"]["first_attempts"] == 0
+    assert pipeline.task_metrics["cluster"]["first_attempt_passes"] == 0
+    assert pipeline.task_metrics["cluster"]["retries"] == 2
+    assert pipeline.batch_stats["first_attempt_pass_rate"] == 0.0
+
+
 def test_task_metrics_count_first_attempt_failure_and_retry():
     class MetricsBackend:
         supports_task_metrics = True
@@ -173,6 +311,11 @@ def test_generation_passes_concept_and_cluster_task_names_to_metrics_backend():
     assert backend.tasks == ["concept_plan"] + ["cluster"] * 20
     assert pipeline.task_metrics["concept_plan"]["first_attempt_passes"] == 1
     assert pipeline.task_metrics["cluster"]["first_attempt_passes"] == 20
+    assert pipeline.batch_stats == {
+        "first_attempt_clusters": 20,
+        "first_attempt_passes": 20,
+        "first_attempt_pass_rate": 1.0,
+    }
     assert pipeline.cluster_generation_seconds is not None
 
 

@@ -402,6 +402,14 @@ def pipeline_args(source: Path, course_code: str, module_number: str) -> Namespa
         raise ValueError(
             "MODULE_FLASHCARDS_CLUSTER_WORKERS must be 'auto' or 1 to 20"
         ) from exc
+    try:
+        clusters_per_call = int(os.environ.get("MODULE_FLASHCARDS_CLUSTERS_PER_CALL", "1"))
+        if clusters_per_call not in (1, 2, 5):
+            raise ValueError("unsupported batch size")
+    except ValueError as exc:
+        raise ValueError(
+            "MODULE_FLASHCARDS_CLUSTERS_PER_CALL must be 1, 2, or 5"
+        ) from exc
     return Namespace(
         input=source,
         course_code=course_code,
@@ -415,11 +423,14 @@ def pipeline_args(source: Path, course_code: str, module_number: str) -> Namespa
         n_gpu_layers=QWEN_GPU_LAYERS,
         n_ctx=DEFAULT_N_CTX,
         cluster_workers=cluster_workers,
+        clusters_per_call=clusters_per_call,
         timeout=0,
         kg_device=KG_DEVICE,
         kg_batch_size=1,
         kg_num_beams=1,
-        skip_final_review=True,
+        # Batched prompts expose several concepts' facts together, so keep
+        # concept-scoped grounding review enabled when batching is requested.
+        skip_final_review=clusters_per_call == 1,
         force=False,
     )
 

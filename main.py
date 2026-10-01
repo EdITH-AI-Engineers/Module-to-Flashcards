@@ -150,6 +150,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="parallel Qwen contexts: auto GPU-memory budget or 1–20 (default: auto)",
     )
     parser.add_argument(
+        "--clusters-per-call", type=int, choices=(1, 2, 5), default=1,
+        help="experimental concepts per model call (default: 1)",
+    )
+    parser.add_argument(
         "--skip-final-review",
         action="store_false",
         dest="final_review",
@@ -289,6 +293,7 @@ def run(
             max_retries=args.max_retries,
             final_review=args.final_review,
             cluster_workers=selected_workers,
+            clusters_per_call=getattr(args, "clusters_per_call", 1),
         ),
         progress=progress
         or (lambda message: print(message, file=sys.stderr, flush=True)),

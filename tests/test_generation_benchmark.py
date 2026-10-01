@@ -3,7 +3,7 @@ import json
 import pytest
 
 from benchmarks.metrics import summarize_metrics
-from benchmarks.run import load_cases, parse_args
+from benchmarks.run import load_cases, parse_args, summarize_cluster_passes
 
 
 def test_summary_reports_per_task_tokens_failures_and_pass_rate():
@@ -82,3 +82,24 @@ def test_manifest_selects_three_modules_by_default_without_embedding_graph_conte
     assert [case.identity.module_number for case in cases] == ["1", "2", "3"]
     with pytest.raises(ValueError, match="at least 4 modules"):
         load_cases(manifest, 4)
+
+
+def test_benchmark_accepts_optional_cluster_batch_size():
+    assert parse_args([]).clusters_per_call == 1
+    assert parse_args(["--clusters-per-call", "2"]).clusters_per_call == 2
+    assert parse_args(["--clusters-per-call", "5"]).clusters_per_call == 5
+    with pytest.raises(SystemExit):
+        parse_args(["--clusters-per-call", "3"])
+
+
+def test_benchmark_uses_per_cluster_first_attempt_rate_not_batch_call_rate():
+    modules = [
+        {"batch_stats": {"first_attempt_clusters": 20, "first_attempt_passes": 19}},
+        {"batch_stats": {"first_attempt_clusters": 10, "first_attempt_passes": 7}},
+    ]
+
+    assert summarize_cluster_passes(modules) == {
+        "first_attempt_clusters": 30,
+        "first_attempt_passes": 26,
+        "first_attempt_cluster_pass_rate": 26 / 30,
+    }

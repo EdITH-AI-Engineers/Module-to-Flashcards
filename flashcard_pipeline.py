@@ -24,6 +24,7 @@ from flashcard_prompt import (
     REPAIR_SYSTEM,
     REVIEW_SYSTEM,
     build_cluster_prompt,
+    build_cluster_batch_prompt,
     build_cluster_retry_prompt,
     build_concept_plan_prompt,
     build_concept_plan_retry_prompt,
@@ -36,6 +37,7 @@ from flashcard_prompt import (
 )
 from flashcard_schema import (
     build_card_cluster_schema,
+    build_cluster_batch_schema,
     build_concept_plan_schema,
     build_review_schema,
     build_single_card_schema,
@@ -78,12 +80,15 @@ class PipelineConfig:
     review_max_tokens: int = 1024
     final_review: bool = True
     cluster_workers: int = 1
+    clusters_per_call: int = 1
 
     def __post_init__(self) -> None:
         if self.max_retries < 1:
             raise ValueError("max_retries must be at least 1")
         if not 1 <= self.cluster_workers <= CLUSTERS_PER_MODULE:
             raise ValueError("cluster_workers must be between 1 and 20")
+        if self.clusters_per_call not in (1, 2, 5):
+            raise ValueError("clusters_per_call must be 1, 2, or 5")
 
 
 Parsed = TypeVar("Parsed")
@@ -328,6 +333,19 @@ class FlashcardPipeline:
         self._rejection_counts: Counter[str] = Counter()
         self._task_attempts: dict[str, Counter[str]] = {}
         self.cluster_generation_seconds: float | None = None
+        self._batch_first_attempt_clusters = 0
+        self._batch_first_attempt_passes = 0
+
+    @property
+    def batch_stats(self) -> dict[str, int | float | None]:
+        total = self._batch_first_attempt_clusters
+        return {
+            "first_attempt_clusters": total,
+            "first_attempt_passes": self._batch_first_attempt_passes,
+            "first_attempt_pass_rate": (
+                self._batch_first_attempt_passes / total if total else None
+            ),
+        }
 
     @property
     def rejection_stats(self) -> dict[str, object]:
@@ -765,6 +783,168 @@ class FlashcardPipeline:
         )
         return FlashcardCluster(cluster=str(uuid4()), concept=concept, cards=cards)
 
+    def _generate_positioned_batch(
+        self,
+        numbered: Sequence[tuple[int, ConceptPlan]],
+        identity: ModuleIdentity,
+        facts: Sequence[GraphFact],
+        prior_questions: Sequence[str],
+        existing: Sequence[FlashcardCluster] = (),
+        *,
+        first_attempt: bool = True,
+    ) -> list[tuple[int, FlashcardCluster]]:
+        """Generate a batch, salvaging valid clusters and splitting bad batches."""
+        if len(numbered) == 1:
+            position, concept = numbered[0]
+            previous = self._task_attempts.get("cluster", Counter())
+            before_attempts = previous.get("first_attempts", 0)
+            before_passes = previous.get("first_attempt_passes", 0)
+            if first_attempt:
+                self._batch_first_attempt_clusters += 1
+            try:
+                cluster = self._generate_cluster(
+                    position, concept, identity, facts, prior_questions, existing
+                )
+            finally:
+                if not first_attempt:
+                    counts = self._task_attempts.get("cluster", Counter())
+                    fallback_calls = counts["first_attempts"] - before_attempts
+                    counts["first_attempts"] -= fallback_calls
+                    counts["first_attempt_passes"] -= (
+                        counts["first_attempt_passes"] - before_passes
+                    )
+                    counts["retries"] += fallback_calls
+            if first_attempt:
+                self._batch_first_attempt_passes += (
+                    self._task_attempts["cluster"]["first_attempt_passes"] - before_passes
+                )
+            return [
+                (position, cluster)
+            ]
+
+        if first_attempt:
+            self._batch_first_attempt_clusters += len(numbered)
+        blocks = []
+        for position, concept in numbered:
+            fact_ids = set(concept.fact_ids)
+            blocks.append(
+                (
+                    position,
+                    concept,
+                    tuple(fact for fact in facts if fact.fact_id in fact_ids),
+                )
+            )
+        prompt = build_cluster_batch_prompt(blocks)
+        schema = build_cluster_batch_schema(
+            [(position, concept.assessment_approaches) for position, concept in numbered]
+        )
+        requested_tokens = self.config.cluster_max_tokens * len(numbered)
+        counts = self._task_attempts.setdefault("cluster_batch", Counter())
+        counts["first_attempts" if first_attempt else "retries"] += 1
+        self._attempt_count += 1
+        self._progress(
+            "Generating one batch for clusters "
+            + ", ".join(str(position) for position, _concept in numbered)
+        )
+        try:
+            try:
+                fitted = self._fitted_completion_budget(
+                    CLUSTER_SYSTEM, prompt, requested_tokens, "cluster_batch", requested_tokens
+                )
+            except ContextWindowExceededError:
+                counts["preflight_context_errors"] += 1
+                raise
+            if fitted < requested_tokens:
+                counts["preflight_context_errors"] += 1
+                raise ContextWindowExceededError(
+                    "cluster batch cannot reserve its full output budget; split the batch"
+                )
+            kwargs: dict[str, object] = {
+                "max_tokens": requested_tokens,
+                "schema": schema,
+            }
+            if getattr(self.backend, "supports_task_metrics", False):
+                kwargs["task"] = "cluster_batch"
+            raw = self.backend.complete(CLUSTER_SYSTEM, prompt, **kwargs)
+            value = json.loads(raw)
+            entries = value.get("clusters") if isinstance(value, dict) else None
+            if not isinstance(entries, list):
+                raise ValidationError("batch must contain a clusters array")
+            by_number: dict[int, object] = {}
+            repeated: set[int] = set()
+            expected = {position for position, _concept in numbered}
+            for entry in entries:
+                if not isinstance(entry, dict) or type(entry.get("number")) is not int:
+                    continue
+                number = entry["number"]
+                if number not in expected:
+                    continue
+                if number in by_number:
+                    repeated.add(number)
+                    continue
+                by_number[number] = entry.get("cards")
+            for number in repeated:
+                del by_number[number]
+        except (CompletionTruncatedError, ContextWindowExceededError, ValidationError, ValueError) as exc:
+            self._record_rejection((f"batch output unusable: {type(exc).__name__}",))
+            self._progress(
+                f"Batch of {len(numbered)} clusters failed structurally or ran out "
+                "of context; trying smaller calls."
+            )
+            middle = len(numbered) // 2
+            return self._generate_positioned_batch(
+                numbered[:middle], identity, facts, prior_questions, existing,
+                first_attempt=False,
+            ) + self._generate_positioned_batch(
+                numbered[middle:], identity, facts, prior_questions, existing,
+                first_attempt=False,
+            )
+
+        output: list[tuple[int, FlashcardCluster]] = []
+        batch_errors: list[str] = []
+        for position, concept in numbered:
+            try:
+                if position not in by_number:
+                    raise ValidationError(f"batch omitted or repeated cluster {position}")
+                cards = parse_cards(
+                    json.dumps({"cards": by_number[position]}, ensure_ascii=False)
+                )
+                errors = list(validate_cluster(cards, concept, facts))
+                errors.extend(self._duplicate_errors(cards, existing, prior_questions))
+                if errors:
+                    repaired = _repair_grounding_errors(cards, errors, facts)
+                    if repaired is not None and not validate_cluster(repaired, concept, facts):
+                        cards = repaired
+                        errors = []
+                if errors:
+                    raise ValidationError(errors)
+            except ValidationError as exc:
+                batch_errors.extend(exc.errors)
+                self._progress(
+                    f"Batch cluster {position} failed validation; retrying only "
+                    "that cluster."
+                )
+                output.extend(
+                    self._generate_positioned_batch(
+                        ((position, concept),), identity, facts, prior_questions,
+                        existing, first_attempt=False,
+                    )
+                )
+            else:
+                if first_attempt:
+                    self._batch_first_attempt_passes += 1
+                output.append(
+                    (
+                        position,
+                        FlashcardCluster(cluster=str(uuid4()), concept=concept, cards=cards),
+                    )
+                )
+        if batch_errors:
+            self._record_rejection(batch_errors)
+        elif first_attempt:
+            counts["first_attempt_passes"] += 1
+        return output
+
     def _generate_clusters_parallel(
         self,
         concepts: Sequence[ConceptPlan],
@@ -775,7 +955,12 @@ class FlashcardPipeline:
         fork = getattr(self.backend, "fork", None)
         if not callable(fork):
             raise GenerationError("parallel clusters require a forkable model backend")
-        count = min(self.config.cluster_workers, len(concepts))
+        numbered = list(enumerate(concepts, start=1))
+        groups = [
+            numbered[start : start + self.config.clusters_per_call]
+            for start in range(0, len(numbered), self.config.clusters_per_call)
+        ]
+        count = min(self.config.cluster_workers, len(groups))
         backends = [self.backend]
         progress_lock = threading.Lock()
         stop = threading.Event()
@@ -805,50 +990,50 @@ class FlashcardPipeline:
             )
             if count == 1:
                 clusters: list[FlashcardCluster] = []
-                for position, concept in enumerate(concepts, start=1):
-                    clusters.append(
-                        self._generate_cluster(
-                            position, concept, identity, facts, prior_questions, clusters
+                for group in groups:
+                    for position, cluster in self._generate_positioned_batch(
+                        group,
+                        identity, facts, prior_questions, clusters,
+                    ):
+                        clusters.append(cluster)
+                        self._progress(
+                            f"Completed cluster {position}/{len(concepts)}: "
+                            f"{cluster.concept.name}"
                         )
-                    )
-                    self._progress(
-                        f"Completed cluster {position}/{len(concepts)}: {concept.name}"
-                    )
                 return clusters
             workers = [
                 FlashcardPipeline(backend, self.config, progress=report)
                 for backend in backends
             ]
-            numbered = list(enumerate(concepts, start=1))
-
             def generate_assigned(
                 worker: FlashcardPipeline,
-                assigned: Sequence[tuple[int, ConceptPlan]],
+                assigned: Sequence[Sequence[tuple[int, ConceptPlan]]],
             ) -> list[tuple[int, FlashcardCluster]]:
                 nonlocal completed_count
                 generated = []
-                for position, concept in assigned:
+                for group in assigned:
                     if stop.is_set():
                         break
                     try:
-                        cluster = worker._generate_cluster(
-                            position, concept, identity, facts, prior_questions
+                        batch = worker._generate_positioned_batch(
+                            group, identity, facts, prior_questions,
                         )
                     except Exception:
                         stop.set()
                         raise
-                    generated.append((position, cluster))
-                    with progress_lock:
-                        completed_count += 1
-                        self._progress(
-                            f"Completed cluster {completed_count}/{len(concepts)}: "
-                            f"{concept.name}"
-                        )
+                    generated.extend(batch)
+                    for _position, cluster in batch:
+                        with progress_lock:
+                            completed_count += 1
+                            self._progress(
+                                f"Completed cluster {completed_count}/{len(concepts)}: "
+                                f"{cluster.concept.name}"
+                            )
                 return generated
 
             with ThreadPoolExecutor(max_workers=count) as executor:
                 futures = [
-                    executor.submit(generate_assigned, worker, numbered[index::count])
+                    executor.submit(generate_assigned, worker, groups[index::count])
                     for index, worker in enumerate(workers)
                 ]
                 results = [future.result() for future in futures]
@@ -857,6 +1042,8 @@ class FlashcardPipeline:
                 self._attempt_count += worker._attempt_count
                 self._rejected_attempt_count += worker._rejected_attempt_count
                 self._rejection_counts.update(worker._rejection_counts)
+                self._batch_first_attempt_clusters += worker._batch_first_attempt_clusters
+                self._batch_first_attempt_passes += worker._batch_first_attempt_passes
                 for task, counts in worker._task_attempts.items():
                     self._task_attempts.setdefault(task, Counter()).update(counts)
             ordered: list[FlashcardCluster | None] = [None] * len(concepts)
@@ -1224,6 +1411,8 @@ class FlashcardPipeline:
         self._rejection_counts.clear()
         self._task_attempts.clear()
         self.cluster_generation_seconds = None
+        self._batch_first_attempt_clusters = 0
+        self._batch_first_attempt_passes = 0
         facts = _exclude_non_assertive_facts(facts)
         eligible_plan_facts = _exclude_structural_facts(facts)
         plan_facts = _context_fitted_plan_facts(
@@ -1281,12 +1470,13 @@ class FlashcardPipeline:
             )
         else:
             clusters: list[FlashcardCluster] = []
-            for position, concept in enumerate(concepts, start=1):
-                clusters.append(
-                    self._generate_cluster(
-                        position, concept, identity, facts, prior_questions, clusters
-                    )
-                )
+            numbered = list(enumerate(concepts, start=1))
+            for start in range(0, len(numbered), self.config.clusters_per_call):
+                for _position, cluster in self._generate_positioned_batch(
+                    numbered[start : start + self.config.clusters_per_call],
+                    identity, facts, prior_questions, clusters,
+                ):
+                    clusters.append(cluster)
         cluster_elapsed = monotonic() - cluster_start
         self.cluster_generation_seconds = cluster_elapsed
         cluster_rate = (

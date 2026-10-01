@@ -419,6 +419,36 @@ def _cluster_payload(
     }
 
 
+def build_cluster_batch_prompt(
+    numbered_concepts: Sequence[tuple[int, ConceptPlan, Sequence[GraphFact]]],
+) -> str:
+    """Request several independent five-card clusters in one model response."""
+    payload = {
+        "concepts": [
+            {
+                "number": number,
+                "topic": concept.name,
+                "assessment_approaches": list(concept.assessment_approaches),
+                "facts": [fact.statement for fact in concept_facts],
+            }
+            for number, concept, concept_facts in numbered_concepts
+        ]
+    }
+    return f"""Generate one independent five-card cluster for each numbered
+concept below. Return one JSON object with a clusters array of exactly
+{len(numbered_concepts)} entries. Each entry has its input number and exactly
+five cards. Do not mix facts or assessment approaches between concepts.
+
+CRITICAL REMINDER
+- Each cluster has at least one multiple-choice, identification, and true-false card.
+- Each card must be grounded in its own concept's facts and use a matching approach.
+- Keep five meaningfully distinct questions per cluster; no one-word rewrites.
+- Follow the per-type schema and preserve expalanation spelling.
+
+INPUT JSON:
+{_json(payload)}"""
+
+
 MAX_RETRY_ERROR_COUNT = 12
 MAX_RETRY_ERROR_CHARS = 220
 MAX_RETRY_CANDIDATE_CHARS = 6000

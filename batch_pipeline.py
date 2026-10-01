@@ -100,6 +100,7 @@ _SHARED_CONFIGURATION = (
     ("--n-gpu-layers", "n_gpu_layers"),
     ("--seed", "seed"),
     ("--cluster-workers", "cluster_workers"),
+    ("--clusters-per-call", "clusters_per_call"),
     ("--kg-device", "kg_device"),
     ("--kg-batch-size", "kg_batch_size"),
     ("--kg-num-beams", "kg_num_beams"),
@@ -141,6 +142,9 @@ def _manifest_settings(args: argparse.Namespace) -> dict[str, object]:
     workers = getattr(args, "cluster_workers", "auto")
     if workers != 1:
         settings["cluster_workers"] = workers
+    batch_size = getattr(args, "clusters_per_call", 1)
+    if batch_size != 1:
+        settings["clusters_per_call"] = batch_size
     return settings
 
 

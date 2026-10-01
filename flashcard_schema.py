@@ -173,6 +173,37 @@ def build_numbered_card_repair_schema(
     )
 
 
+def build_cluster_batch_schema(
+    numbered_approaches: Sequence[tuple[int, Sequence[str]]],
+) -> dict[str, object]:
+    """Constrain batched output to numbered, independently shaped clusters."""
+    if not numbered_approaches:
+        raise ValueError("batch needs at least one concept")
+    variants = []
+    for number, approaches in numbered_approaches:
+        cards = build_card_cluster_schema(approaches)["properties"]["cards"]
+        variants.append(
+            _strict_object(
+                {
+                    "number": {"type": "integer", "enum": [number]},
+                    "cards": cards,
+                },
+                ("number", "cards"),
+            )
+        )
+    return _strict_object(
+        {
+            "clusters": {
+                "type": "array",
+                "items": {"oneOf": variants},
+                "minItems": len(numbered_approaches),
+                "maxItems": len(numbered_approaches),
+            }
+        },
+        ("clusters",),
+    )
+
+
 def build_review_schema(known_clusters: Sequence[str]) -> dict[str, object]:
     issue = _strict_object(
         {

@@ -1,5 +1,6 @@
 from flashcard_schema import (
     build_card_cluster_schema,
+    build_cluster_batch_schema,
     build_numbered_card_repair_schema,
     build_single_card_schema,
 )
@@ -42,3 +43,18 @@ def test_numbered_repair_schema_requests_only_flagged_positions():
     assert cards["minItems"] == cards["maxItems"] == 2
     assert cards["items"]["properties"]["card_number"]["enum"] == [2, 4]
     assert len(cards["items"]["properties"]["card"]["oneOf"]) == 3
+
+
+def test_batch_schema_preserves_five_cards_and_concept_numbers():
+    schema = build_cluster_batch_schema(((1, ("recall",)), (2, ("application",))))
+    clusters = schema["properties"]["clusters"]
+
+    assert clusters["minItems"] == clusters["maxItems"] == 2
+    variants = clusters["items"]["oneOf"]
+    assert [item["properties"]["number"]["enum"] for item in variants] == [[1], [2]]
+    assert all(
+        item["properties"]["cards"]["minItems"]
+        == item["properties"]["cards"]["maxItems"] == 5
+        for item in variants
+    )
+    assert variants[0]["properties"]["cards"]["items"]["oneOf"][0]["properties"]["assessment_approach"]["enum"] == ["recall"]

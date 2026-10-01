@@ -76,6 +76,19 @@ def _merge_task_counts(
         target.setdefault(task, Counter()).update(counts)
 
 
+def summarize_cluster_passes(
+    module_results: Sequence[dict[str, object]],
+) -> dict[str, int | float | None]:
+    """Aggregate per-concept acceptance, independent of batch call size."""
+    total = sum(int(item["batch_stats"]["first_attempt_clusters"]) for item in module_results)
+    passes = sum(int(item["batch_stats"]["first_attempt_passes"]) for item in module_results)
+    return {
+        "first_attempt_clusters": total,
+        "first_attempt_passes": passes,
+        "first_attempt_cluster_pass_rate": passes / total if total else None,
+    }
+
+
 def benchmark(
     cases: Sequence[BenchmarkCase],
     *,
@@ -84,6 +97,7 @@ def benchmark(
     n_ctx: int = DEFAULT_N_CTX,
     n_gpu_layers: int = -1,
     workers: int | str = 1,
+    clusters_per_call: int = 1,
     max_retries: int = 3,
     final_review: bool = True,
     hard_no_think: bool = False,
@@ -137,6 +151,7 @@ def benchmark(
                     max_retries=max_retries,
                     final_review=final_review,
                     cluster_workers=actual_workers,
+                    clusters_per_call=clusters_per_call,
                 ),
                 progress=report_progress,
             )
@@ -199,6 +214,7 @@ def benchmark(
                     "cluster_generation_seconds": pipeline.cluster_generation_seconds,
                     "selected_workers": actual_workers,
                     "actual_workers": getattr(pipeline, "_actual_cluster_workers", None),
+                    "batch_stats": pipeline.batch_stats,
                 }
             )
 
@@ -217,6 +233,7 @@ def benchmark(
             "n_ctx": n_ctx,
             "n_gpu_layers": n_gpu_layers,
             "workers": workers,
+            "clusters_per_call": clusters_per_call,
             "max_retries": max_retries,
             "final_review": final_review,
             "hard_no_think": hard_no_think,
@@ -229,6 +246,7 @@ def benchmark(
         "cluster_generation_per_minute": (
             60 * valid_total / sum(cluster_times) if cluster_times else None
         ),
+        **summarize_cluster_passes(module_results),
         "metrics": summarize_metrics(events, task_counts),
     }
 
@@ -243,6 +261,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--n-ctx", type=int, default=DEFAULT_N_CTX)
     parser.add_argument("--n-gpu-layers", type=int, default=-1)
     parser.add_argument("--workers", type=parse_cluster_workers, default=1)
+    parser.add_argument("--clusters-per-call", type=int, choices=(1, 2, 5), default=1)
     parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--skip-final-review", action="store_true")
     parser.add_argument("--hard-no-think", action="store_true")
@@ -264,6 +283,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         n_ctx=args.n_ctx,
         n_gpu_layers=args.n_gpu_layers,
         workers=args.workers,
+        clusters_per_call=args.clusters_per_call,
         max_retries=args.max_retries,
         final_review=not args.skip_final_review,
         hard_no_think=args.hard_no_think,

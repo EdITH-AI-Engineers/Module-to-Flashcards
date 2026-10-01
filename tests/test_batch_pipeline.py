@@ -1,5 +1,6 @@
 from collections import Counter
 from contextlib import contextmanager
+import json
 import time
 
 import pytest
@@ -637,6 +638,10 @@ def _legacy_item(tmp_path):
     )
     item.args.cluster_workers = 1
     batch_pipeline._write_manifest(item)
+    manifest_path = item.paths.workspace / "batch_reuse_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("output_format")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     item.args.cluster_workers = "auto"
     return item
 
@@ -674,6 +679,33 @@ def test_batch_changed_source_does_not_migrate_legacy_output(tmp_path):
 def test_corrupt_legacy_output_regenerates(tmp_path):
     item = _legacy_item(tmp_path)
     item.paths.flashcards.write_text("bad old data", encoding="utf-8")
+    counters = Counter()
+
+    result = run_batch((item,), dependencies=counting_dependencies(counters))
+
+    assert result.outputs == item.paths.flashcard_parts
+    assert counters["qwen_load"] == 1
+
+
+def test_retained_legacy_backup_never_replaces_newer_batch_pair(tmp_path):
+    item = _legacy_item(tmp_path)
+    assert run_batch((item,), dependencies=fake_dependencies([], None, None)).outputs
+    item.args.input.write_text(
+        item.args.input.read_text(encoding="utf-8") + "\n", encoding="utf-8"
+    )
+    assert run_batch((item,), dependencies=counting_dependencies(Counter())).outputs
+    item.paths.flashcard_parts[1].unlink()
+    counters = Counter()
+
+    result = run_batch((item,), dependencies=counting_dependencies(counters))
+
+    assert result.outputs == item.paths.flashcard_parts
+    assert counters["qwen_load"] == 1
+
+
+def test_explicit_worker_change_prevents_legacy_migration(tmp_path):
+    item = _legacy_item(tmp_path)
+    item.args.cluster_workers = 12
     counters = Counter()
 
     result = run_batch((item,), dependencies=counting_dependencies(counters))

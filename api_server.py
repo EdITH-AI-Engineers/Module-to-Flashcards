@@ -548,6 +548,7 @@ async def process_files(
                                 filename,
                                 args,
                                 paths,
+                                request_index=index,
                             )
                             items.append(item)
                             item_indexes[filename] = index
@@ -571,7 +572,11 @@ async def process_files(
 
                     try:
                         def report_progress(event: BatchProgressEvent) -> None:
-                            index = item_indexes.get(event.filename)
+                            index = (
+                                event.request_index
+                                if event.request_index is not None
+                                else item_indexes.get(event.filename)
+                            )
                             if index is not None:
                                 _PIPELINE_STATUS.apply_event(
                                     request_id,
@@ -586,12 +591,17 @@ async def process_files(
                         )
                     except (OSError, ValueError, RuntimeError) as exc:
                         for item in items:
-                            record_error(item_indexes[item.filename], item.filename, exc)
+                            record_error(item.request_index, item.filename, exc)
                     else:
                         for error in batch_result.errors:
-                            filename = error["file"]
+                            filename = str(error["file"])
+                            error_index = error.get("uploadIndex")
                             record_error(
-                                item_indexes.get(filename, len(files)),
+                                (
+                                    error_index
+                                    if isinstance(error_index, int)
+                                    else item_indexes.get(filename, len(files))
+                                ),
                                 filename,
                                 error["error"],
                             )
@@ -603,7 +613,7 @@ async def process_files(
                             if all(path in outputs for path in item_outputs):
                                 _PIPELINE_STATUS.update(
                                     request_id,
-                                    item_indexes[item.filename],
+                                    item.request_index,
                                     state="completed",
                                     stage="complete",
                                     progress_percent=100,

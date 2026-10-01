@@ -299,6 +299,78 @@ def test_process_files_saves_all_uploads_then_runs_one_batch(monkeypatch, tmp_pa
     assert all(upload.closed for upload in uploads)
 
 
+def test_duplicate_upload_names_get_distinct_completed_status(monkeypatch, tmp_path):
+    uploads = [FakeUpload("same.txt"), FakeUpload("same.txt")]
+    saved = iter((1, 2))
+
+    async def fake_save(upload, course_code):
+        number = next(saved)
+        path = tmp_path / f"staged-{number}.txt"
+        path.write_text(f"module {number}", encoding="utf-8")
+        return path
+
+    def module_number(source, course_code):
+        return Path(source).stem.rsplit("-", 1)[-1]
+
+    def fake_batch(items, **kwargs):
+        return BatchResult(
+            outputs=tuple(path for item in items for path in item.paths.flashcard_parts),
+            errors=(),
+        )
+
+    monkeypatch.setattr(api_server, "save_upload", fake_save)
+    monkeypatch.setattr(api_server, "structured_module_number", module_number)
+    monkeypatch.setattr(api_server, "run_batch", fake_batch)
+
+    response = asyncio.run(api_server.process_files("CPE", uploads))
+
+    assert len(response["outputs"]) == 4
+    modules = api_server.pipeline_status(Response())["modules"]
+    assert [module["moduleNumber"] for module in modules] == ["1", "2"]
+    assert all(len(module["outputs"]) == 2 for module in modules)
+    assert all(module["output"] == module["outputs"][0] for module in modules)
+
+
+def test_duplicate_upload_name_failure_targets_its_own_status(monkeypatch, tmp_path):
+    uploads = [FakeUpload("same.txt"), FakeUpload("same.txt")]
+    saved = iter((1, 2))
+
+    async def fake_save(upload, course_code):
+        number = next(saved)
+        path = tmp_path / f"staged-{number}.txt"
+        path.write_text(f"module {number}", encoding="utf-8")
+        return path
+
+    monkeypatch.setattr(api_server, "save_upload", fake_save)
+    monkeypatch.setattr(
+        api_server,
+        "structured_module_number",
+        lambda source, course_code: Path(source).stem.rsplit("-", 1)[-1],
+    )
+
+    def fake_batch(items, **kwargs):
+        return BatchResult(
+            outputs=items[1].paths.flashcard_parts,
+            errors=(
+                {
+                    "file": items[0].filename,
+                    "error": "first upload failed",
+                    "uploadIndex": items[0].request_index,
+                },
+            ),
+        )
+
+    monkeypatch.setattr(api_server, "run_batch", fake_batch)
+
+    response = asyncio.run(api_server.process_files("CPE", uploads))
+    modules = api_server.pipeline_status(Response())["modules"]
+
+    assert response["errors"] == [{"file": "same.txt", "error": "first upload failed"}]
+    assert [module["state"] for module in modules] == ["failed", "completed"]
+    assert modules[0]["outputs"] == []
+    assert len(modules[1]["outputs"]) == 2
+
+
 def test_save_failure_does_not_prevent_other_files_from_batching(monkeypatch, tmp_path):
     uploads = [FakeUpload("bad.txt"), FakeUpload("good.txt")]
     captured = []

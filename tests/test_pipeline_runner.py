@@ -286,6 +286,13 @@ def test_run_reuses_all_valid_artifacts_without_subprocesses(tmp_path):
     )
     for stage in ("knowledge-graph", "flashcards"):
         materialize(stage, paths)
+    pipeline.stage_structured_module(
+        args.input, paths.structured_text,
+        course_code=args.course_code, module_number=args.module_number,
+    )
+    pipeline._write_pipeline_manifest(
+        paths, pipeline._pipeline_manifest_contents(args, args.input)
+    )
 
     result = pipeline.run(
         args,
@@ -341,11 +348,84 @@ def test_legacy_migration_rejects_changed_source(tmp_path):
     calls = []
 
     def runner(command, **kwargs):
+        stage = Path(command[1]).name
+        calls.append(stage)
+        materialize("knowledge-graph" if stage == "text-extractor.py" else "flashcards", paths)
+        return subprocess.CompletedProcess(command, 0)
+
+    pipeline.run(args, command_runner=runner)
+
+    assert calls == ["text-extractor.py", "main.py"]
+
+
+@pytest.mark.parametrize("change", ["source", "seed"])
+def test_changed_source_or_settings_recomputes_existing_pair(tmp_path, change):
+    args = make_args(tmp_path)
+    paths = pipeline.pipeline_paths(
+        args.input, args.output_root, args.course_code, args.module_number
+    )
+    materialize("knowledge-graph", paths)
+    materialize("flashcards", paths)
+    pipeline.stage_structured_module(
+        args.input, paths.structured_text,
+        course_code=args.course_code, module_number=args.module_number,
+    )
+    pipeline._write_pipeline_manifest(
+        paths, pipeline._pipeline_manifest_contents(args, args.input)
+    )
+    pipeline.run(args, command_runner=lambda *a, **k: pytest.fail("initial artifacts must reuse"))
+    if change == "source":
+        args.input.write_text(args.input.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    else:
+        args.seed = 99
+    calls = []
+
+    def runner(command, **kwargs):
+        stage = Path(command[1]).name
+        calls.append(stage)
+        materialize("knowledge-graph" if stage == "text-extractor.py" else "flashcards", paths)
+        return subprocess.CompletedProcess(command, 0)
+
+    pipeline.run(args, command_runner=runner)
+
+    assert calls == ["text-extractor.py", "main.py"]
+
+
+def test_retained_legacy_backup_never_replaces_newer_subprocess_pair(tmp_path):
+    args = make_args(tmp_path)
+    paths = pipeline.pipeline_paths(
+        args.input, args.output_root, args.course_code, args.module_number
+    )
+    pipeline.stage_structured_module(
+        args.input, paths.structured_text,
+        course_code=args.course_code, module_number=args.module_number,
+    )
+    materialize("knowledge-graph", paths)
+    materialize("flashcards", paths)
+    for path in (*paths.flashcard_parts, paths.flashcard_receipt):
+        path.unlink()
+    paths.flashcards.write_text(
+        render_module(ModuleIdentity("CPE0021", "01"), valid_clusters()),
+        encoding="utf-8-sig",
+    )
+    pipeline.run(args, command_runner=lambda *a, **k: pytest.fail("convert A"))
+    args.input.write_text(args.input.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+    def runner(command, **kwargs):
+        stage = Path(command[1]).name
+        materialize("knowledge-graph" if stage == "text-extractor.py" else "flashcards", paths)
+        return subprocess.CompletedProcess(command, 0)
+
+    pipeline.run(args, command_runner=runner)
+    paths.flashcard_parts[1].unlink()
+    calls = []
+
+    def rerun(command, **kwargs):
         calls.append(Path(command[1]).name)
         materialize("flashcards", paths)
         return subprocess.CompletedProcess(command, 0)
 
-    pipeline.run(args, command_runner=runner)
+    pipeline.run(args, command_runner=rerun)
 
     assert calls == ["main.py"]
 

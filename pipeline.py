@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -34,6 +36,7 @@ from structured_module import (
 
 PROJECT_DIR = Path(__file__).resolve().parent
 _BATCH_REUSE_MANIFEST_NAME = "batch_reuse_manifest.json"
+_PIPELINE_REUSE_MANIFEST_NAME = "pipeline_reuse_manifest.json"
 
 
 class PipelineRunError(RuntimeError):
@@ -352,6 +355,62 @@ def _valid_flashcards(
     )
 
 
+def _pipeline_manifest_contents(args: argparse.Namespace, source: Path) -> dict[str, object]:
+    return {
+        "output_format": "split-csv-v1",
+        "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "course_code": str(args.course_code),
+        "module_number": str(args.module_number),
+        "settings": {
+            "model_dir": str(Path(args.model_dir).resolve()),
+            "attempts": args.attempts,
+            "seed": args.seed,
+            "n_gpu_layers": args.n_gpu_layers,
+            "n_ctx": args.n_ctx,
+            "cluster_workers": args.cluster_workers,
+            "kg_device": args.kg_device,
+            "kg_batch_size": args.kg_batch_size,
+            "kg_num_beams": args.kg_num_beams,
+            "skip_final_review": args.skip_final_review,
+        },
+    }
+
+
+def _pipeline_manifest_path(paths: PipelinePaths) -> Path:
+    return paths.workspace / _PIPELINE_REUSE_MANIFEST_NAME
+
+
+def _pipeline_manifest_matches(
+    paths: PipelinePaths, identity: dict[str, object]
+) -> bool:
+    try:
+        return json.loads(_pipeline_manifest_path(paths).read_text(encoding="utf-8")) == identity
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _write_pipeline_manifest(
+    paths: PipelinePaths, identity: dict[str, object]
+) -> None:
+    path = _pipeline_manifest_path(paths)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", delete=False, dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp",
+        ) as handle:
+            temporary_path = Path(handle.name)
+            json.dump(identity, handle, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+        temporary_path.replace(path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
 def _invalidate_artifacts(paths: Sequence[Path]) -> None:
     for path in paths:
         try:
@@ -366,6 +425,7 @@ def _invalidate_artifacts(paths: Sequence[Path]) -> None:
 
 def _invalidate_downstream_for_stage(stage_name: str, paths: PipelinePaths) -> None:
     manifest = paths.workspace / _BATCH_REUSE_MANIFEST_NAME
+    pipeline_manifest = _pipeline_manifest_path(paths)
     if stage_name == "knowledge-graph":
         _invalidate_artifacts(
             (
@@ -376,10 +436,13 @@ def _invalidate_downstream_for_stage(stage_name: str, paths: PipelinePaths) -> N
                 *paths.flashcard_parts,
                 paths.flashcard_receipt,
                 manifest,
+                pipeline_manifest,
             )
         )
     elif stage_name == "flashcards":
-        _invalidate_artifacts((*paths.flashcard_parts, paths.flashcard_receipt, manifest))
+        _invalidate_artifacts(
+            (*paths.flashcard_parts, paths.flashcard_receipt, manifest, pipeline_manifest)
+        )
 
 
 def run(
@@ -411,6 +474,9 @@ def run(
         args.course_code,
         args.module_number,
     )
+    current_identity = _pipeline_manifest_contents(args, source)
+    manifest_exists = _pipeline_manifest_path(paths).is_file()
+    reusable_identity = _pipeline_manifest_matches(paths, current_identity)
     try:
         unchanged_staged_source = (
             paths.structured_text.read_bytes() == source.read_bytes()
@@ -427,14 +493,18 @@ def run(
     commands = build_stage_commands(args, paths)
     if (
         not args.force
+        and not manifest_exists
         and unchanged_staged_source
         and _valid_checked_graph(paths.graph_json)
         and not _valid_flashcards(paths.flashcards, args.module_number, args.course_code)
     ):
-        migrate_legacy_module(
+        migrated = migrate_legacy_module(
             paths.flashcards,
             ModuleIdentity(args.course_code, args.module_number),
         )
+        if migrated is not None:
+            _write_pipeline_manifest(paths, current_identity)
+            reusable_identity = True
     validators = {
         "knowledge-graph": lambda path: (
             _valid_checked_graph(paths.graph_json) or _valid_graph(path)
@@ -449,7 +519,7 @@ def run(
         if effective_timeout is not None
         else None
     )
-    upstream_recomputed = False
+    upstream_recomputed = args.force or not reusable_identity
     for stage in commands:
         is_valid = validators[stage.name](stage.expected_output)
         if not args.force and not upstream_recomputed and is_valid:
@@ -486,6 +556,7 @@ def run(
             )
         upstream_recomputed = True
 
+    _write_pipeline_manifest(paths, current_identity)
     return paths
 
 

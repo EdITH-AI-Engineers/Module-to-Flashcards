@@ -40,12 +40,13 @@ class BatchItem:
     filename: str
     args: argparse.Namespace
     paths: PipelinePaths
+    request_index: int | None = None
 
 
 @dataclass(frozen=True)
 class BatchResult:
     outputs: tuple[Path, ...]
-    errors: tuple[dict[str, str], ...]
+    errors: tuple[dict[str, object], ...]
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,7 @@ class BatchProgressEvent:
     progress_percent: int
     message: str
     error: str | None = None
+    request_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -144,6 +146,7 @@ def _manifest_settings(args: argparse.Namespace) -> dict[str, object]:
 
 def _manifest_contents(item: BatchItem) -> dict[str, object]:
     return {
+        "output_format": "split-csv-v1",
         "source_sha256": _source_sha256(item.args.input),
         "course_code": str(item.args.course_code),
         "module_number": str(item.args.module_number),
@@ -165,14 +168,18 @@ def _legacy_manifest_matches(item: BatchItem) -> bool:
     try:
         manifest = json.loads(_manifest_path(item).read_text(encoding="utf-8"))
         current = _manifest_contents(item)
-        if not isinstance(manifest, dict):
+        if not isinstance(manifest, dict) or "output_format" in manifest:
             return False
         old_settings = dict(manifest.get("settings", {}))
         new_settings = dict(current["settings"])
-        old_settings.pop("cluster_workers", None)
-        new_settings.pop("cluster_workers", None)
+        old_workers = old_settings.pop("cluster_workers", 1)
+        new_workers = new_settings.pop("cluster_workers", 1)
+        worker_policy_matches = (
+            old_workers == 1 if new_workers == "auto" else old_workers == new_workers
+        )
         return (
-            manifest.get("source_sha256") == current["source_sha256"]
+            worker_policy_matches
+            and manifest.get("source_sha256") == current["source_sha256"]
             and manifest.get("course_code") == current["course_code"]
             and manifest.get("module_number") == current["module_number"]
             and old_settings == new_settings
@@ -419,6 +426,7 @@ def _notify_progress(
                 progress_percent=state.progress_percent,
                 message=message,
                 error=error,
+                request_index=state.item.request_index,
             )
         )
     except Exception:
@@ -644,7 +652,14 @@ def _result(states: Sequence[_BatchState]) -> BatchResult:
         for path in state.item.paths.flashcard_parts
     )
     errors = tuple(
-        {"file": state.item.filename, "error": state.error}
+        {
+            "file": state.item.filename,
+            "error": state.error,
+            **(
+                {"uploadIndex": state.item.request_index}
+                if state.item.request_index is not None else {}
+            ),
+        }
         for state in states
         if state.error is not None
     )

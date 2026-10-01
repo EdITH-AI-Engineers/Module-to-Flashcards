@@ -78,8 +78,8 @@ class PipelineConfig:
     def __post_init__(self) -> None:
         if self.max_retries < 1:
             raise ValueError("max_retries must be at least 1")
-        if not 1 <= self.cluster_workers <= 5:
-            raise ValueError("cluster_workers must be between 1 and 5")
+        if not 1 <= self.cluster_workers <= CLUSTERS_PER_MODULE:
+            raise ValueError("cluster_workers must be between 1 and 20")
 
 
 Parsed = TypeVar("Parsed")

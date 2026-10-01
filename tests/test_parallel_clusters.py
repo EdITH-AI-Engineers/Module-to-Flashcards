@@ -69,11 +69,12 @@ def test_five_clusters_run_concurrently_and_return_in_plan_order():
     assert pipeline.rejection_stats["attempts"] == 21
 
 
-def test_cluster_worker_count_must_be_between_one_and_five():
+def test_cluster_worker_count_must_be_between_one_and_twenty():
     with pytest.raises(ValueError, match="cluster_workers"):
         PipelineConfig(cluster_workers=0)
+    PipelineConfig(cluster_workers=6)
     with pytest.raises(ValueError, match="cluster_workers"):
-        PipelineConfig(cluster_workers=6)
+        PipelineConfig(cluster_workers=21)
 
 
 def test_parallel_progress_reports_completed_count():

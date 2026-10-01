@@ -134,7 +134,7 @@ def _manifest_settings(args: argparse.Namespace) -> dict[str, object]:
         "graph_model": DEFAULT_MODEL,
         "graph_checker": "qwen-conservative-v1",
     }
-    workers = getattr(args, "cluster_workers", 1)
+    workers = getattr(args, "cluster_workers", "auto")
     if workers != 1:
         settings["cluster_workers"] = workers
     return settings
@@ -253,7 +253,11 @@ def _qwen_loader(args: argparse.Namespace):
         model_path,
         n_ctx=args.n_ctx,
         n_gpu_layers=args.n_gpu_layers,
-        n_threads=thread_budget_for_workers(getattr(args, "cluster_workers", 1)),
+        n_threads=(
+            thread_budget_for_workers(args.cluster_workers)
+            if isinstance(args.cluster_workers, int)
+            else None
+        ),
         seed=args.seed,
     )
     try:

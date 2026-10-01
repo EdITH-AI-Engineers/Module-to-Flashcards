@@ -17,6 +17,7 @@ from flashcard_types import ModuleIdentity
 from graph_input import GraphInputError, extract_graph_facts, load_graph
 from knowledge_graph_checker import is_checked_graph
 from local_qwen import DEFAULT_N_CTX
+from worker_budget import parse_cluster_workers
 from structured_module import (
     graph_ready_text,
     parse_module_metadata,
@@ -120,10 +121,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--n-ctx", type=int, default=DEFAULT_N_CTX)
     parser.add_argument(
         "--cluster-workers",
-        type=int,
-        choices=range(1, 6),
-        default=1,
-        help="parallel Qwen model instances for cluster generation (default: 1)",
+        type=parse_cluster_workers,
+        default="auto",
+        help="parallel Qwen contexts: auto GPU-memory budget or 1–20 (default: auto)",
     )
     parser.add_argument(
         "--timeout",

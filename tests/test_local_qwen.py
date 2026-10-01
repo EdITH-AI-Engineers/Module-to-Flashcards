@@ -242,3 +242,52 @@ def test_parallel_model_contexts_share_the_available_cpu_threads(monkeypatch, tm
     assert calls[0]["n_threads"] == 3
     assert calls[1]["n_threads"] == 3
     assert thread_budget_for_workers(1) is None
+
+
+def test_full_gpu_load_measures_context_and_selects_more_than_five(monkeypatch, tmp_path):
+    gib = 1024**3
+    readings = iter(((20 * gib, 24 * gib), (18 * gib, 24 * gib)))
+    calls = []
+
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+    fake_cuda = SimpleNamespace(
+        is_available=lambda: True,
+        mem_get_info=lambda device: next(readings),
+    )
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=fake_cuda))
+    monkeypatch.setitem(
+        sys.modules, "llama_cpp",
+        SimpleNamespace(Llama=FakeLlama, llama_supports_gpu_offload=lambda: True),
+    )
+
+    backend = LocalQwenBackend(tmp_path / "model.gguf")
+
+    assert backend.auto_cluster_workers == 7
+    assert "VRAM" in backend.auto_cluster_workers_reason
+    assert "n_threads" not in calls[0]
+
+
+def test_auto_workers_without_cuda_uses_one_and_does_not_probe_vram(
+    monkeypatch, tmp_path
+):
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            pass
+
+    fake_cuda = SimpleNamespace(
+        is_available=lambda: False,
+        mem_get_info=lambda device: pytest.fail("CPU run must not probe VRAM"),
+    )
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=fake_cuda))
+    monkeypatch.setitem(
+        sys.modules, "llama_cpp",
+        SimpleNamespace(Llama=FakeLlama, llama_supports_gpu_offload=lambda: True),
+    )
+
+    backend = LocalQwenBackend(tmp_path / "model.gguf")
+
+    assert backend.auto_cluster_workers == 1
+    assert "GPU" in backend.auto_cluster_workers_reason

@@ -23,6 +23,7 @@ from local_qwen import (
     ensure_model,
     thread_budget_for_workers,
 )
+from worker_budget import parse_cluster_workers
 from knowledge_graph_checker import (
     KnowledgeGraphCheckError,
     check_knowledge_graph,
@@ -144,10 +145,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--cluster-workers",
-        type=int,
-        choices=range(1, 6),
-        default=1,
-        help="parallel Qwen model instances for cluster generation (default: 1)",
+        type=parse_cluster_workers,
+        default="auto",
+        help="parallel Qwen contexts: auto GPU-memory budget or 1–20 (default: auto)",
     )
     parser.add_argument(
         "--skip-final-review",
@@ -185,11 +185,16 @@ def run(
     if backend is None:
         try:
             model_path = ensure_model(args.model_dir)
+            setting = getattr(args, "cluster_workers", "auto")
             backend = LocalQwenBackend(
                 model_path,
                 n_ctx=args.n_ctx,
                 n_gpu_layers=args.n_gpu_layers,
-                n_threads=thread_budget_for_workers(getattr(args, "cluster_workers", 1)),
+                n_threads=(
+                    thread_budget_for_workers(setting)
+                    if isinstance(setting, int)
+                    else None
+                ),
                 seed=args.seed,
             )
         except Exception as exc:
@@ -260,12 +265,30 @@ def run(
         file=sys.stderr,
         flush=True,
     )
+    setting = getattr(args, "cluster_workers", "auto")
+    selected_workers = (
+        getattr(backend, "auto_cluster_workers", 1)
+        if setting == "auto"
+        else setting
+    )
+    selection_reason = (
+        getattr(
+            backend,
+            "auto_cluster_workers_reason",
+            "GPU measurement unavailable for injected backend; using one worker",
+        )
+        if setting == "auto"
+        else f"manual setting selected {selected_workers} cluster workers"
+    )
+    (progress or (lambda message: print(message, file=sys.stderr, flush=True)))(
+        f"Selected cluster workers: {selected_workers} ({selection_reason})"
+    )
     pipeline = FlashcardPipeline(
         backend,
         PipelineConfig(
             max_retries=args.max_retries,
             final_review=args.final_review,
-            cluster_workers=getattr(args, "cluster_workers", 1),
+            cluster_workers=selected_workers,
         ),
         progress=progress
         or (lambda message: print(message, file=sys.stderr, flush=True)),

@@ -387,12 +387,16 @@ def publish_module_upload(
 
 
 def pipeline_args(source: Path, course_code: str, module_number: str) -> Namespace:
+    from worker_budget import parse_cluster_workers
+
     try:
-        cluster_workers = int(os.environ.get("MODULE_FLASHCARDS_CLUSTER_WORKERS", "1"))
+        cluster_workers = parse_cluster_workers(
+            os.environ.get("MODULE_FLASHCARDS_CLUSTER_WORKERS", "auto")
+        )
     except ValueError as exc:
-        raise ValueError("MODULE_FLASHCARDS_CLUSTER_WORKERS must be 1 to 5") from exc
-    if not 1 <= cluster_workers <= 5:
-        raise ValueError("MODULE_FLASHCARDS_CLUSTER_WORKERS must be 1 to 5")
+        raise ValueError(
+            "MODULE_FLASHCARDS_CLUSTER_WORKERS must be 'auto' or 1 to 20"
+        ) from exc
     return Namespace(
         input=source,
         course_code=course_code,

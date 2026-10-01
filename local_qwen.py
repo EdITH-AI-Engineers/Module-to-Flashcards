@@ -7,6 +7,7 @@ from typing import Any, Mapping
 from huggingface_hub import hf_hub_download
 
 from flashcard_types import CompletionTruncatedError, ContextWindowExceededError
+from worker_budget import choose_cluster_workers
 
 
 MODEL_REPO = "Qwen/Qwen3-8B-GGUF"
@@ -65,6 +66,29 @@ class LocalQwenBackend:
         self._n_ctx = n_ctx
         self._n_gpu_layers = n_gpu_layers
         self._n_threads = n_threads
+        memory_reader = None
+        if n_gpu_layers == -1:
+            try:
+                from llama_cpp import llama_supports_gpu_offload
+
+                if llama_supports_gpu_offload():
+                    import torch
+
+                    if torch.cuda.is_available():
+                        memory_reader = lambda: torch.cuda.mem_get_info(0)
+            except (ImportError, AttributeError, RuntimeError):
+                pass
+
+        def read_memory() -> tuple[int, int] | None:
+            if memory_reader is None:
+                return None
+            try:
+                free, total = memory_reader()
+                return int(free), int(total)
+            except (RuntimeError, OSError, ValueError, TypeError):
+                return None
+
+        before = read_memory()
         llama_kwargs = dict(
             model_path=str(model_path),
             n_ctx=n_ctx,
@@ -75,6 +99,18 @@ class LocalQwenBackend:
         if n_threads is not None:
             llama_kwargs["n_threads"] = n_threads
         self._llm = Llama(**llama_kwargs)
+        after = read_memory()
+        (
+            self.auto_cluster_workers,
+            self.auto_cluster_workers_reason,
+        ) = choose_cluster_workers(
+            "auto", full_gpu=memory_reader is not None, before=before, after=after
+        )
+        self._fork_n_threads = (
+            n_threads
+            if n_threads is not None
+            else thread_budget_for_workers(self.auto_cluster_workers)
+        )
         self._temperature = temperature
         self._seed = seed
         self._completion_index = 0
@@ -88,7 +124,7 @@ class LocalQwenBackend:
             self._model_path,
             n_ctx=self._n_ctx,
             n_gpu_layers=self._n_gpu_layers,
-            n_threads=self._n_threads,
+            n_threads=self._fork_n_threads,
             temperature=self._temperature,
             seed=self._seed + 100_000 * worker_index,
         )

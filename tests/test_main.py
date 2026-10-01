@@ -74,11 +74,16 @@ def test_run_writes_pipeline_result(tmp_path, monkeypatch, valid_clusters):
     )
     output_path = tmp_path / "cards.txt"
     monkeypatch.setattr(main, "ensure_model", lambda path: tmp_path / "model.gguf")
-    monkeypatch.setattr(main, "LocalQwenBackend", lambda *args, **kwargs: object())
+    class FakeBackend:
+        auto_cluster_workers = 7
+        auto_cluster_workers_reason = "GPU VRAM budget selected 7 cluster workers"
+
+    monkeypatch.setattr(main, "LocalQwenBackend", lambda *args, **kwargs: FakeBackend())
+    selected = []
 
     class FakePipeline:
         def __init__(self, backend, config, **kwargs):
-            pass
+            selected.append(config.cluster_workers)
 
         def run(self, identity, facts, **kwargs):
             return valid_clusters
@@ -98,6 +103,7 @@ def test_run_writes_pipeline_result(tmp_path, monkeypatch, valid_clusters):
 
     result = main.run(args)
 
+    assert selected == [7]
     assert result == output_path
     assert output_path.read_text(encoding="utf-8-sig").startswith("Module 1.1\n")
 

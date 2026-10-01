@@ -336,6 +336,30 @@ def valid_written_parts(
         return False
 
 
+def migrate_legacy_module(
+    base: Path,
+    identity: ModuleIdentity,
+) -> tuple[Path, Path] | None:
+    """Convert a valid labeled combined CSV while retaining it as a backup."""
+    base = Path(base)
+    try:
+        legacy = base.read_text(encoding="utf-8-sig")
+        blocks = parse_rendered_module(legacy, identity)
+        parts = []
+        for rows in blocks:
+            stream = io.StringIO(newline="")
+            writer = csv.writer(stream, lineterminator="\n")
+            writer.writerow(CSV_COLUMNS)
+            writer.writerows(rows)
+            parts.append(stream.getvalue())
+        pair = (parts[0], parts[1])
+        parse_rendered_parts(pair, identity)
+    except (OSError, UnicodeError, ValueError):
+        return None
+    paths = write_module_parts(base, pair, identity)
+    return paths if valid_written_parts(base, identity) else None
+
+
 def write_module_output(path: Path, content: str) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

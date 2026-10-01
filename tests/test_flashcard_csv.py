@@ -221,3 +221,54 @@ def test_pair_receipt_rejects_mixed_generations(tmp_path):
     paths[0].write_bytes(paths[0].read_bytes() + b"\n")
     assert not flashcard_csv.valid_written_parts(base, identity)
     assert flashcard_receipt_path(base).is_file()
+
+
+def test_valid_legacy_combined_csv_converts_and_remains_as_backup(tmp_path):
+    identity = ModuleIdentity("CPE0021", "1")
+    base = tmp_path / "CPE0021_M1.csv"
+    legacy = render_module(identity, valid_clusters())
+    base.write_text(legacy, encoding="utf-8-sig")
+
+    outputs = flashcard_csv.migrate_legacy_module(base, identity)
+
+    assert outputs == flashcard_part_paths(base)
+    assert flashcard_csv.valid_written_parts(base, identity)
+    assert base.read_text(encoding="utf-8-sig") == legacy
+
+
+def test_interrupted_legacy_conversion_is_not_reusable(tmp_path, monkeypatch):
+    identity = ModuleIdentity("CPE0021", "1")
+    base = tmp_path / "CPE0021_M1.csv"
+    base.write_text(render_module(identity, valid_clusters()), encoding="utf-8-sig")
+    original_replace = Path.replace
+
+    def fail_receipt(self, target):
+        if target == flashcard_receipt_path(base):
+            raise OSError("receipt write interrupted")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", fail_receipt)
+
+    with pytest.raises(OSError, match="interrupted"):
+        flashcard_csv.migrate_legacy_module(base, identity)
+
+    assert not flashcard_csv.valid_written_parts(base, identity)
+
+
+def test_migration_does_not_report_a_corrupted_published_pair(tmp_path, monkeypatch):
+    identity = ModuleIdentity("CPE0021", "1")
+    base = tmp_path / "CPE0021_M1.csv"
+    base.write_text(render_module(identity, valid_clusters()), encoding="utf-8-sig")
+    original_replace = Path.replace
+
+    def corrupt_after_receipt(self, target):
+        result = original_replace(self, target)
+        if target == flashcard_receipt_path(base):
+            first = flashcard_part_paths(base)[0]
+            first.write_bytes(first.read_bytes() + b"\n")
+        return result
+
+    monkeypatch.setattr(Path, "replace", corrupt_after_receipt)
+
+    assert flashcard_csv.migrate_legacy_module(base, identity) is None
+    assert not flashcard_csv.valid_written_parts(base, identity)

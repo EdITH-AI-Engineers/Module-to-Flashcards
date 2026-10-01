@@ -295,6 +295,61 @@ def test_run_reuses_all_valid_artifacts_without_subprocesses(tmp_path):
     assert result == paths
 
 
+def test_unchanged_legacy_output_converts_without_subprocess(tmp_path):
+    args = make_args(tmp_path)
+    paths = pipeline.pipeline_paths(
+        args.input, args.output_root, args.course_code, args.module_number
+    )
+    pipeline.stage_structured_module(
+        args.input, paths.structured_text,
+        course_code=args.course_code, module_number=args.module_number,
+    )
+    materialize("knowledge-graph", paths)
+    materialize("flashcards", paths)
+    for path in (*paths.flashcard_parts, paths.flashcard_receipt):
+        path.unlink()
+    legacy = render_module(ModuleIdentity("CPE0021", "01"), valid_clusters())
+    paths.flashcards.write_text(legacy, encoding="utf-8-sig")
+
+    pipeline.run(
+        args,
+        command_runner=lambda *a, **k: pytest.fail("unchanged legacy artifact must convert"),
+    )
+
+    assert pipeline._valid_flashcards(paths.flashcards, "01", "CPE0021")
+    assert paths.flashcards.read_text(encoding="utf-8-sig") == legacy
+
+
+def test_legacy_migration_rejects_changed_source(tmp_path):
+    args = make_args(tmp_path)
+    paths = pipeline.pipeline_paths(
+        args.input, args.output_root, args.course_code, args.module_number
+    )
+    pipeline.stage_structured_module(
+        args.input, paths.structured_text,
+        course_code=args.course_code, module_number=args.module_number,
+    )
+    materialize("knowledge-graph", paths)
+    materialize("flashcards", paths)
+    for path in (*paths.flashcard_parts, paths.flashcard_receipt):
+        path.unlink()
+    paths.flashcards.write_text(
+        render_module(ModuleIdentity("CPE0021", "01"), valid_clusters()),
+        encoding="utf-8-sig",
+    )
+    args.input.write_text(args.input.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append(Path(command[1]).name)
+        materialize("flashcards", paths)
+        return subprocess.CompletedProcess(command, 0)
+
+    pipeline.run(args, command_runner=runner)
+
+    assert calls == ["main.py"]
+
+
 def test_force_recomputes_every_stage(tmp_path):
     args = make_args(tmp_path, "--force")
     paths = pipeline.pipeline_paths(

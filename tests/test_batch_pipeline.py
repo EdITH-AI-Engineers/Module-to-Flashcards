@@ -12,6 +12,9 @@ from tests.batch_helpers import (
     make_items,
     materialize,
 )
+from flashcard_csv import render_module
+from flashcard_types import ModuleIdentity
+from tests.factories import valid_clusters
 
 
 def test_batch_groups_stages_and_reuses_each_runtime(tmp_path):
@@ -620,6 +623,63 @@ def test_matching_batch_reuse_manifest_skips_all_model_work(tmp_path):
     )
 
     assert resumed.outputs == item.paths.flashcard_parts
+
+
+def _legacy_item(tmp_path):
+    item = make_items(tmp_path, "one.txt")[0]
+    for stage in ("ingest", "graph", "flashcards"):
+        materialize(item, stage)
+    for path in (*item.paths.flashcard_parts, item.paths.flashcard_receipt):
+        path.unlink()
+    item.paths.flashcards.write_text(
+        render_module(ModuleIdentity("CPE0021", "1"), valid_clusters()),
+        encoding="utf-8-sig",
+    )
+    item.args.cluster_workers = 1
+    batch_pipeline._write_manifest(item)
+    item.args.cluster_workers = "auto"
+    return item
+
+
+def test_batch_converts_matching_legacy_output_without_qwen(tmp_path):
+    item = _legacy_item(tmp_path)
+
+    result = run_batch(
+        (item,),
+        dependencies=fake_dependencies(
+            [],
+            lambda args: pytest.fail("Qwen must not load"),
+            lambda args: pytest.fail("REBEL must not load"),
+        ),
+    )
+
+    assert result.outputs == item.paths.flashcard_parts
+    assert not result.errors
+    assert item.paths.flashcards.is_file()
+
+
+def test_batch_changed_source_does_not_migrate_legacy_output(tmp_path):
+    item = _legacy_item(tmp_path)
+    item.args.input.write_text(
+        item.args.input.read_text(encoding="utf-8") + "\n", encoding="utf-8"
+    )
+    counters = Counter()
+
+    result = run_batch((item,), dependencies=counting_dependencies(counters))
+
+    assert result.outputs == item.paths.flashcard_parts
+    assert counters["qwen_load"] == 1
+
+
+def test_corrupt_legacy_output_regenerates(tmp_path):
+    item = _legacy_item(tmp_path)
+    item.paths.flashcards.write_text("bad old data", encoding="utf-8")
+    counters = Counter()
+
+    result = run_batch((item,), dependencies=counting_dependencies(counters))
+
+    assert result.outputs == item.paths.flashcard_parts
+    assert counters["qwen_load"] == 1
 
 
 @pytest.mark.parametrize(

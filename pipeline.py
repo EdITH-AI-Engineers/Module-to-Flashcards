@@ -18,7 +18,7 @@ from artifact_paths import (
     module_file_label,
     safe_path_component,
 )
-from flashcard_csv import valid_written_parts
+from flashcard_csv import migrate_legacy_module, valid_written_parts
 from flashcard_types import ModuleIdentity
 from graph_input import GraphInputError, extract_graph_facts, load_graph
 from knowledge_graph_checker import is_checked_graph
@@ -411,6 +411,12 @@ def run(
         args.course_code,
         args.module_number,
     )
+    try:
+        unchanged_staged_source = (
+            paths.structured_text.read_bytes() == source.read_bytes()
+        )
+    except OSError:
+        unchanged_staged_source = False
     paths.workspace.mkdir(parents=True, exist_ok=True)
     stage_structured_module(
         source,
@@ -419,6 +425,16 @@ def run(
         module_number=args.module_number,
     )
     commands = build_stage_commands(args, paths)
+    if (
+        not args.force
+        and unchanged_staged_source
+        and _valid_checked_graph(paths.graph_json)
+        and not _valid_flashcards(paths.flashcards, args.module_number, args.course_code)
+    ):
+        migrate_legacy_module(
+            paths.flashcards,
+            ModuleIdentity(args.course_code, args.module_number),
+        )
     validators = {
         "knowledge-graph": lambda path: (
             _valid_checked_graph(paths.graph_json) or _valid_graph(path)

@@ -13,6 +13,8 @@ import time
 from typing import Callable, Sequence
 
 from flashcard_pipeline import GenerationError
+from flashcard_csv import migrate_legacy_module
+from flashcard_types import ModuleIdentity
 from graph_input import GraphInputError
 from local_qwen import LocalQwenBackend, ensure_model, thread_budget_for_workers
 import main as flashcard_generator
@@ -154,6 +156,27 @@ def _manifest_matches(item: BatchItem) -> bool:
         with _manifest_path(item).open(encoding="utf-8") as handle:
             manifest = json.load(handle)
         return manifest == _manifest_contents(item)
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _legacy_manifest_matches(item: BatchItem) -> bool:
+    """Accept old worker-policy metadata only when source and other settings match."""
+    try:
+        manifest = json.loads(_manifest_path(item).read_text(encoding="utf-8"))
+        current = _manifest_contents(item)
+        if not isinstance(manifest, dict):
+            return False
+        old_settings = dict(manifest.get("settings", {}))
+        new_settings = dict(current["settings"])
+        old_settings.pop("cluster_workers", None)
+        new_settings.pop("cluster_workers", None)
+        return (
+            manifest.get("source_sha256") == current["source_sha256"]
+            and manifest.get("course_code") == current["course_code"]
+            and manifest.get("module_number") == current["module_number"]
+            and old_settings == new_settings
+        )
     except (OSError, ValueError, TypeError):
         return False
 
@@ -678,6 +701,28 @@ def run_batch(
                 for item in items
             ),
         )
+
+    for item in items:
+        if (
+            not item.args.force
+            and _legacy_manifest_matches(item)
+            and _valid_structured_text(item.paths.structured_text)
+            and _valid_checked_graph(item.paths.graph_json)
+            and not _valid_flashcards(
+                item.paths.flashcards,
+                item.args.module_number,
+                item.args.course_code,
+            )
+        ):
+            try:
+                migrated = migrate_legacy_module(
+                    item.paths.flashcards,
+                    ModuleIdentity(item.args.course_code, item.args.module_number),
+                )
+                if migrated is not None:
+                    _write_manifest(item)
+            except OSError:
+                pass  # A non-reusable pair follows the normal regeneration path.
 
     states = [_make_state(item, timeout_seconds) for item in items]
     for state in states:

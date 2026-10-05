@@ -132,6 +132,10 @@ More workers are not a guaranteed speedup, so measure throughput on the target
 GPU. Changing an explicit count can change model output because workers use
 distinct seeds.
 
+For a beginner-friendly comparison of smaller local models, including which
+worker counts are worth testing on the intended 12 GB RTX 3060, see
+[`docs/model-alternatives.md`](docs/model-alternatives.md).
+
 Run only the knowledge-graph stage:
 
 ```powershell
@@ -197,8 +201,10 @@ failures are recorded under `data/logs/` when that directory is writable.
 ## Build the portable release
 
 Maintainer builds require Windows x64, Python 3.11 or 3.12, the project and
-PyInstaller dependencies, CUDA-enabled PyTorch and `llama-cpp-python` builds,
-and internet access while staging the locked Ministral and REBEL models.
+PyInstaller dependencies, CUDA-enabled PyTorch and `llama-cpp-python` 0.3.36
+or newer builds, and internet access while staging the locked Ministral and
+REBEL models. Older llama.cpp runtimes cannot read this model's integer
+tokenizer-score metadata and fail during model loading.
 
 ```powershell
 python -m venv .venv

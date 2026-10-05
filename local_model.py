@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 from time import perf_counter
 from typing import Any, Callable, Mapping
 
@@ -17,7 +18,25 @@ MODEL_REPO = "mistralai/Ministral-3-3B-Instruct-2512-GGUF"
 MODEL_REVISION = "eb599d408350ea2bb60452cb86be7c7b2fc28227"
 MODEL_FILENAME = "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf"
 DEFAULT_N_CTX = 8192
+MIN_LLAMA_CPP_VERSION = (0, 3, 36)
 _LOGGER = logging.getLogger(__name__)
+
+
+def _require_compatible_llama_cpp(module: object) -> None:
+    """Reject runtimes that cannot load Ministral's integer token scores."""
+    raw_version = getattr(module, "__version__", None)
+    if not isinstance(raw_version, str):
+        return
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", raw_version)
+    if match is None:
+        return
+    installed = tuple(int(part) for part in match.groups())
+    if installed < MIN_LLAMA_CPP_VERSION:
+        minimum = ".".join(str(part) for part in MIN_LLAMA_CPP_VERSION)
+        raise RuntimeError(
+            "Ministral requires llama-cpp-python>="
+            f"{minimum}; installed version is {raw_version}"
+        )
 
 
 def thread_budget_for_workers(workers: int) -> int | None:
@@ -65,12 +84,14 @@ class LocalModelBackend:
         presence_penalty: float | None = None,
     ) -> None:
         try:
-            from llama_cpp import Llama
+            import llama_cpp
         except ImportError as exc:
             raise RuntimeError(
                 "llama-cpp-python is not installed; run "
                 "python -m pip install -r requirements.txt"
             ) from exc
+        _require_compatible_llama_cpp(llama_cpp)
+        Llama = llama_cpp.Llama
 
         self._model_path = Path(model_path)
         self._n_ctx = n_ctx

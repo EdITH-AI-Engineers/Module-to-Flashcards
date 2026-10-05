@@ -215,6 +215,23 @@ def test_backend_has_no_qwen_only_hard_no_think_mode():
     assert "hard_no_think" not in inspect.signature(LocalModelBackend).parameters
 
 
+def test_backend_rejects_runtime_before_integer_tokenizer_score_support(
+    monkeypatch, tmp_path
+):
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            raise AssertionError("an incompatible runtime must fail before model loading")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "llama_cpp",
+        SimpleNamespace(__version__="0.3.35", Llama=FakeLlama),
+    )
+
+    with pytest.raises(RuntimeError, match=r"llama-cpp-python>=0\.3\.36.*0\.3\.35"):
+        LocalModelBackend(tmp_path / "model.gguf")
+
+
 def test_optional_sampling_defaults_are_omitted_and_call_overrides_apply():
     calls = []
 

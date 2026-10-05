@@ -418,8 +418,8 @@ def test_artifact_validation_time_is_excluded_from_active_budget(
     now = [0.0]
     original_validator = batch_pipeline._valid_structured_text
 
-    def slow_validator(path):
-        result = original_validator(path)
+    def slow_validator(path, **kwargs):
+        result = original_validator(path, **kwargs)
         if path.is_file():
             now[0] += 10
         return result
@@ -722,8 +722,9 @@ def test_explicit_worker_change_prevents_legacy_migration(tmp_path):
             encoding="utf-8",
         ),
         lambda item: setattr(item.args, "seed", 99),
+        lambda item: setattr(item.args, "identity_from_filename", True),
     ),
-    ids=("replaced-source", "changed-setting"),
+    ids=("replaced-source", "changed-setting", "filename-identity"),
 )
 def test_changed_batch_reuse_identity_or_source_forces_all_stages(tmp_path, change):
     item = make_items(tmp_path, "one.txt")[0]

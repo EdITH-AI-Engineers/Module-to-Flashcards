@@ -796,6 +796,7 @@ def validate_slide_report(
     *,
     course_code: str,
     module_number: str | None = None,
+    identity_from_filename: bool = False,
 ) -> dict[str, str]:
     """Validate slide-report identity and readable content without rewriting it."""
 
@@ -809,12 +810,17 @@ def validate_slide_report(
     declared_number = metadata.get("module_number")
     supplied_number = _specified_report_value(str(module_number or "").strip())
     if (
-        declared_number
+        not identity_from_filename
+        and declared_number
         and supplied_number
         and module_file_label(declared_number) != module_file_label(supplied_number)
     ):
         raise ValueError("slide report module number does not match --module-number")
-    effective_number = declared_number or supplied_number
+    effective_number = (
+        supplied_number
+        if identity_from_filename and supplied_number
+        else declared_number or supplied_number
+    )
     if not effective_number:
         raise ValueError(
             "slide report must declare a module number in 'Module #:' or a "

@@ -97,6 +97,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--course-code", help="course identity for slide-report input")
     parser.add_argument("--module-number", help="module identity for slide-report input")
     parser.add_argument(
+        "--identity-from-filename",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
         "--output-dir", type=Path, default=Path("knowledge_graph_output")
     )
     parser.add_argument("--model", default=DEFAULT_MODEL)
@@ -130,6 +135,7 @@ def prepare_input_text(
     course_code: str | None = None,
     module_number: str | None = None,
     source_file: str | None = None,
+    identity_from_filename: bool = False,
 ) -> tuple[str, dict[str, str]]:
     """Project either supported module format into graph-ready prose."""
     metadata = parse_module_metadata(text)
@@ -141,11 +147,18 @@ def prepare_input_text(
                 text,
                 course_code=effective_course,
                 module_number=module_number,
+                identity_from_filename=identity_from_filename,
             )
         else:
             metadata = report_metadata
         if source_file:
             metadata["source_file"] = source_file
+    elif metadata and identity_from_filename:
+        metadata = dict(metadata)
+        if course_code:
+            metadata["course_code"] = str(course_code)
+        if module_number:
+            metadata["module_number"] = str(module_number)
     projected = graph_ready_text(text) if metadata else text
     return clean_text(projected), metadata
 
@@ -701,6 +714,7 @@ def run(
             course_code=getattr(args, "course_code", None),
             module_number=getattr(args, "module_number", None),
             source_file=args.input.name,
+            identity_from_filename=getattr(args, "identity_from_filename", False),
         )
         lesson_facts = extract_lesson_facts(source_text)
         chunks = make_chunks(text, runtime.tokenizer, args.chunk_tokens, args.overlap_tokens)

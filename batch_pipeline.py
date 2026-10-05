@@ -145,6 +145,8 @@ def _manifest_settings(args: argparse.Namespace) -> dict[str, object]:
     batch_size = getattr(args, "clusters_per_call", 1)
     if batch_size != 1:
         settings["clusters_per_call"] = batch_size
+    if getattr(args, "identity_from_filename", False):
+        settings["identity_from_filename"] = True
     return settings
 
 
@@ -324,6 +326,9 @@ def _ingest_stage(item: BatchItem, _runtime: object) -> Path:
         item.paths.structured_text,
         course_code=item.args.course_code,
         module_number=item.args.module_number,
+        identity_from_filename=getattr(
+            item.args, "identity_from_filename", False
+        ),
     )
 
 
@@ -373,7 +378,10 @@ def _make_state(item: BatchItem, timeout_seconds: float | None) -> _BatchState:
     needs_ingest = (
         args.force
         or not reusable
-        or not _valid_structured_text(paths.structured_text)
+        or not _valid_structured_text(
+            paths.structured_text,
+            identity_from_filename=getattr(args, "identity_from_filename", False),
+        )
     )
     has_graph_source = _valid_graph(paths.unchecked_graph_json) or _valid_checked_graph(
         paths.graph_json
@@ -725,7 +733,10 @@ def run_batch(
         if (
             not item.args.force
             and _legacy_manifest_matches(item)
-            and _valid_structured_text(item.paths.structured_text)
+            and _valid_structured_text(
+                item.paths.structured_text,
+                identity_from_filename=getattr(item.args, "identity_from_filename", False),
+            )
             and _valid_checked_graph(item.paths.graph_json)
             and not _valid_flashcards(
                 item.paths.flashcards,
@@ -782,7 +793,12 @@ def run_batch(
         print(f"[{state.item.filename}] Staging structured input...", flush=True)
         try:
             stage_result = dependencies.ingest_stage(state.item, None)
-            if not _valid_structured_text(state.item.paths.structured_text):
+            if not _valid_structured_text(
+                state.item.paths.structured_text,
+                identity_from_filename=getattr(
+                    state.item.args, "identity_from_filename", False
+                ),
+            ):
                 raise RuntimeError(
                     "ingest stage did not create a valid artifact: "
                     f"{state.item.paths.structured_text}"

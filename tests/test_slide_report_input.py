@@ -1,8 +1,14 @@
+from collections import Counter
+from dataclasses import replace
+
 import pytest
 
 import api_server
+import batch_pipeline
 import pipeline
 import text_extractor
+from batch_pipeline import BatchItem
+from tests.batch_helpers import counting_dependencies, structured_content
 from structured_module import (
     extract_lesson_facts,
     graph_ready_text,
@@ -144,6 +150,79 @@ def test_slide_report_requires_discoverable_module_number(tmp_path):
     assert "module_number" not in parse_slide_report_metadata(without_module_title)
     with pytest.raises(ValueError, match="module number"):
         api_server.structured_module_number(source, "BASICEE")
+
+
+@pytest.mark.parametrize("content", (REPORT, structured_content("9")))
+def test_filename_identity_skips_conflicting_report_identity_during_ingest(
+    tmp_path, monkeypatch, content
+):
+    source = tmp_path / "CS0003_M2.txt"
+    source.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(api_server, "OUTPUT_ROOT", tmp_path / "output")
+    args = api_server.pipeline_args(
+        source,
+        "CS0003",
+        "2",
+        identity_from_filename=True,
+    )
+    paths = pipeline.pipeline_paths(
+        source,
+        args.output_root,
+        args.course_code,
+        args.module_number,
+    )
+    item = BatchItem(source.name, args, paths)
+
+    staged = batch_pipeline._ingest_stage(item, object())
+
+    assert staged.read_bytes() == source.read_bytes()
+
+
+def test_filename_identity_can_reuse_staged_report_without_module_label(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "CS0003_M2.txt"
+    source.write_text(REPORT.replace("MODULE 9", "OVERVIEW"), encoding="utf-8")
+    monkeypatch.setattr(api_server, "OUTPUT_ROOT", tmp_path / "output")
+    args = api_server.pipeline_args(
+        source, "CS0003", "2", identity_from_filename=True
+    )
+    paths = pipeline.pipeline_paths(source, args.output_root, "CS0003", "2")
+    item = BatchItem(source.name, args, paths)
+    batch_pipeline._ingest_stage(item, object())
+    batch_pipeline._write_manifest(item)
+
+    state = batch_pipeline._make_state(item, None)
+
+    assert not state.needs_ingest
+    dependencies = replace(
+        counting_dependencies(Counter()),
+        ingest_stage=batch_pipeline._ingest_stage,
+    )
+    result = batch_pipeline.run_batch((item,), dependencies=dependencies)
+    assert result.errors == ()
+    assert result.outputs == paths.flashcard_parts
+    assert batch_pipeline._make_state(item, None).stage == "complete"
+
+
+def test_filename_report_passes_batch_ingest_validation(tmp_path, monkeypatch):
+    source = tmp_path / "CS0003_M2.txt"
+    source.write_text(REPORT.replace("MODULE 9", "OVERVIEW"), encoding="utf-8")
+    monkeypatch.setattr(api_server, "OUTPUT_ROOT", tmp_path / "output")
+    args = api_server.pipeline_args(
+        source, "CS0003", "2", identity_from_filename=True
+    )
+    paths = pipeline.pipeline_paths(source, args.output_root, "CS0003", "2")
+    item = BatchItem(source.name, args, paths)
+    dependencies = replace(
+        counting_dependencies(Counter()),
+        ingest_stage=batch_pipeline._ingest_stage,
+    )
+
+    result = batch_pipeline.run_batch((item,), dependencies=dependencies)
+
+    assert result.errors == ()
+    assert result.outputs == paths.flashcard_parts
 
 
 def test_slide_report_uses_substantive_explanation_when_content_is_missing():

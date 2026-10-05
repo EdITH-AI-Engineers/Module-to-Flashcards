@@ -316,6 +316,66 @@ def test_run_reuses_injected_runtime(tmp_path, monkeypatch):
     assert args.num_beams == 1
 
 
+@pytest.mark.parametrize("input_format", ("report", "missing-number", "structured"))
+def test_run_uses_authoritative_filename_identity_for_report_metadata(
+    tmp_path, monkeypatch, input_format
+):
+    source = tmp_path / "CS0003_M2.txt"
+    content = """Module #: 9
+Module Title: Algorithms
+
+Slide 1:
+{
+Title:
+Search algorithms
+Content:
+Binary search repeatedly halves a sorted search interval.
+Image/Diagram Description:
+Not Specified
+}
+Brief Explanation:
+This slide explains binary search.
+"""
+    if input_format == "structured":
+        content = structured_text()
+    elif input_format == "missing-number":
+        content = content.replace("Module #: 9", "Module #: Not Specified")
+    source.write_text(content, encoding="utf-8")
+    output_dir = tmp_path / "graph"
+
+    class FakeTokenizer:
+        def encode(self, text, *, add_special_tokens):
+            return [1]
+
+        def decode(self, ids, *, skip_special_tokens):
+            return "binary search halves a sorted interval"
+
+    runtime = text_extractor.RebelRuntime(FakeTokenizer(), object(), "cpu")
+    monkeypatch.setattr(text_extractor, "extract_relations", lambda *a, **k: [])
+    args = text_extractor.parse_args(
+        [
+            str(source),
+            "--output-dir",
+            str(output_dir),
+            "--course-code",
+            "CS0003",
+            "--module-number",
+            "2",
+            "--batch-size",
+            "1",
+            "--num-beams",
+            "1",
+        ]
+    )
+    args.identity_from_filename = True
+
+    json_path, _ = text_extractor.run(args, runtime=runtime)
+
+    metadata = json.loads(json_path.read_text(encoding="utf-8"))["metadata"]
+    assert metadata["course_code"] == "CS0003"
+    assert metadata["module_number"] == "2"
+
+
 @pytest.mark.parametrize("save_error", (None, OSError("output failed")))
 def test_run_releases_an_internally_owned_runtime_on_success_and_output_failure(
     tmp_path, monkeypatch, save_error

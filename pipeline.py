@@ -126,6 +126,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--course-code", required=True, help="exact course code")
     parser.add_argument("--module-number", required=True, help="exact module number")
     parser.add_argument(
+        "--identity-from-filename",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
         "--output-root",
         type=Path,
         default=Path("pipeline_output"),
@@ -234,6 +239,8 @@ def build_stage_commands(
         "--clusters-per-call",
         str(args.clusters_per_call),
     ]
+    if getattr(args, "identity_from_filename", False):
+        stage_two.append("--identity-from-filename")
     if args.skip_final_review:
         stage_three.append("--skip-final-review")
 
@@ -245,7 +252,9 @@ def build_stage_commands(
     )
 
 
-def _valid_structured_text(path: Path) -> bool:
+def _valid_structured_text(
+    path: Path, *, identity_from_filename: bool = False
+) -> bool:
     if not path.is_file():
         return False
     try:
@@ -259,7 +268,9 @@ def _valid_structured_text(path: Path) -> bool:
         )
     report_metadata = parse_slide_report_metadata(text)
     return bool(
-        report_metadata.get("module_number") and graph_ready_text(text).strip()
+        report_metadata
+        and (identity_from_filename or report_metadata.get("module_number"))
+        and graph_ready_text(text).strip()
     )
 
 
@@ -269,6 +280,7 @@ def stage_structured_module(
     *,
     course_code: str | None = None,
     module_number: str | None = None,
+    identity_from_filename: bool = False,
 ) -> Path:
     """Validate and atomically stage a supported UTF-8 module unchanged."""
     source = Path(source)
@@ -284,14 +296,16 @@ def stage_structured_module(
                 f"input is not a valid format_version 1 structured module: {source}"
             )
         if (
-            course_code is not None
+            not identity_from_filename
+            and course_code is not None
             and metadata.get("course_code") != str(course_code).strip()
         ):
             raise PipelineRunError(
                 "structured module course_code does not match --course-code"
             )
         if (
-            module_number is not None
+            not identity_from_filename
+            and module_number is not None
             and module_file_label(metadata.get("module_number", ""))
             != module_file_label(module_number)
         ):
@@ -306,6 +320,7 @@ def stage_structured_module(
                 content,
                 course_code=course_code,
                 module_number=module_number,
+                identity_from_filename=identity_from_filename,
             )
         except ValueError as exc:
             raise PipelineRunError(f"invalid slide-report input {source}: {exc}") from exc
@@ -368,6 +383,10 @@ def _pipeline_manifest_contents(args: argparse.Namespace, source: Path) -> dict[
         "course_code": str(args.course_code),
         "module_number": str(args.module_number),
         "settings": {
+            **(
+                {"identity_from_filename": True}
+                if getattr(args, "identity_from_filename", False) else {}
+            ),
             "model_dir": str(Path(args.model_dir).resolve()),
             "attempts": args.attempts,
             "seed": args.seed,
@@ -496,6 +515,7 @@ def run(
         paths.structured_text,
         course_code=args.course_code,
         module_number=args.module_number,
+        identity_from_filename=getattr(args, "identity_from_filename", False),
     )
     commands = build_stage_commands(args, paths)
     if (

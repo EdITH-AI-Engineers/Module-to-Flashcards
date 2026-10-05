@@ -42,12 +42,19 @@ RMS compares the heating effect of AC with DC in the same resistor.
 ---
 ```
 
-If `Module #:` is `Not Specified`, a slide titled `MODULE 9` supplies module
-number `9`. The course identity is provided separately as `courseCode` in the
-API or `--course-code` in the command line. A cover-slide label such as
-`Course: BASICEE` is not required to match that identity (for example,
-`COE0041`). The server uses each request's `courseCode` value even if the
-report labels the course differently; `COE0041` below is only an example.
+For server uploads named `<course>-M<number>.txt`, the filename supplies both
+values directly. For example, `CS0003-M2.txt` means course `CS0003`, module `2`.
+These values take priority over the submitted `courseCode` and any identity
+written inside the report; no identity comparison is performed. The report
+must still contain readable learning content.
+
+If the filename does not match that format, the existing detection is used:
+the server reads the module number from the report's `Module #:` header, or
+from a slide titled `MODULE 9` when the header is `Not Specified`. The request's
+`courseCode` supplies the course for slide reports. A cover-slide label such as
+`Course: BASICEE` does not override it. The earlier `[MODULE]` format retains
+its metadata checks in this fallback. Command-line inputs use `--course-code`
+and `--module-number` as before.
 
 ## Quick start with the local server
 
@@ -74,9 +81,10 @@ POST http://localhost:8000/process
 ```
 
 The multipart payload must contain `courseCode` once and one or more `files`
-fields. The server reads the module number from each report, uses `courseCode`
-as the course identity, and stores the upload as
-`<courseCode>_M<moduleNumber>.txt` regardless of its original filename.
+fields. Each file uses its `<course>-M<number>.txt` identity when available,
+otherwise the request course and report metadata. The server stores the upload
+under its resolved course as `<course>_M<module>.txt`. The original report text
+is preserved.
 
 While processing is running, poll the status endpoint:
 

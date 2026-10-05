@@ -93,6 +93,7 @@ class PipelineStatusRegistry:
         index: int,
         *,
         filename: str | None = None,
+        course_code: str | None = None,
         module_number: str | None = None,
         state: str | None = None,
         stage: str | None = None,
@@ -109,6 +110,8 @@ class PipelineStatusRegistry:
             module = request.modules[index]
             if filename is not None:
                 module.filename = str(filename)
+            if course_code is not None:
+                module.course_code = str(course_code)
             if module_number is not None:
                 module.module_number = str(module_number)
             if state is not None:
@@ -260,6 +263,19 @@ def safe_filename(filename: str) -> str:
     return name
 
 
+def filename_module_identity(filename: str) -> tuple[str, str] | None:
+    """Return identity from an exact ``<course>-M<number>.txt`` filename."""
+    name = Path(filename).name
+    match = re.fullmatch(
+        r"(?P<course>[A-Za-z0-9][A-Za-z0-9._-]*)-M(?P<module>[0-9]+)\.txt",
+        name,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    return match.group("course"), match.group("module")
+
+
 def safe_course_component(course_code: str) -> str:
     """Return one safe directory component without changing the public code."""
     value = str(course_code).strip()
@@ -391,7 +407,13 @@ def publish_module_upload(
     return destination
 
 
-def pipeline_args(source: Path, course_code: str, module_number: str) -> Namespace:
+def pipeline_args(
+    source: Path,
+    course_code: str,
+    module_number: str,
+    *,
+    identity_from_filename: bool = False,
+) -> Namespace:
     from worker_budget import parse_cluster_workers
 
     try:
@@ -414,6 +436,7 @@ def pipeline_args(source: Path, course_code: str, module_number: str) -> Namespa
         input=source,
         course_code=course_code,
         module_number=module_number,
+        identity_from_filename=identity_from_filename,
         output_root=OUTPUT_ROOT,
         model_dir=MODEL_DIR,
         rebel_model=REBEL_MODEL,
@@ -486,12 +509,17 @@ async def process_files(
 
     outputs: list[str] = []
     try:
-        if not course_code.strip():
+        has_filename_identity = any(
+            filename_module_identity(upload.filename or "") is not None
+            for upload in files
+        )
+        if not has_filename_identity and not course_code.strip():
             record_error(-1, "(batch)", "Missing course code")
         else:
             try:
-                safe_course_component(course_code)
-                course_upload_directory(course_code)
+                if not has_filename_identity:
+                    safe_course_component(course_code)
+                    course_upload_directory(course_code)
             except ValueError as exc:
                 record_error(-1, "(batch)", exc)
             else:
@@ -516,10 +544,26 @@ async def process_files(
                         )
                         try:
                             safe_filename(upload.filename or "")
-                            source = await save_upload(upload, course_code)
-                            module_number = structured_module_number(source, course_code)
+                            filename_identity = filename_module_identity(
+                                upload.filename or ""
+                            )
+                            effective_course = (
+                                filename_identity[0]
+                                if filename_identity is not None
+                                else course_code
+                            )
+                            if not effective_course.strip():
+                                raise ValueError("Missing course code")
+                            safe_course_component(effective_course)
+                            course_upload_directory(effective_course)
+                            source = await save_upload(upload, effective_course)
+                            module_number = (
+                                filename_identity[1]
+                                if filename_identity is not None
+                                else structured_module_number(source, effective_course)
+                            )
                             canonical_filename = canonical_module_filename(
-                                course_code,
+                                effective_course,
                                 module_number,
                             )
                             canonical_key = canonical_filename.casefold()
@@ -531,14 +575,19 @@ async def process_files(
                             seen_module_filenames.add(canonical_key)
                             source = publish_module_upload(
                                 source,
-                                course_code,
+                                effective_course,
                                 module_number,
                             )
-                            args = pipeline_args(source, course_code, module_number)
+                            args = pipeline_args(
+                                source,
+                                effective_course,
+                                module_number,
+                                identity_from_filename=filename_identity is not None,
+                            )
                             paths = pipeline_paths(
                                 source,
                                 output_root,
-                                course_code,
+                                effective_course,
                                 args.module_number,
                             )
                             workspace_key = paths.workspace.name.casefold()
@@ -567,6 +616,7 @@ async def process_files(
                                 request_id,
                                 index,
                                 filename=canonical_filename,
+                                course_code=effective_course,
                                 module_number=module_number,
                                 state="queued",
                                 stage="ingest",

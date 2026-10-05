@@ -128,12 +128,19 @@ def test_process_endpoint_requires_course_code_in_multipart_payload():
     assert "/process/{course_code}" not in schema["paths"]
 
 
+@pytest.mark.parametrize("filename", (
+    "arbitrary-original-name.txt",
+    "CS0003_M2.txt",
+    "CS0003-M2-notes.txt",
+    "CS0003-Mtwo.txt",
+    "CS0003 -M2.txt",
+))
 def test_process_discovers_module_number_and_renames_upload(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, filename
 ):
     upload = ContentUpload(
-        "arbitrary-original-name.txt",
-        structured_content("02", "arbitrary-original-name.txt"),
+        filename,
+        structured_content("02", filename),
     )
     captured = []
 
@@ -157,6 +164,51 @@ def test_process_discovers_module_number_and_renames_upload(
     assert renamed.is_file()
     assert captured[0].args.input == renamed
     assert captured[0].args.module_number == "02"
+
+
+@pytest.mark.parametrize("payload_course", ("", "WRONG999"))
+@pytest.mark.parametrize("declared_module", ("9", "Not Specified"))
+def test_process_uses_course_and_module_from_exact_filename(
+    monkeypatch, tmp_path, payload_course, declared_module
+):
+    upload = ContentUpload(
+        "CS0003-M2.txt",
+        """Module #: 9
+Module Title: Algorithms
+
+Slide 1:
+{
+Title:
+Search algorithms
+Content:
+Binary search repeatedly halves a sorted search interval.
+Image/Diagram Description:
+Not Specified
+}
+Brief Explanation:
+This slide explains binary search.
+""".replace("Module #: 9", f"Module #: {declared_module}"),
+    )
+    captured = []
+
+    def fake_batch(items, **kwargs):
+        captured.extend(items)
+        return BatchResult(outputs=(), errors=())
+
+    monkeypatch.setattr(api_server, "UPLOAD_DIR", tmp_path / "uploads")
+    monkeypatch.setattr(api_server, "OUTPUT_ROOT", tmp_path / "output")
+    monkeypatch.setattr(api_server, "run_batch", fake_batch)
+
+    response = asyncio.run(api_server.process_files(payload_course, [upload]))
+
+    renamed = tmp_path / "uploads" / "CS0003" / "CS0003_M2.txt"
+    assert response["errors"] == []
+    assert renamed.is_file()
+    assert captured[0].args.input == renamed
+    assert captured[0].args.course_code == "CS0003"
+    assert captured[0].args.module_number == "2"
+    status = api_server._PIPELINE_STATUS.snapshot()
+    assert status["modules"][0]["courseCode"] == "CS0003"
 
 
 @pytest.mark.parametrize("payload_course", ("COE0041", "ECE0099"))

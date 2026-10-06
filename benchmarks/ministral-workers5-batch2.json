@@ -1,0 +1,135 @@
+{
+  "format_version": 1,
+  "model_filename": "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+  "settings": {
+    "seed": 42,
+    "n_ctx": 8192,
+    "n_gpu_layers": -1,
+    "workers": 2,
+    "clusters_per_call": 5,
+    "max_retries": 3,
+    "final_review": true
+  },
+  "modules": [
+    {
+      "course_code": "COE0041",
+      "module_number": "2",
+      "graph_sha256": "ea4b4cf4c641e3fb6792cdba28a95bbee5d620f6c51bc5c1dbc5e20fad89966f",
+      "graph_facts": 74,
+      "result": "passed",
+      "error": null,
+      "valid_clusters": 20,
+      "duration_seconds": 310.6253437999985,
+      "cluster_generation_seconds": 261.7659999999996,
+      "selected_workers": 2,
+      "actual_workers": 2,
+      "batch_stats": {
+        "first_attempt_clusters": 20,
+        "first_attempt_passes": 0,
+        "first_attempt_pass_rate": 0.0
+      }
+    },
+    {
+      "course_code": "CS0027",
+      "module_number": "1",
+      "graph_sha256": "299c0b1a114c96469d903ec23b7da5f2f358aad7420d4f66a5ca15b4d9132d8b",
+      "graph_facts": 32,
+      "result": "passed",
+      "error": null,
+      "valid_clusters": 20,
+      "duration_seconds": 272.9454046999999,
+      "cluster_generation_seconds": 238.34400000000096,
+      "selected_workers": 2,
+      "actual_workers": 2,
+      "batch_stats": {
+        "first_attempt_clusters": 20,
+        "first_attempt_passes": 0,
+        "first_attempt_pass_rate": 0.0
+      }
+    },
+    {
+      "course_code": "GED0081",
+      "module_number": "1",
+      "graph_sha256": "05bd602f1d683a6c35da4308722f82bf116e0d403e1bcdcc896c428b272f3729",
+      "graph_facts": 33,
+      "result": "passed",
+      "error": null,
+      "valid_clusters": 20,
+      "duration_seconds": 268.9261632000016,
+      "cluster_generation_seconds": 235.25,
+      "selected_workers": 2,
+      "actual_workers": 2,
+      "batch_stats": {
+        "first_attempt_clusters": 20,
+        "first_attempt_passes": 0,
+        "first_attempt_pass_rate": 0.0
+      }
+    }
+  ],
+  "valid_clusters_per_minute": 4.222889198297608,
+  "cluster_generation_per_minute": 4.895561357702346,
+  "first_attempt_clusters": 60,
+  "first_attempt_passes": 0,
+  "first_attempt_cluster_pass_rate": 0.0,
+  "metrics": {
+    "tasks": {
+      "cluster_batch": {
+        "calls": 24,
+        "prompt_tokens": {
+          "mean": 1437,
+          "p95": 1627
+        },
+        "completion_tokens": {
+          "mean": 1552.9583333333333,
+          "p95": 2084
+        },
+        "length_finishes": 0,
+        "context_errors": 12,
+        "first_attempts": 12,
+        "first_attempt_passes": 0,
+        "first_attempt_pass_rate": 0.0,
+        "retry_count": 24,
+        "visible_think_markers": 0,
+        "chars_per_completion_token": 3.7289313407206675
+      },
+      "concept_plan": {
+        "calls": 3,
+        "prompt_tokens": {
+          "mean": 2224.6666666666665,
+          "p95": 3749
+        },
+        "completion_tokens": {
+          "mean": 1122.6666666666667,
+          "p95": 1176
+        },
+        "length_finishes": 0,
+        "context_errors": 0,
+        "first_attempts": 3,
+        "first_attempt_passes": 3,
+        "first_attempt_pass_rate": 1.0,
+        "retry_count": 0,
+        "visible_think_markers": 0,
+        "chars_per_completion_token": 3.5478028503562946
+      }
+    },
+    "overall": {
+      "calls": 27,
+      "prompt_tokens": {
+        "mean": 1524.5185185185185,
+        "p95": 2044
+      },
+      "completion_tokens": {
+        "mean": 1505.148148148148,
+        "p95": 2084
+      },
+      "length_finishes": 0,
+      "context_errors": 12,
+      "first_attempts": 15,
+      "first_attempt_passes": 3,
+      "first_attempt_pass_rate": 0.2,
+      "retry_count": 24,
+      "visible_think_markers": 0,
+      "chars_per_completion_token": 3.713920125987352
+    }
+  }
+}

@@ -79,8 +79,12 @@ def summarize_cluster_passes(
     module_results: Sequence[dict[str, object]],
 ) -> dict[str, int | float | None]:
     """Aggregate per-concept acceptance, independent of batch call size."""
-    total = sum(int(item["batch_stats"]["first_attempt_clusters"]) for item in module_results)
-    passes = sum(int(item["batch_stats"]["first_attempt_passes"]) for item in module_results)
+    total = sum(
+        int(item["batch_stats"]["first_attempt_clusters"]) for item in module_results
+    )
+    passes = sum(
+        int(item["batch_stats"]["first_attempt_passes"]) for item in module_results
+    )
     return {
         "first_attempt_clusters": total,
         "first_attempt_passes": passes,
@@ -96,7 +100,7 @@ def benchmark(
     n_ctx: int = DEFAULT_N_CTX,
     n_gpu_layers: int = -1,
     workers: int | str = 1,
-    clusters_per_call: int = 1,
+    clusters_per_call: int = 3,
     max_retries: int = 3,
     final_review: bool = True,
 ) -> dict[str, object]:
@@ -129,7 +133,10 @@ def benchmark(
 
             def report_progress(message: str) -> None:
                 if message.startswith("Completed cluster "):
-                    print(f"Benchmark module {index}: {message.split(':', 1)[0]}", flush=True)
+                    print(
+                        f"Benchmark module {index}: {message.split(':', 1)[0]}",
+                        flush=True,
+                    )
                 elif message.startswith("Cluster generation:"):
                     print(f"Benchmark module {index}: {message}", flush=True)
 
@@ -201,7 +208,9 @@ def benchmark(
                     "duration_seconds": elapsed,
                     "cluster_generation_seconds": pipeline.cluster_generation_seconds,
                     "selected_workers": actual_workers,
-                    "actual_workers": getattr(pipeline, "_actual_cluster_workers", None),
+                    "actual_workers": getattr(
+                        pipeline, "_actual_cluster_workers", None
+                    ),
                     "batch_stats": pipeline.batch_stats,
                 }
             )
@@ -239,7 +248,9 @@ def benchmark(
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, default=Path("benchmarks/modules.json"))
+    parser.add_argument(
+        "--manifest", type=Path, default=Path("benchmarks/modules.json")
+    )
     parser.add_argument("--modules", type=int, default=3)
     parser.add_argument("--output", type=Path, default=Path("benchmarks/baseline.json"))
     parser.add_argument("--model-dir", type=Path, default=Path("models"))
@@ -247,7 +258,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--n-ctx", type=int, default=DEFAULT_N_CTX)
     parser.add_argument("--n-gpu-layers", type=int, default=-1)
     parser.add_argument("--workers", type=parse_cluster_workers, default=1)
-    parser.add_argument("--clusters-per-call", type=int, choices=(1, 2, 5), default=1)
+    parser.add_argument("--clusters-per-call", type=int, default=3)
     parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--skip-final-review", action="store_true")
     return parser.parse_args(argv)

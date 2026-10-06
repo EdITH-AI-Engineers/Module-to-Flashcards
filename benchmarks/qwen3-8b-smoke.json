@@ -1,0 +1,101 @@
+{
+  "format_version": 1,
+  "model_filename": "Qwen3-8B-Q5_K_M.gguf",
+  "settings": {
+    "seed": 42,
+    "n_ctx": 12288,
+    "n_gpu_layers": -1,
+    "workers": 1,
+    "clusters_per_call": 1,
+    "max_retries": 3,
+    "final_review": true,
+    "hard_no_think": false,
+    "sampling_preset": "current"
+  },
+  "modules": [
+    {
+      "course_code": "COE0041",
+      "module_number": "1",
+      "graph_sha256": "68731bee68e989ed3e1cdd47e48969ce405192c08a0bca34c20fb674a522d16a",
+      "graph_facts": 77,
+      "result": "passed",
+      "error": null,
+      "valid_clusters": 20,
+      "duration_seconds": 607.8712625999979,
+      "cluster_generation_seconds": 566.9379999999983,
+      "selected_workers": 1,
+      "actual_workers": 1,
+      "batch_stats": {
+        "first_attempt_clusters": 20,
+        "first_attempt_passes": 20,
+        "first_attempt_pass_rate": 1.0
+      }
+    }
+  ],
+  "valid_clusters_per_minute": 1.974102205238883,
+  "cluster_generation_per_minute": 2.1166335648695336,
+  "first_attempt_clusters": 20,
+  "first_attempt_passes": 20,
+  "first_attempt_cluster_pass_rate": 1.0,
+  "metrics": {
+    "tasks": {
+      "cluster": {
+        "calls": 20,
+        "prompt_tokens": {
+          "mean": 1241.75,
+          "p95": 1252
+        },
+        "completion_tokens": {
+          "mean": 588.05,
+          "p95": 734
+        },
+        "length_finishes": 0,
+        "context_errors": 0,
+        "first_attempts": 20,
+        "first_attempt_passes": 20,
+        "first_attempt_pass_rate": 1.0,
+        "retry_count": 0,
+        "visible_think_markers": 0,
+        "chars_per_completion_token": 4.137403282033841
+      },
+      "concept_plan": {
+        "calls": 1,
+        "prompt_tokens": {
+          "mean": 3088,
+          "p95": 3088
+        },
+        "completion_tokens": {
+          "mean": 799,
+          "p95": 799
+        },
+        "length_finishes": 0,
+        "context_errors": 0,
+        "first_attempts": 1,
+        "first_attempt_passes": 1,
+        "first_attempt_pass_rate": 1.0,
+        "retry_count": 0,
+        "visible_think_markers": 0,
+        "chars_per_completion_token": 4.236545682102628
+      }
+    },
+    "overall": {
+      "calls": 21,
+      "prompt_tokens": {
+        "mean": 1329.6666666666667,
+        "p95": 1269
+      },
+      "completion_tokens": {
+        "mean": 598.0952380952381,
+        "p95": 743
+      },
+      "length_finishes": 0,
+      "context_errors": 0,
+      "first_attempts": 21,
+      "first_attempt_passes": 21,
+      "first_attempt_pass_rate": 1.0,
+      "retry_count": 0,
+      "visible_think_markers": 0,
+      "chars_per_completion_token": 4.1437101910828025
+    }
+  }
+}

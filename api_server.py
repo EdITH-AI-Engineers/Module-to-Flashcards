@@ -27,7 +27,6 @@ from structured_module import (
 )
 from version import __version__
 
-
 PROJECT_DIR = Path(__file__).resolve().parent
 _RUNTIME_PATHS = build_paths(PROJECT_DIR, portable=False)
 UPLOAD_DIR = _RUNTIME_PATHS.uploads
@@ -179,7 +178,9 @@ class PipelineStatusRegistry:
             for state in ("queued", "processing", "completed", "failed")
         }
         return {
-            "status": "processing" if counts["queued"] or counts["processing"] else "idle",
+            "status": (
+                "processing" if counts["queued"] or counts["processing"] else "idle"
+            ),
             "active": active,
             "queue": queued,
             "modules": modules,
@@ -328,7 +329,11 @@ async def save_upload(upload: UploadFile, course_code: str) -> Path:
     temporary_path: Path | None = None
     try:
         with NamedTemporaryFile(
-            mode="wb", dir=destination_dir, prefix=f".{filename}.", suffix=".tmp", delete=False
+            mode="wb",
+            dir=destination_dir,
+            prefix=f".{filename}.",
+            suffix=".tmp",
+            delete=False,
         ) as temporary:
             temporary_path = Path(temporary.name)
             while chunk := await upload.read(1024 * 1024):
@@ -348,9 +353,9 @@ def find_module_number(module_text: str) -> str:
     if module_number:
         return module_number
 
-    report_number = parse_slide_report_metadata(module_text).get(
-        "module_number", ""
-    ).strip()
+    report_number = (
+        parse_slide_report_metadata(module_text).get("module_number", "").strip()
+    )
     if report_number:
         return report_number
 
@@ -425,7 +430,9 @@ def pipeline_args(
             "MODULE_FLASHCARDS_CLUSTER_WORKERS must be 'auto' or 1 to 20"
         ) from exc
     try:
-        clusters_per_call = int(os.environ.get("MODULE_FLASHCARDS_CLUSTERS_PER_CALL", "1"))
+        clusters_per_call = int(
+            os.environ.get("MODULE_FLASHCARDS_CLUSTERS_PER_CALL", "2")
+        )
         if clusters_per_call not in (1, 2, 5):
             raise ValueError("unsupported batch size")
     except ValueError as exc:
@@ -479,9 +486,7 @@ async def process_files(
             description="Course code used to name and group uploaded modules",
         ),
     ],
-    files: Annotated[
-        list[UploadFile], File(description="TXT module reports")
-    ],
+    files: Annotated[list[UploadFile], File(description="TXT module reports")],
 ) -> dict:
     request_id = _PIPELINE_STATUS.enqueue(
         course_code,
@@ -632,6 +637,7 @@ async def process_files(
                             record_error(index, filename, exc)
 
                     try:
+
                         def report_progress(event: BatchProgressEvent) -> None:
                             index = (
                                 event.request_index
@@ -666,10 +672,13 @@ async def process_files(
                                 filename,
                                 error["error"],
                             )
-                        outputs = [str(output.resolve()) for output in batch_result.outputs]
+                        outputs = [
+                            str(output.resolve()) for output in batch_result.outputs
+                        ]
                         for item in items:
                             item_outputs = [
-                                str(path.resolve()) for path in item.paths.flashcard_parts
+                                str(path.resolve())
+                                for path in item.paths.flashcard_parts
                             ]
                             if all(path in outputs for path in item_outputs):
                                 _PIPELINE_STATUS.update(
@@ -708,9 +717,7 @@ async def process_files(
 @app.post("/process/{course_code}", include_in_schema=False)
 async def process_files_legacy(
     course_code: str,
-    files: Annotated[
-        list[UploadFile], File(description="Structured TXT module files")
-    ],
+    files: Annotated[list[UploadFile], File(description="Structured TXT module files")],
 ) -> dict:
     """Temporary compatibility route for older extension builds."""
     return await process_files(course_code, files)

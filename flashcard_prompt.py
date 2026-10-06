@@ -522,7 +522,9 @@ def build_retry_prompt(
         )
 
     rejected_json, omitted_entries = _trim_rejected_json(candidate)
-    rejected_block = rejected_json or "(rejected JSON omitted because it was unavailable or invalid)"
+    rejected_block = (
+        rejected_json or "(rejected JSON omitted because it was unavailable or invalid)"
+    )
     if omitted_entries:
         rejected_block += f"\n({omitted_entries} whole entries omitted to fit context)"
 
@@ -666,8 +668,8 @@ def build_cluster_retry_prompt(
             answer = card.get("correct_option")
             if isinstance(answer, str) and answer.strip():
                 forbidden_answers.append(
-                    f'    - Card {card_number}: the question must not contain '
-                    f'the answer text {json.dumps(answer.strip(), ensure_ascii=False)} '
+                    f"    - Card {card_number}: the question must not contain "
+                    f"the answer text {json.dumps(answer.strip(), ensure_ascii=False)} "
                     "or its abbreviation. Keep that correct_option and describe "
                     "its supported function or defining relationship instead."
                 )
@@ -682,7 +684,9 @@ def build_cluster_retry_prompt(
     if candidate is not None:
         try:
             candidate_value = json.loads(candidate)
-            if isinstance(candidate_value, dict) and isinstance(candidate_value.get("cards"), list):
+            if isinstance(candidate_value, dict) and isinstance(
+                candidate_value.get("cards"), list
+            ):
                 candidate_cards = candidate_value["cards"]
         except (ValueError, TypeError):
             pass
@@ -1118,11 +1122,31 @@ def build_grounding_review_prompt(
                 "cards": [
                     {
                         "question": card.question,
-                        **({"correct_option": card.correct_option} if card.correct_option else {}),
-                        **({"wrong_option_1": card.wrong_option_1} if card.wrong_option_1 else {}),
-                        **({"wrong_option_2": card.wrong_option_2} if card.wrong_option_2 else {}),
-                        **({"wrong_option_3": card.wrong_option_3} if card.wrong_option_3 else {}),
-                        **({"is_true": card.is_true} if card.is_true is not None else {}),
+                        **(
+                            {"correct_option": card.correct_option}
+                            if card.correct_option
+                            else {}
+                        ),
+                        **(
+                            {"wrong_option_1": card.wrong_option_1}
+                            if card.wrong_option_1
+                            else {}
+                        ),
+                        **(
+                            {"wrong_option_2": card.wrong_option_2}
+                            if card.wrong_option_2
+                            else {}
+                        ),
+                        **(
+                            {"wrong_option_3": card.wrong_option_3}
+                            if card.wrong_option_3
+                            else {}
+                        ),
+                        **(
+                            {"is_true": card.is_true}
+                            if card.is_true is not None
+                            else {}
+                        ),
                         "expalanation": card.expalanation,
                         "hint": card.hint,
                     }

@@ -10,6 +10,7 @@ from flashcard_pipeline import (
     FlashcardPipeline,
     GenerationError,
     PipelineConfig,
+    _context_fitted_plan_facts,
     _repair_grounding_errors,
 )
 from flashcard_types import (
@@ -525,6 +526,45 @@ def test_pipeline_uses_largest_balanced_fact_set_that_fits_context():
     assert messages[0] == (
         "Planning 20 concepts from 37 of 60 grounded lesson facts..."
     )
+
+
+def test_context_fitting_skips_an_oversized_leading_fact():
+    facts = (
+        GraphFact("f1", " ".join(f"{number}." for number in range(1000)), (1,)),
+        GraphFact("f2", "A project schedule orders activities.", (2,)),
+        GraphFact("f3", "A budget estimates project costs.", (3,)),
+    )
+
+    class SizedBackend:
+        context_window = 4096
+
+        def count_prompt_tokens(self, system, user):
+            assert system == PLAN_SYSTEM
+            ids = [item.split(":", 1)[0] for item in review_payload(user)["graph_facts"]]
+            return 500 + 4000 * ("f1" in ids) + 100 * len(ids)
+
+    selected = _context_fitted_plan_facts(
+        SizedBackend(), ModuleIdentity("CS0027", "4"), facts, (),
+        completion_tokens=3072,
+    )
+
+    assert [fact.fact_id for fact in selected] == ["f2", "f3"]
+
+
+def test_pipeline_rejects_empty_plan_fact_set_before_model_call():
+    class TinyBackend(FakeBackend):
+        context_window = 1100
+
+        def count_prompt_tokens(self, system, user):
+            return 300
+
+    backend = TinyBackend(())
+    pipeline = FlashcardPipeline(backend, progress=lambda _message: None)
+
+    with pytest.raises(GenerationError, match="no lesson facts fit"):
+        pipeline.run(ModuleIdentity("CS0027", "4"), graph_facts())
+
+    assert not backend.calls
 
 
 def test_invalid_cluster_is_retried_with_validator_feedback():

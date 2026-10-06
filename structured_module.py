@@ -277,6 +277,7 @@ def filter_lesson_fact_records(
             not _meaningful(statement)
             or len(statement) < 5
             or len(statement.split()) < 2
+            or not any(char.isalpha() for char in statement)
         ):
             continue
         topic = _clean_fact_text(record.get("topic", ""))

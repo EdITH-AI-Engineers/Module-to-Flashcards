@@ -207,7 +207,16 @@ def _context_fitted_plan_facts(
             low = middle
         else:
             high = middle - 1
-    return ordered[:low]
+    # A single oversized fact can prevent every prefix from fitting. Keep the
+    # balanced prefix, then consider later facts individually so one outlier
+    # cannot erase the rest of the lesson from the plan.
+    selected = list(ordered[:low])
+    for fact in ordered[low:]:
+        candidate = (*selected, fact)
+        prompt = build_concept_plan_prompt(identity, candidate, prior_concept_names)
+        if count_prompt_tokens(PLAN_SYSTEM, prompt) <= prompt_budget:
+            selected.append(fact)
+    return tuple(selected)
 
 
 DISTRACTOR_FACT_LIMIT = 12
@@ -1422,6 +1431,13 @@ class FlashcardPipeline:
             prior_concept_names,
             completion_tokens=self.config.plan_max_tokens,
         )
+        if not plan_facts:
+            if not eligible_plan_facts:
+                raise GenerationError("no usable lesson facts are available for concept planning")
+            raise GenerationError(
+                "no lesson facts fit the concept planning context window; "
+                "increase --n-ctx or reduce the source content"
+            )
         fact_count = f"{len(plan_facts)}"
         if len(plan_facts) < len(eligible_plan_facts):
             fact_count += f" of {len(eligible_plan_facts)}"

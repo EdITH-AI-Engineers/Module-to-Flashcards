@@ -1,10 +1,18 @@
+import pytest
+
 from flashcard_schema import (
     build_card_cluster_schema,
     build_cluster_batch_schema,
+    build_concept_plan_schema,
     build_numbered_card_repair_schema,
     build_single_card_schema,
 )
 from tests.test_flashcard_validator import valid_cards
+
+
+def test_concept_plan_schema_requires_fact_ids():
+    with pytest.raises(ValueError, match="at least one fact ID"):
+        build_concept_plan_schema(())
 
 
 def test_card_schema_omits_only_structural_constants():

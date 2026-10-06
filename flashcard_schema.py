@@ -21,6 +21,8 @@ def _strict_object(
 
 def build_concept_plan_schema(fact_ids: Sequence[str]) -> dict[str, object]:
     """Constrain planning output to either a complete plan or one refusal."""
+    if not fact_ids:
+        raise ValueError("concept planning requires at least one fact ID")
 
     concept = _strict_object(
         {

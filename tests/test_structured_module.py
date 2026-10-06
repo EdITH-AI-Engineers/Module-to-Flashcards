@@ -305,6 +305,23 @@ def test_filter_lesson_facts_keeps_a_sparse_short_substantive_claim():
     assert filter_lesson_fact_records(records) == records
 
 
+def test_filter_lesson_facts_drops_numeric_only_extraction_noise():
+    records = (
+        {
+            "id": "f1",
+            "statement": " ".join(f"{number}." for number in range(1, 1001)),
+            "kind": "content",
+        },
+        {
+            "id": "f2",
+            "statement": "Project schedules define when activities are completed.",
+            "kind": "content",
+        },
+    )
+
+    assert [fact["id"] for fact in filter_lesson_fact_records(records)] == ["f2"]
+
+
 def test_filter_lesson_facts_removes_numbered_presentation_metadata_generically():
     records = (
         {

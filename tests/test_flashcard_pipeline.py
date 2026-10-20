@@ -15,6 +15,7 @@ from flashcard_pipeline import (
 )
 from flashcard_types import (
     CompletionTruncatedError,
+    IncompleteCompletionError,
     ContextWindowExceededError,
     FlashcardCluster,
     FlashcardDraft,
@@ -48,6 +49,17 @@ class FakeBackend:
 
 def empty_review():
     return json.dumps({"issues": []})
+
+
+def test_unfinished_model_reply_is_repaired_before_flashcards_are_generated():
+    def unfinished(*args):
+        raise IncompleteCompletionError("Unfinished response (finish_reason: error).", finish_reason="error")
+    backend = FakeBackend([unfinished, plan_json()] + [cluster_json(position) for position in range(1, 21)])
+    pipeline = FlashcardPipeline(backend, PipelineConfig(final_review=False), progress=lambda message: None)
+    clusters = pipeline.run(ModuleIdentity("CPE0021", "1"), graph_facts())
+    assert len(clusters) == 20 and len(backend.calls) == 22
+    assert "finish_reason: error" in backend.calls[1][1]
+    assert pipeline.task_metrics["concept_plan"]["retries"] == 1
 
 
 def batch_json(*positions: int) -> str:

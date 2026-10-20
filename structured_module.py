@@ -533,8 +533,8 @@ class StructuredSlide:
         if self.number < 1:
             raise ValueError("slide number must be positive")
         method = _single_line(self.extraction_method).casefold()
-        if method != "text":
-            raise ValueError("extraction method must be text")
+        if method not in {"text", "ocr"}:
+            raise ValueError("extraction method must be text or ocr")
         object.__setattr__(self, "extraction_method", method)
         object.__setattr__(self, "title", _safe_item(self.title))
         object.__setattr__(self, "content", _items(self.content) or (NOT_SPECIFIED,))

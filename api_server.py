@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict
 from dataclasses import dataclass, field
+import json
 import os
 import re
 from argparse import Namespace
@@ -12,14 +13,22 @@ from tempfile import NamedTemporaryFile
 import threading
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, Response, UploadFile
+from fastapi import FastAPI, File, Form, Response, UploadFile, HTTPException, Request
+from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, Field
+from uuid import uuid4
+import time
 from fastapi.middleware.cors import CORSMiddleware
 
 from batch_pipeline import BatchItem, BatchProgressEvent, run_batch
 from artifact_paths import module_file_label
-from local_model import DEFAULT_N_CTX
+from flashcard_types import CompletionTruncatedError, IncompleteCompletionError
+from mistral_backend import DEFAULT_N_CTX, DEFAULT_MODEL, ApiKeyPool, MistralBackend, MistralRequestError
+from module_sources import pdf_identity
 from pipeline import pipeline_paths
 from portable_paths import PortablePaths, build_paths
+from saved_graphs import copy_graph_checkpoint, discover_graphs, saved_run_root, saved_run_summary
 from structured_module import (
     parse_module_metadata,
     parse_slide_report_metadata,
@@ -160,11 +169,12 @@ class PipelineStatusRegistry:
             request.finished = True
             self._trim_history()
 
-    def snapshot(self) -> dict[str, object]:
+    def snapshot(self, request_id: int | None = None) -> dict[str, object]:
         with self._lock:
             modules = [
                 self._module_snapshot(request.request_id, index, module)
                 for request in self._requests.values()
+                if request_id is None or request.request_id == request_id
                 for index, module in enumerate(request.modules)
             ]
         active = next(
@@ -233,6 +243,185 @@ app.add_middleware(
 )
 
 
+@dataclass
+class _MistralSession:
+    pool: ApiKeyPool
+    model: str
+    workers: int
+    ocr_language: str = "eng"
+    ocr_mode: str = "auto"
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    request_id: int = 0
+    last_used: float = field(default_factory=time.monotonic)
+    final_status: dict | None = None
+    run_number: int = 0
+
+
+_SESSIONS: dict[str, _MistralSession] = {}
+_SESSIONS_LOCK = threading.Lock()
+
+
+def _get_session(session_id: str) -> _MistralSession:
+    with _SESSIONS_LOCK:
+        session = _SESSIONS.get(session_id)
+        if session is None:
+            raise HTTPException(404, "Run not found. Create a new run after restarting the server.")
+        session.last_used = time.monotonic()
+        return session
+
+
+@app.middleware("http")
+async def protect_run_configuration(request: Request, call_next):
+    # Credential configuration is available only to pages on this server.
+    # Existing extension clients retain the original /process interface.
+    if request.url.path.startswith("/api/"):
+        origin = request.headers.get("origin")
+        if origin and origin != f"{request.url.scheme}://{request.headers.get('host')}":
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"detail": "Open the app on this server to configure runs."}, status_code=403)
+    return await call_next(request)
+
+
+@app.exception_handler(RequestValidationError)
+async def safe_validation_error(request: Request, exc: RequestValidationError):
+    from fastapi.exception_handlers import request_validation_exception_handler
+    from fastapi.responses import JSONResponse
+    if request.url.path == "/api/sessions":
+        return JSONResponse({"detail": "Check API keys, model ID, and worker count (1–20)."}, status_code=422)
+    return await request_validation_exception_handler(request, exc)
+
+
+class SessionSettings(BaseModel):
+    apiKeys: list[str] = Field(min_length=1, max_length=100, repr=False)
+    model: str = Field(default=DEFAULT_MODEL, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
+    workers: int = Field(default=1, ge=1, le=20)
+    ocrLanguage: str = Field(default="eng", pattern=r"^[A-Za-z0-9_]+(?:\+[A-Za-z0-9_]+)*$", max_length=80)
+    ocrMode: str = Field(default="auto", pattern=r"^(auto|always)$")
+
+
+class ResumeSettings(BaseModel):
+    sourceRunId: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+@app.get("/", response_class=HTMLResponse)
+def home():
+    from web_ui import HTML
+    return HTMLResponse(HTML, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/sessions")
+def create_session(settings: SessionSettings, response: Response):
+    try:
+        pool = ApiKeyPool(settings.apiKeys)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    with _SESSIONS_LOCK:
+        now = time.monotonic()
+        for key, old in list(_SESSIONS.items()):
+            if not old.lock.locked() and now - old.last_used > 12 * 3600:
+                del _SESSIONS[key]
+        if len(_SESSIONS) >= 64:
+            raise HTTPException(409, "Close a completed run before creating another (64 run limit).")
+        session_id = uuid4().hex
+        run_number = max((old.run_number for old in _SESSIONS.values()), default=0) + 1
+        _SESSIONS[session_id] = _MistralSession(pool, settings.model, settings.workers,
+            ocr_language=settings.ocrLanguage, ocr_mode=settings.ocrMode, run_number=run_number)
+    response.headers["Cache-Control"] = "no-store"
+    return {"sessionId": session_id, "runNumber": run_number, "keys": pool.snapshot()}
+
+
+@app.get("/api/sessions")
+def list_sessions(response: Response):
+    """Rediscover submitted runs after refresh without storing API keys in the browser."""
+    response.headers["Cache-Control"] = "no-store"
+    with _SESSIONS_LOCK:
+        return {"sessions": [
+            {"sessionId": session_id, "runNumber": session.run_number,
+             "model": session.model, "running": session.lock.locked()}
+            for session_id, session in _SESSIONS.items() if session.request_id
+        ]}
+
+
+@app.get("/api/ocr")
+def ocr_status():
+    from pdf_ingestion import find_tesseract
+    try:
+        find_tesseract()
+        return {"available": True, "message": "Tesseract OCR is ready."}
+    except RuntimeError as exc:
+        return {"available": False, "message": str(exc)}
+
+
+@app.post("/api/sessions/{session_id}/check")
+async def check_session_model(session_id: str):
+    """Check actual model access before the browser uploads any module PDFs."""
+    session = _get_session(session_id)
+    if not session.lock.acquire(blocking=False):
+        raise HTTPException(409, "Wait for this run to finish before checking its model.")
+    try:
+        backend = MistralBackend(session.pool, model=session.model, timeout=30,
+                                 retry_wait_timeout=45, max_retries=1)
+        try:
+            result = await asyncio.to_thread(backend.complete,
+                "Return JSON only.", 'Reply with {"ok":true}.', max_tokens=32,
+                schema={"type": "object", "properties": {"ok": {"type": "boolean"}},
+                        "required": ["ok"], "additionalProperties": False})
+        except MistralRequestError as exc:
+            status = exc.status if exc.status in (400, 401, 402, 403, 404, 429) else (
+                429 if exc.category == "rate_limited" else 502)
+            raise HTTPException(status, session.pool.redact(exc, 1000)) from None
+        except (IncompleteCompletionError, CompletionTruncatedError) as exc:
+            raise HTTPException(502, session.pool.redact(exc, 1000)) from None
+        try:
+            if json.loads(result) != {"ok": True}:
+                raise ValueError("Unexpected connection check response")
+        except (ValueError, TypeError):
+            raise HTTPException(502, "Mistral did not return a valid model connection check.") from None
+        return {"model": session.model, "message": "Mistral model connection verified."}
+    finally:
+        session.lock.release()
+
+
+@app.get("/api/sessions/{session_id}")
+def session_status(session_id: str, response: Response):
+    session = _get_session(session_id)
+    response.headers["Cache-Control"] = "no-store"
+    status = session.final_status or _PIPELINE_STATUS.snapshot(session.request_id)
+    return {**status, "runNumber": session.run_number, "model": session.model, "keys": session.pool.snapshot(), "apiDiagnostics": session.pool.diagnostics(),
+            "running": session.lock.locked()}
+
+
+@app.delete("/api/sessions/{session_id}")
+def close_session(session_id: str):
+    with _SESSIONS_LOCK:
+        session = _get_session_unlocked(session_id)
+        if not session.lock.acquire(blocking=False):
+            raise HTTPException(409, "Wait for this run to finish before closing it.")
+        del _SESSIONS[session_id]
+    return {"closed": True}
+
+
+def _get_session_unlocked(session_id: str) -> _MistralSession:
+    session = _SESSIONS.get(session_id)
+    if session is None:
+        raise HTTPException(404, "Run not found.")
+    return session
+
+
+@app.get("/api/sessions/{session_id}/files/{request_index}/{part}")
+def download_csv(session_id: str, request_index: int, part: int):
+    session = _get_session(session_id)
+    status = session.final_status or _PIPELINE_STATUS.snapshot(session.request_id)
+    module = next((item for item in status["modules"] if item["index"] == request_index), None)
+    if module is None or module["state"] != "completed" or part not in (1, 2) or len(module["outputs"]) != 2:
+        raise HTTPException(404, "Completed CSV not found.")
+    path = Path(module["outputs"][part - 1]).resolve()
+    root = (OUTPUT_ROOT.parent / "runs" / session_id).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise HTTPException(404, "Completed CSV not found.")
+    return FileResponse(path, media_type="text/csv", filename=path.name)
+
+
 def configure_api_storage(paths: PortablePaths) -> None:
     global PROJECT_DIR, _RUNTIME_PATHS, UPLOAD_DIR, OUTPUT_ROOT, MODEL_DIR
     global REBEL_MODEL, PORTABLE_MODE
@@ -258,8 +447,8 @@ def safe_filename(filename: str) -> str:
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
     if not name:
         raise ValueError("uploaded file must have a filename")
-    if not name.casefold().endswith(".txt"):
-        raise ValueError("only TXT module reports are accepted")
+    if Path(name).suffix.casefold() not in {".txt", ".pdf"}:
+        raise ValueError("only PDF modules or TXT module reports are accepted")
     return name
 
 
@@ -267,7 +456,7 @@ def filename_module_identity(filename: str) -> tuple[str, str] | None:
     """Return identity from an exact ``<course>-M<number>.txt`` filename."""
     name = Path(filename).name
     match = re.fullmatch(
-        r"(?P<course>[A-Za-z0-9][A-Za-z0-9._-]*)-M(?P<module>[0-9]+)\.txt",
+        r"(?P<course>[A-Za-z0-9][A-Za-z0-9._-]*)-M(?P<module>[0-9]+)\.(?:txt|pdf)",
         name,
         flags=re.IGNORECASE,
     )
@@ -287,9 +476,9 @@ def safe_course_component(course_code: str) -> str:
     return component
 
 
-def course_upload_directory(course_code: str) -> Path:
+def course_upload_directory(course_code: str, upload_root: Path | None = None) -> Path:
     component = safe_course_component(course_code)
-    root = UPLOAD_DIR.resolve()
+    root = (upload_root or UPLOAD_DIR).resolve()
     destination = (root / component).resolve()
     try:
         destination.relative_to(root)
@@ -320,9 +509,18 @@ async def acquire_request_lock() -> None:
         raise RuntimeError("could not acquire the batch request lock")
 
 
-async def save_upload(upload: UploadFile, course_code: str) -> Path:
+async def _run_owned_thread(function, *args, **kwargs):
+    """Keep run ownership until an off-thread file operation has finished."""
+    task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        return await task
+
+
+async def save_upload(upload: UploadFile, course_code: str, upload_root: Path | None = None) -> Path:
     filename = safe_filename(upload.filename or "")
-    destination_dir = course_upload_directory(course_code)
+    destination_dir = course_upload_directory(course_code, upload_root)
     destination_dir.mkdir(parents=True, exist_ok=True)
 
     temporary_path: Path | None = None
@@ -385,22 +583,23 @@ def structured_module_number(source: Path, course_code: str) -> str:
     return report_metadata["module_number"]
 
 
-def canonical_module_filename(course_code: str, module_number: str) -> str:
+def canonical_module_filename(course_code: str, module_number: str, extension: str = ".txt") -> str:
     """Build the canonical upload name from payload identity."""
     course = safe_course_component(course_code)
     module = module_file_label(module_number)
-    return f"{course}_M{module}.txt"
+    return f"{course}_M{module}{extension}"
 
 
 def publish_module_upload(
     staged_source: Path,
     course_code: str,
     module_number: str,
+    extension: str = ".txt",
 ) -> Path:
     """Atomically rename a validated staged upload to its canonical name."""
     source = Path(staged_source)
     destination = source.with_name(
-        canonical_module_filename(course_code, module_number)
+        canonical_module_filename(course_code, module_number, extension)
     )
     if source != destination:
         source.replace(destination)
@@ -439,12 +638,16 @@ def pipeline_args(
         identity_from_filename=identity_from_filename,
         output_root=OUTPUT_ROOT,
         model_dir=MODEL_DIR,
+        mistral_model=os.environ.get("MISTRAL_MODEL", DEFAULT_MODEL),
         rebel_model=REBEL_MODEL,
         portable=PORTABLE_MODE,
         attempts=3,
         seed=42,
         n_gpu_layers=MODEL_GPU_LAYERS,
         n_ctx=DEFAULT_N_CTX,
+        ocr_language="eng",
+        ocr_dpi=200,
+        ocr_mode="auto",
         cluster_workers=cluster_workers,
         clusters_per_call=clusters_per_call,
         timeout=0,
@@ -470,7 +673,130 @@ def pipeline_status(response: Response) -> dict[str, object]:
     return _PIPELINE_STATUS.snapshot()
 
 
-@app.post("/process")
+@app.get("/api/saved-runs")
+def list_saved_runs(response: Response):
+    """Find durable graph checkpoints even when session memory was lost."""
+    response.headers["Cache-Control"] = "no-store"
+    root = OUTPUT_ROOT.parent / "runs"
+    runs = []
+    if root.is_dir():
+        for candidate in root.iterdir():
+            if not re.fullmatch(r"[a-f0-9]{32}", candidate.name):
+                continue
+            try:
+                run_root = saved_run_root(root, candidate.name)
+                summary = saved_run_summary(run_root)
+            except (OSError, ValueError):
+                continue
+            if summary is not None:
+                with _SESSIONS_LOCK:
+                    session = _SESSIONS.get(candidate.name)
+                    summary["running"] = bool(session and session.lock.locked())
+                runs.append(summary)
+    return {"runs": sorted(runs, key=lambda run: run["updatedAt"], reverse=True)}
+
+
+@app.post("/api/sessions/{session_id}/resume")
+async def resume_saved_graphs(session_id: str, settings: ResumeSettings):
+    """Generate only flashcards in a new run, preserving the source checkpoint."""
+    session = _get_session(session_id)
+    if settings.sourceRunId == session_id:
+        raise HTTPException(409, "Choose a previous run to continue in this new run.")
+    if not session.lock.acquire(blocking=False):
+        raise HTTPException(409, "This run is already processing.")
+    source_session = None
+    source_locked = False
+    request_id = None
+    outputs: list[str] = []
+    errors: list[dict[str, object]] = []
+    try:
+        if session.request_id:
+            raise HTTPException(409, "Create a new run to continue saved graphs.")
+        try:
+            source_root = saved_run_root(OUTPUT_ROOT.parent / "runs", settings.sourceRunId)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from None
+        with _SESSIONS_LOCK:
+            source_session = _SESSIONS.get(settings.sourceRunId)
+            if source_session is not None:
+                source_locked = source_session.lock.acquire(blocking=False)
+                if not source_locked:
+                    raise HTTPException(409, "The saved run is still processing. Wait for it to finish.")
+        modules, discovery_errors = await _run_owned_thread(discover_graphs, source_root)
+        if not modules:
+            raise HTTPException(422, "This run has no usable saved knowledge graphs.")
+        destination_root = OUTPUT_ROOT.parent / "runs" / session_id
+        request_id = _PIPELINE_STATUS.enqueue("", [
+            canonical_module_filename(module.course_code, module.module_number, ".json")
+            for module in modules
+        ] + [error["file"] for error in discovery_errors])
+        session.request_id = request_id
+        session.final_status = None
+
+        def fail(index: int, filename: str, error: object):
+            message = session.pool.redact(error, 2000)
+            errors.append({"file": filename, "error": message})
+            _PIPELINE_STATUS.update(request_id, index, state="failed", stage="failed",
+                                    message=message, error=message)
+
+        for index, error in enumerate(discovery_errors, start=len(modules)):
+            fail(index, error["file"], error["error"])
+        items = []
+        for index, module in enumerate(modules):
+            filename = canonical_module_filename(module.course_code, module.module_number, ".json")
+            try:
+                paths = await _run_owned_thread(copy_graph_checkpoint, module, destination_root)
+                args = pipeline_args(paths.graph_json if module.checked else paths.unchecked_graph_json,
+                                     module.course_code, module.module_number)
+                args.start_from_graph = True
+                args.output_root = destination_root / "pipeline_output"
+                args._mistral_pool = session.pool
+                args.mistral_model = session.model
+                args.cluster_workers = session.workers
+                args.skip_final_review = False
+                items.append(BatchItem(filename, args, paths, request_index=index))
+                _PIPELINE_STATUS.update(request_id, index, course_code=module.course_code,
+                    module_number=module.module_number, stage="flashcards", progress_percent=45,
+                    message="Continuing from saved knowledge graph.")
+            except (OSError, ValueError, RuntimeError) as exc:
+                fail(index, filename, exc)
+        if source_locked:
+            source_session.lock.release()
+            source_locked = False
+
+        def report_progress(event: BatchProgressEvent):
+            if event.request_index is not None:
+                _PIPELINE_STATUS.apply_event(request_id, event.request_index, event)
+
+        try:
+            result = await _run_owned_thread(run_batch, tuple(items), progress=report_progress)
+        except (OSError, ValueError, RuntimeError) as exc:
+            for item in items:
+                fail(item.request_index, item.filename, exc)
+        else:
+            for error in result.errors:
+                index = error.get("uploadIndex")
+                if not isinstance(index, int):
+                    index = next(item.request_index for item in items if item.filename == error["file"])
+                fail(index, str(error["file"]), error["error"])
+            outputs = [str(path.resolve()) for path in result.outputs]
+            for item in items:
+                item_outputs = [str(path.resolve()) for path in item.paths.flashcard_parts]
+                if all(path in outputs for path in item_outputs):
+                    _PIPELINE_STATUS.update(request_id, item.request_index,
+                        state="completed", stage="complete", progress_percent=100,
+                        message="Module processing complete.", output=item_outputs[0], outputs=item_outputs)
+        return {"outputs": outputs, "errors": errors, "sourceRunId": settings.sourceRunId}
+    finally:
+        if source_locked:
+            source_session.lock.release()
+        if request_id is not None:
+            _PIPELINE_STATUS.finish(request_id)
+            session.final_status = _PIPELINE_STATUS.snapshot(request_id)
+        session.last_used = time.monotonic()
+        session.lock.release()
+
+
 async def process_files(
     course_code: Annotated[
         str,
@@ -480,13 +806,20 @@ async def process_files(
         ),
     ],
     files: Annotated[
-        list[UploadFile], File(description="TXT module reports")
+        list[UploadFile], File(description="Module PDFs from course folders, or TXT reports")
     ],
+    session_id: str | None = None,
 ) -> dict:
+    session = _get_session(session_id) if session_id is not None else None
+    if session is not None and not session.lock.acquire(blocking=False):
+        raise HTTPException(409, "This run is already processing. Create another run for separate data.")
     request_id = _PIPELINE_STATUS.enqueue(
         course_code,
         [upload.filename or "(unnamed)" for upload in files],
     )
+    if session is not None:
+        session.request_id = request_id
+        session.final_status = None
     indexed_errors: list[tuple[int, int, dict[str, str]]] = []
     error_order = 0
 
@@ -511,6 +844,8 @@ async def process_files(
     try:
         has_filename_identity = any(
             filename_module_identity(upload.filename or "") is not None
+            or (str(upload.filename).lower().endswith(".pdf")
+                and len(str(upload.filename).replace("\\", "/").split("/")) > 1)
             for upload in files
         )
         if not has_filename_identity and not course_code.strip():
@@ -523,14 +858,16 @@ async def process_files(
             except ValueError as exc:
                 record_error(-1, "(batch)", exc)
             else:
-                await acquire_request_lock()
+                if session is None:
+                    await acquire_request_lock()
                 try:
                     items: list[BatchItem] = []
                     item_indexes: dict[str, int] = {}
                     seen_module_filenames: set[str] = set()
                     seen_workspaces: set[str] = set()
                     seen_outputs: set[str] = set()
-                    output_root = OUTPUT_ROOT
+                    run_root = OUTPUT_ROOT.parent / "runs" / session_id if session else None
+                    output_root = run_root / "pipeline_output" if run_root else OUTPUT_ROOT
                     for index, upload in enumerate(files):
                         filename = upload.filename or "(unnamed)"
                         source: Path | None = None
@@ -547,6 +884,9 @@ async def process_files(
                             filename_identity = filename_module_identity(
                                 upload.filename or ""
                             )
+                            is_pdf = str(upload.filename).lower().endswith(".pdf")
+                            if is_pdf:
+                                filename_identity = pdf_identity(upload.filename or "", course_code)
                             effective_course = (
                                 filename_identity[0]
                                 if filename_identity is not None
@@ -556,15 +896,22 @@ async def process_files(
                                 raise ValueError("Missing course code")
                             safe_course_component(effective_course)
                             course_upload_directory(effective_course)
-                            source = await save_upload(upload, effective_course)
+                            source = (
+                                await save_upload(upload, effective_course, run_root / "uploads")
+                                if run_root else await save_upload(upload, effective_course)
+                            )
                             module_number = (
                                 filename_identity[1]
                                 if filename_identity is not None
                                 else structured_module_number(source, effective_course)
                             )
+                            if is_pdf:
+                                from pdf_ingestion import validate_pdf
+                                await asyncio.to_thread(validate_pdf, source)
                             canonical_filename = canonical_module_filename(
                                 effective_course,
                                 module_number,
+                                ".pdf" if is_pdf else ".txt",
                             )
                             canonical_key = canonical_filename.casefold()
                             if canonical_key in seen_module_filenames:
@@ -577,6 +924,7 @@ async def process_files(
                                 source,
                                 effective_course,
                                 module_number,
+                                ".pdf" if is_pdf else ".txt",
                             )
                             args = pipeline_args(
                                 source,
@@ -584,6 +932,13 @@ async def process_files(
                                 module_number,
                                 identity_from_filename=filename_identity is not None,
                             )
+                            if session is not None:
+                                args._mistral_pool = session.pool
+                                args.mistral_model = session.model
+                                args.cluster_workers = session.workers
+                                args.ocr_language = session.ocr_language
+                                args.ocr_mode = session.ocr_mode
+                                args.skip_final_review = False
                             paths = pipeline_paths(
                                 source,
                                 output_root,
@@ -645,11 +1000,14 @@ async def process_files(
                                     event,
                                 )
 
-                        batch_result = await asyncio.to_thread(
-                            run_batch,
-                            tuple(items),
-                            progress=report_progress,
-                        )
+                        batch_task = asyncio.create_task(asyncio.to_thread(
+                            run_batch, tuple(items), progress=report_progress))
+                        try:
+                            batch_result = await asyncio.shield(batch_task)
+                        except asyncio.CancelledError:
+                            # A disconnected browser must not release ownership
+                            # while its worker still writes this run's files.
+                            batch_result = await batch_task
                     except (OSError, ValueError, RuntimeError) as exc:
                         for item in items:
                             record_error(item.request_index, item.filename, exc)
@@ -683,7 +1041,8 @@ async def process_files(
                                     outputs=item_outputs,
                                 )
                 finally:
-                    _REQUEST_LOCK.release()
+                    if session is None:
+                        _REQUEST_LOCK.release()
     finally:
         for index, upload in enumerate(files):
             filename = upload.filename or "(unnamed)"
@@ -692,6 +1051,10 @@ async def process_files(
             except Exception as exc:
                 record_error(index, filename, exc)
         _PIPELINE_STATUS.finish(request_id)
+        if session is not None:
+            session.final_status = _PIPELINE_STATUS.snapshot(request_id)
+            session.last_used = time.monotonic()
+            session.lock.release()
 
     errors = [
         error
@@ -703,6 +1066,15 @@ async def process_files(
         "courseCode": course_code,
         "processUrl": "/process",
     }
+
+
+@app.post("/process")
+async def upload_modules(
+    files: Annotated[list[UploadFile], File(description="Module PDFs from course folders, or TXT reports")],
+    course_code: Annotated[str, Form(alias="courseCode")] = "",
+    session_id: str | None = None,
+) -> dict:
+    return await process_files(course_code, files, session_id)
 
 
 @app.post("/process/{course_code}", include_in_schema=False)

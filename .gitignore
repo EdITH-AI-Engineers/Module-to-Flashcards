@@ -1,5 +1,6 @@
 __pycache__/
 .pytest_cache/
+.pytest-tmp*/
 .venv*/
 .worktrees/
 models/
@@ -18,5 +19,6 @@ packaging/assets/
 structured_text/
 progress.json
 progress.log
+runs/
 *.tmp
 *.pyc

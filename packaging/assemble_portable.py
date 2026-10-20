@@ -17,11 +17,8 @@ from portable_manifest import verify_manifest, write_manifest
 
 _VERSION_PACKAGES = (
     "fastapi",
-    "huggingface-hub",
-    "llama-cpp-python",
-    "sentencepiece",
-    "torch",
-    "transformers",
+    "python-multipart",
+    "PyMuPDF",
     "uvicorn",
 )
 
@@ -114,7 +111,7 @@ def _copy_declared_models(repo_root: Path, source: Path, destination: Path) -> N
 
 
 def _manifest_assets(output: Path) -> tuple[Path, ...]:
-    roots = (output / "models", output / "licenses")
+    roots = (output / "models", output / "licenses", output / "tesseract")
     files = []
     for root in roots:
         files.extend(
@@ -129,12 +126,13 @@ def assemble_portable(
     *,
     repo_root: Path = PROJECT_ROOT,
     frozen_app: Path,
-    assets: Path,
+    assets: Path | None = None,
+    tesseract_dir: Path | None = None,
     output_dir: Path | None = None,
 ) -> Path:
     repo_root = Path(repo_root).resolve()
     frozen_app = _require_directory(frozen_app, "frozen application")
-    assets = _require_directory(assets, "staged assets")
+    assets = _require_directory(assets, "staged assets") if assets is not None else None
     output = _distribution_output(repo_root, output_dir)
     executable = frozen_app / "ModuleToFlashcards.exe"
     runtime = frozen_app / "runtime"
@@ -142,15 +140,24 @@ def assemble_portable(
         raise ValueError(f"frozen application is missing ModuleToFlashcards.exe: {executable}")
     if not runtime.is_dir():
         raise ValueError(f"frozen application is missing runtime directory: {runtime}")
-    models_source = _require_directory(assets / "models", "staged models")
+    models_source = _require_directory(assets / "models", "staged models") if assets is not None else None
     if frozen_app == output:
         raise ValueError("frozen application and distribution directory must be different")
+    if tesseract_dir is not None:
+        tesseract_dir = _require_directory(tesseract_dir, "Tesseract")
+        if not (tesseract_dir / "tesseract.exe").is_file() or not (tesseract_dir / "tessdata" / "eng.traineddata").is_file():
+            raise ValueError("Tesseract bundle needs tesseract.exe and tessdata/eng.traineddata")
 
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists():
         shutil.rmtree(output)
     shutil.copytree(frozen_app, output)
-    _copy_declared_models(repo_root, models_source, output / "models")
+    if tesseract_dir is not None:
+        shutil.copytree(tesseract_dir, output / "tesseract")
+    if models_source is not None:
+        _copy_declared_models(repo_root, models_source, output / "models")
+    else:
+        (output / "models").mkdir(exist_ok=True)
 
     for relative in ("uploads", "pipeline_output", "temporary", "logs"):
         (output / "data" / relative).mkdir(parents=True, exist_ok=True)
@@ -170,7 +177,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Assemble the portable Windows bundle.")
     parser.add_argument("--repo-root", type=Path, default=PROJECT_ROOT)
     parser.add_argument("--frozen-app", type=Path, required=True)
-    parser.add_argument("--assets", type=Path, required=True)
+    parser.add_argument("--assets", type=Path, help="optional legacy local-model assets")
+    parser.add_argument("--tesseract-dir", type=Path, help="Tesseract install directory to bundle with language data")
     parser.add_argument("--output-dir", type=Path)
     return parser.parse_args(argv)
 
@@ -181,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
         repo_root=args.repo_root,
         frozen_app=args.frozen_app,
         assets=args.assets,
+        tesseract_dir=args.tesseract_dir,
         output_dir=args.output_dir,
     )
     print(f"Portable distribution assembled at {result}")

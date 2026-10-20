@@ -5,6 +5,7 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -13,10 +14,11 @@ import time
 from typing import Callable, Sequence
 
 from flashcard_pipeline import GenerationError
-from flashcard_csv import migrate_legacy_module
+from flashcard_csv import migrate_legacy_module, valid_written_receipt
 from flashcard_types import ModuleIdentity
 from graph_input import GraphInputError
-from local_model import LocalModelBackend, ensure_model, thread_budget_for_workers
+from mistral_backend import DEFAULT_MODEL as MISTRAL_MODEL, MistralRequestError, backend_from_args
+from saved_graphs import valid_graph_checkpoint
 import main as flashcard_generator
 from pipeline import (
     PipelinePaths,
@@ -26,8 +28,6 @@ from pipeline import (
     _valid_structured_text,
     stage_structured_module,
 )
-import text_extractor
-from text_extractor import DEFAULT_MODEL, load_runtime, release_runtime
 
 
 Loader = Callable[[argparse.Namespace], AbstractContextManager[object]]
@@ -95,6 +95,7 @@ _STAGE_ERRORS = (
 )
 
 _SHARED_CONFIGURATION = (
+    ("--mistral-model", "mistral_model"),
     ("--model-dir", "model_dir"),
     ("--n-ctx", "n_ctx"),
     ("--n-gpu-layers", "n_gpu_layers"),
@@ -136,9 +137,14 @@ def _manifest_settings(args: argparse.Namespace) -> dict[str, object]:
         "graph_chunk_tokens": getattr(args, "chunk_tokens", 384),
         "graph_overlap_tokens": getattr(args, "overlap_tokens", 64),
         "graph_max_new_tokens": getattr(args, "max_new_tokens", 192),
-        "graph_model": DEFAULT_MODEL,
-        "graph_checker": "local-model-conservative-v1",
+        "graph_model": getattr(args, "mistral_model", None) or os.environ.get("MISTRAL_MODEL", MISTRAL_MODEL),
+        "graph_checker": "mistral-conservative-v1",
+        "provider": "mistral-api-v1",
     }
+    if Path(args.input).suffix.casefold() == ".pdf":
+        settings.update(pdf_ingestion="tesseract-mistral-filter-indexes-v4",
+            ocr_language=getattr(args, "ocr_language", "eng"),
+            ocr_dpi=getattr(args, "ocr_dpi", 200), ocr_mode=getattr(args, "ocr_mode", "auto"))
     workers = getattr(args, "cluster_workers", "auto")
     if workers != 1:
         settings["cluster_workers"] = workers
@@ -259,6 +265,8 @@ def _invalidate_for_recomputation(state: _BatchState) -> None:
 
 
 def _configuration_value(args: argparse.Namespace, attribute: str):
+    if attribute == "mistral_model":
+        return getattr(args, attribute, None) or os.environ.get("MISTRAL_MODEL", MISTRAL_MODEL)
     value = getattr(args, attribute)
     if attribute == "model_dir":
         return Path(value).resolve()
@@ -283,21 +291,7 @@ def _configuration_error(items: Sequence[BatchItem]) -> str | None:
 
 @contextmanager
 def _model_loader(args: argparse.Namespace):
-    if getattr(args, "portable", False):
-        model_path = ensure_model(args.model_dir, allow_download=False)
-    else:
-        model_path = ensure_model(args.model_dir)
-    backend = LocalModelBackend(
-        model_path,
-        n_ctx=args.n_ctx,
-        n_gpu_layers=args.n_gpu_layers,
-        n_threads=(
-            thread_budget_for_workers(args.cluster_workers)
-            if isinstance(args.cluster_workers, int)
-            else None
-        ),
-        seed=args.seed,
-    )
+    backend = backend_from_args(args)
     try:
         yield backend
     finally:
@@ -306,21 +300,20 @@ def _model_loader(args: argparse.Namespace):
 
 @contextmanager
 def _rebel_loader(args: argparse.Namespace):
-    if getattr(args, "portable", False):
-        runtime = load_runtime(
-            args.rebel_model,
-            args.kg_device,
-            local_files_only=True,
-        )
-    else:
-        runtime = load_runtime(DEFAULT_MODEL, args.kg_device)
-    try:
-        yield runtime
-    finally:
-        release_runtime(runtime)
+    # Retain this adapter name for existing callers of BatchDependencies.
+    with _model_loader(args) as backend:
+        yield backend
 
 
 def _ingest_stage(item: BatchItem, _runtime: object) -> Path:
+    if Path(item.args.input).suffix.casefold() == ".pdf":
+        from pdf_ingestion import convert_pdf
+        with _model_loader(item.args) as backend:
+            return convert_pdf(item.args.input, item.paths.structured_text,
+                course_code=item.args.course_code, module_number=item.args.module_number,
+                backend=backend, language=getattr(item.args, "ocr_language", "eng"),
+                dpi=getattr(item.args, "ocr_dpi", 200), mode=getattr(item.args, "ocr_mode", "auto"),
+                attempts=item.args.attempts, progress=getattr(item.args, "_ingest_progress", None))
     return stage_structured_module(
         item.args.input,
         item.paths.structured_text,
@@ -333,17 +326,17 @@ def _ingest_stage(item: BatchItem, _runtime: object) -> Path:
 
 
 def _graph_stage(item: BatchItem, runtime: object) -> tuple[Path, Path]:
+    import mistral_graph
     args = argparse.Namespace(**vars(item.args))
     args.input = item.paths.structured_text
     args.output_dir = item.paths.unchecked_graph_dir
-    args.model = getattr(item.args, "rebel_model", DEFAULT_MODEL)
     args.chunk_tokens = getattr(args, "chunk_tokens", 384)
     args.overlap_tokens = getattr(args, "overlap_tokens", 64)
     args.batch_size = item.args.kg_batch_size
     args.num_beams = item.args.kg_num_beams
     args.max_new_tokens = getattr(args, "max_new_tokens", 192)
     args.device = item.args.kg_device
-    return text_extractor.run(args, runtime=runtime)
+    return mistral_graph.run(args, runtime)
 
 
 def _flashcard_stage(item: BatchItem, backend: object) -> Path | None:
@@ -371,29 +364,47 @@ PRODUCTION_DEPENDENCIES = BatchDependencies(
 )
 
 
+def _checked_graph_available(item: BatchItem) -> bool:
+    if getattr(item.args, "start_from_graph", False):
+        return valid_graph_checkpoint(item.paths.graph_json, checked=True)
+    return _valid_checked_graph(item.paths.graph_json)
+
+
+def _flashcards_available(item: BatchItem) -> bool:
+    if getattr(item.args, "start_from_graph", False):
+        # Receipts are published only after full validation. Matching hashes
+        # let recovery reuse a large batch without repeating duplicate scans.
+        return valid_written_receipt(item.paths.flashcards,
+            ModuleIdentity(item.args.course_code, item.args.module_number))
+    return _valid_flashcards(item.paths.flashcards, item.args.module_number, item.args.course_code)
+
+
 def _make_state(item: BatchItem, timeout_seconds: float | None) -> _BatchState:
     args = item.args
     paths = item.paths
-    reusable = _manifest_matches(item)
-    needs_ingest = (
-        args.force
-        or not reusable
-        or not _valid_structured_text(
-            paths.structured_text,
-            identity_from_filename=getattr(args, "identity_from_filename", False),
+    if getattr(args, "start_from_graph", False):
+        # An explicit graph checkpoint does not depend on the original PDF,
+        # structured text, or generation settings from the interrupted run.
+        needs_ingest = needs_graph = False
+    else:
+        reusable = _manifest_matches(item)
+        needs_ingest = (
+            args.force
+            or not reusable
+            or not _valid_structured_text(
+                paths.structured_text,
+                identity_from_filename=getattr(args, "identity_from_filename", False),
+            )
         )
-    )
-    has_graph_source = _valid_graph(paths.unchecked_graph_json) or _valid_checked_graph(
-        paths.graph_json
-    )
-    needs_graph = needs_ingest or args.force or not has_graph_source
+        has_graph_source = _valid_graph(paths.unchecked_graph_json) or _valid_checked_graph(
+            paths.graph_json
+        )
+        needs_graph = needs_ingest or args.force or not has_graph_source
     needs_flashcards = (
         needs_graph
         or args.force
-        or not _valid_checked_graph(paths.graph_json)
-        or not _valid_flashcards(
-            paths.flashcards, args.module_number, args.course_code
-        )
+        or not _checked_graph_available(item)
+        or not _flashcards_available(item)
     )
     if needs_ingest:
         stage, progress_percent = "ingest", 0
@@ -608,6 +619,8 @@ def _run_stage(
                         flush=True,
                     )
                     _fail(state, str(exc), progress)
+                    if _stop_for_mistral_configuration(states, exc, progress):
+                        return False
                     print(
                         f"[{state.item.filename}] {stage_name} failed: {exc}",
                         flush=True,
@@ -638,6 +651,23 @@ def _fail(
     )
 
 
+def _stop_for_mistral_configuration(
+    states: Sequence[_BatchState], error: BaseException, progress: ProgressCallback | None,
+) -> bool:
+    cause = error
+    while cause is not None:
+        if isinstance(cause, MistralRequestError) and cause.category in {
+            "access_denied", "model_unavailable", "keys_unavailable", "tls_error",
+        }:
+            message = "Run stopped before processing more modules. " + str(cause)
+            for state in states:
+                if state.active and state.stage != "complete" and _has_remaining_work(state):
+                    _fail(state, message, progress)
+            return True
+        cause = cause.__cause__
+    return False
+
+
 def _has_remaining_work(state: _BatchState) -> bool:
     return state.needs_ingest or state.needs_graph or state.needs_flashcards
 
@@ -655,12 +685,8 @@ def _result(states: Sequence[_BatchState]) -> BatchResult:
         path
         for state in states
         if state.active
-        and _valid_checked_graph(state.item.paths.graph_json)
-        and _valid_flashcards(
-            state.item.paths.flashcards,
-            state.item.args.module_number,
-            state.item.args.course_code,
-        )
+        and _checked_graph_available(state.item)
+        and _flashcards_available(state.item)
         for path in state.item.paths.flashcard_parts
     )
     errors = tuple(
@@ -683,7 +709,10 @@ def _write_completed_manifests(
     progress: ProgressCallback | None = None,
 ) -> None:
     for state in states:
-        if not state.active or not _has_remaining_work(state):
+        if (
+            not state.active or not _has_remaining_work(state)
+            or getattr(state.item.args, "start_from_graph", False)
+        ):
             continue
         try:
             _write_manifest(state.item)
@@ -731,7 +760,8 @@ def run_batch(
 
     for item in items:
         if (
-            not item.args.force
+            not getattr(item.args, "start_from_graph", False)
+            and not item.args.force
             and _legacy_manifest_matches(item)
             and _valid_structured_text(
                 item.paths.structured_text,
@@ -756,6 +786,12 @@ def run_batch(
 
     states = [_make_state(item, timeout_seconds) for item in items]
     for state in states:
+        if getattr(state.item.args, "start_from_graph", False) and not (
+            _checked_graph_available(state.item)
+            or valid_graph_checkpoint(state.item.paths.unchecked_graph_json)
+        ):
+            _fail(state, "No usable saved knowledge graph. Choose a run with completed graphs.", progress)
+            continue
         if state.stage == "complete":
             _notify_progress(
                 progress,
@@ -775,6 +811,8 @@ def run_batch(
                 message=f"Waiting for {state.stage}.",
             )
     for state in states:
+        if not state.active:
+            continue
         try:
             _invalidate_for_recomputation(state)
         except OSError as exc:
@@ -788,11 +826,22 @@ def run_batch(
             status="processing",
             stage="ingest",
             progress_percent=0,
-            message="Staging structured input...",
+            message="Reading PDF, running OCR, and filtering decorations..." if Path(state.item.args.input).suffix.casefold() == ".pdf" else "Staging structured input...",
         )
         print(f"[{state.item.filename}] Staging structured input...", flush=True)
+        timed_pdf = Path(state.item.args.input).suffix.casefold() == ".pdf" and state.remaining_seconds is not None
+        ingest_started = dependencies.monotonic() if timed_pdf else None
         try:
-            stage_result = dependencies.ingest_stage(state.item, None)
+            state.item.args._ingest_progress = lambda message, current=state: _notify_progress(
+                progress, current, status="processing", stage="ingest", progress_percent=5, message=message)
+            try:
+                stage_result = dependencies.ingest_stage(state.item, None)
+            finally:
+                delattr(state.item.args, "_ingest_progress")
+                if ingest_started is not None:
+                    state.remaining_seconds -= dependencies.monotonic() - ingest_started
+            if timed_pdf and state.remaining_seconds <= 0:
+                raise RuntimeError(f"module exceeded {timeout_seconds:g}-second active-processing timeout")
             if not _valid_structured_text(
                 state.item.paths.structured_text,
                 identity_from_filename=getattr(
@@ -823,6 +872,8 @@ def run_batch(
                 flush=True,
             )
             _fail(state, str(exc), progress)
+            if _stop_for_mistral_configuration(states, exc, progress):
+                return _result(states)
     if not _run_stage(
         states,
         needs_attribute="needs_graph",
@@ -841,11 +892,7 @@ def run_batch(
         stage_name="flashcards",
         loader=dependencies.model_loader,
         stage=dependencies.flashcard_stage,
-        validator=lambda item: _valid_flashcards(
-            item.paths.flashcards,
-            item.args.module_number,
-            item.args.course_code,
-        ),
+        validator=_flashcards_available,
         dependencies=dependencies,
         timeout_seconds=timeout_seconds,
         progress=progress,

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
+from mistral_backend import DEFAULT_MODEL as MISTRAL_MODEL
 from structured_module import (
     deduplicate_lesson_fact_records,
     extract_lesson_facts,
@@ -91,9 +92,10 @@ class RebelRuntime:
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Create a knowledge graph from text using the REBEL model."
+        description="Create a knowledge graph from text using the Mistral API."
     )
     parser.add_argument("input", type=Path, help="UTF-8 .txt file to process")
+    parser.add_argument("--mistral-model", default=None, help=f"Mistral model ID; defaults to MISTRAL_MODEL or {MISTRAL_MODEL}")
     parser.add_argument("--course-code", help="course identity for slide-report input")
     parser.add_argument("--module-number", help="module identity for slide-report input")
     parser.add_argument(
@@ -703,6 +705,14 @@ def run(
     runtime: RebelRuntime | None = None,
 ) -> tuple[Path, Path]:
     _validate_run_args(args)
+    if runtime is None:
+        from mistral_backend import backend_from_args
+        import mistral_graph
+        backend = backend_from_args(args)
+        try:
+            return mistral_graph.run(args, backend)
+        finally:
+            backend.close()
     owns_runtime = runtime is None
     if runtime is None:
         runtime = load_runtime(args.model, args.device)

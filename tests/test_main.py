@@ -30,16 +30,16 @@ def test_load_course_corpus_tolerates_missing_and_corrupt_files(tmp_path):
     assert main.load_course_corpus(tmp_path) == ([], [])
 
 
-def test_parse_args_defaults_to_8k_context():
-    assert main.parse_args(["graph.json"]).n_ctx == 8192
+def test_parse_args_defaults_to_32k_context():
+    assert main.parse_args(["graph.json"]).n_ctx == 32768
 
 
-def test_cli_help_names_ministral_without_qwen(capsys):
+def test_cli_help_names_mistral_api(capsys):
     with pytest.raises(SystemExit):
         main.parse_args(["--help"])
 
     help_text = capsys.readouterr().out
-    assert "Ministral-3-3B-Instruct-2512 Q4_K_M" in help_text
+    assert "Mistral hosted API" in " ".join(help_text.split())
     assert "Qwen" not in help_text
 
 
@@ -77,7 +77,7 @@ def test_run_validates_graph_before_model_download(tmp_path, monkeypatch):
     def fail_if_called(path):
         raise AssertionError("model download must not run for an invalid graph")
 
-    monkeypatch.setattr(main, "ensure_model", fail_if_called)
+    monkeypatch.setattr(main, "backend_from_args", fail_if_called)
     args = main.parse_args(
         [str(missing), "--course-code", "C", "--module-number", "1"]
     )
@@ -94,12 +94,11 @@ def test_run_writes_pipeline_result(tmp_path, monkeypatch, valid_clusters):
         encoding="utf-8",
     )
     output_path = tmp_path / "cards.txt"
-    monkeypatch.setattr(main, "ensure_model", lambda path: tmp_path / "model.gguf")
     class FakeBackend:
         auto_cluster_workers = 7
         auto_cluster_workers_reason = "GPU VRAM budget selected 7 cluster workers"
 
-    monkeypatch.setattr(main, "LocalModelBackend", lambda *args, **kwargs: FakeBackend())
+    monkeypatch.setattr(main, "backend_from_args", lambda args: FakeBackend())
     selected = []
 
     class FakePipeline:
@@ -186,7 +185,7 @@ def test_run_reuses_injected_backend(tmp_path, monkeypatch, valid_clusters):
     shared_backend = object()
     monkeypatch.setattr(
         main,
-        "ensure_model",
+        "backend_from_args",
         lambda path: pytest.fail("an injected backend must bypass model loading"),
     )
 
@@ -389,8 +388,7 @@ def test_default_output_uses_resolved_graph_module(tmp_path, monkeypatch, valid_
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(main, "ensure_model", lambda path: tmp_path / "model.gguf")
-    monkeypatch.setattr(main, "LocalModelBackend", lambda *args, **kwargs: object())
+    monkeypatch.setattr(main, "backend_from_args", lambda args: object())
 
     class FakePipeline:
         def __init__(self, backend, config, **kwargs):
@@ -418,7 +416,6 @@ def test_smoke_test_checks_for_exact_json_status(tmp_path, monkeypatch):
         '[{"id":"e1","subject":"a","relation":"is","object":"b"}]}',
         encoding="utf-8",
     )
-    monkeypatch.setattr(main, "ensure_model", lambda path: tmp_path / "model.gguf")
 
     class FakeBackend:
         def __init__(self, *args, **kwargs):
@@ -427,7 +424,7 @@ def test_smoke_test_checks_for_exact_json_status(tmp_path, monkeypatch):
         def complete(self, system, user, *, max_tokens):
             return '{"status":"ok"}'
 
-    monkeypatch.setattr(main, "LocalModelBackend", FakeBackend)
+    monkeypatch.setattr(main, "backend_from_args", lambda args: FakeBackend())
     args = main.parse_args(
         [
             str(graph_path),

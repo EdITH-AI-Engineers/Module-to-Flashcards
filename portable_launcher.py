@@ -13,8 +13,6 @@ from portable_manifest import verify_manifest
 from portable_paths import PortablePaths, build_paths, prepare_data_directories
 from portable_runtime import (
     AccelerationStatus,
-    configure_offline_environment,
-    detect_acceleration,
 )
 from version import __version__
 
@@ -125,7 +123,7 @@ def run_launcher(
     prepare_data: Callable[[PortablePaths], None] = prepare_data_directories,
     configure_offline: Callable[[], None] | None = None,
     verify_bundle: Callable[[bool], object] | None = None,
-    detect_devices: Callable[[], AccelerationStatus] = detect_acceleration,
+    detect_devices: Callable[[], AccelerationStatus] | None = None,
     probe: Callable[[int], str] = probe_port,
     load_server: Callable[[], Any] = _default_load_server,
     run_server: Callable[..., None] = _default_run_server,
@@ -138,9 +136,7 @@ def run_launcher(
     paths = build_paths(root, portable=True)
     try:
         prepare_data(paths)
-        if configure_offline is None:
-            configure_offline_environment(paths.temporary / "huggingface")
-        else:
+        if configure_offline is not None:
             configure_offline()
 
         if verify_bundle is None:
@@ -153,8 +149,9 @@ def run_launcher(
         else:
             verify_bundle(args.verify)
 
-        status = detect_devices()
-        output(_device_message(status))
+        status = detect_devices() if detect_devices is not None else AccelerationStatus(False, False, None)
+        output(_device_message(status) if detect_devices is not None else
+               "Mistral API ready. Open the browser UI to add API keys. Internet access is required.")
         if args.verify:
             output("Bundle verification passed.")
             return 0

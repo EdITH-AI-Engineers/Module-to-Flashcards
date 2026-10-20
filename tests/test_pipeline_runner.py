@@ -12,10 +12,10 @@ from tests.batch_helpers import flashcard_content
 from tests.factories import valid_clusters
 
 
-def test_parse_args_defaults_to_12k_context(tmp_path):
+def test_parse_args_defaults_to_32k_context(tmp_path):
     assert pipeline.parse_args(
         [str(tmp_path / "module.txt"), "--course-code", "CPE0021", "--module-number", "1"]
-    ).n_ctx == 8192
+    ).n_ctx == 32768
 
 
 def test_timeout_defaults_to_disabled(tmp_path):
@@ -262,8 +262,8 @@ def test_negative_timeout_fails_before_running_stages(tmp_path):
         pipeline.run(args, command_runner=lambda *a, **k: pytest.fail("must not run"))
 
 
-def test_run_rejects_non_txt_input_before_running_stages(tmp_path):
-    source = tmp_path / "module.pdf"
+def test_run_rejects_unsupported_input_before_running_stages(tmp_path):
+    source = tmp_path / "module.docx"
     source.write_text(structured_content(), encoding="utf-8")
     args = pipeline.parse_args(
         [
@@ -275,7 +275,7 @@ def test_run_rejects_non_txt_input_before_running_stages(tmp_path):
         ]
     )
 
-    with pytest.raises(pipeline.PipelineRunError, match=r"must be a \.txt file"):
+    with pytest.raises(pipeline.PipelineRunError, match=r"must be a \.pdf or \.txt file"):
         pipeline.run(args, command_runner=lambda *a, **k: pytest.fail("must not run"))
 
 
@@ -578,7 +578,8 @@ def test_help_documents_artifacts_resume_and_force(capsys):
 
     assert exc_info.value.code == 0
     help_text = capsys.readouterr().out
-    assert "UTF-8 TXT module report" in help_text
+    assert "module PDF" in " ".join(help_text.split())
+    assert "course folder" in " ".join(help_text.split())
     assert "--course-code" in help_text
     assert "--module-number" in help_text
     assert "structured_module.txt" in help_text

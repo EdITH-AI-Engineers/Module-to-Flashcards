@@ -1,15 +1,14 @@
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
+from PyInstaller.utils.hooks import collect_submodules
 
 
 PROJECT_ROOT = Path(SPECPATH).resolve().parent
 hiddenimports = (
     collect_submodules("uvicorn")
-    + collect_submodules("transformers")
-    + collect_submodules("sentencepiece")
+    + ["api_server", "web_ui", "mistral_backend", "mistral_graph", "pdf_ingestion", "pymupdf"]
 )
-binaries = collect_dynamic_libs("torch") + collect_dynamic_libs("llama_cpp")
+binaries = []
 
 a = Analysis(
     [str(PROJECT_ROOT / "portable_launcher.py")],
@@ -20,7 +19,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=["torch", "transformers", "llama_cpp", "huggingface_hub", "sentencepiece"],
     noarchive=False,
     optimize=0,
 )

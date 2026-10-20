@@ -4,6 +4,15 @@ from dataclasses import dataclass
 from typing import Mapping, Protocol
 
 
+class IncompleteCompletionError(RuntimeError):
+    """A provider response ended without a usable, completed text answer."""
+
+    def __init__(self, message: str, *, finish_reason: str = "missing", request_id: str = "") -> None:
+        super().__init__(message)
+        self.finish_reason = finish_reason
+        self.request_id = request_id
+
+
 class CompletionTruncatedError(RuntimeError):
     """Raised when a backend stops because its output budget was exhausted."""
 

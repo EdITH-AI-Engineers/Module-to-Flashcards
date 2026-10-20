@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$PythonExe = "",
+    [string]$TesseractDir = "",
     [switch]$SkipGpuPreflight,
     [switch]$SkipAssetPreparation
 )
@@ -55,23 +56,20 @@ if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
 
 New-Item -ItemType Directory -Force -Path $BuildRoot, $DistRoot | Out-Null
 
-& $PythonExe -c "import fastapi, huggingface_hub, llama_cpp, sentencepiece, torch, transformers, uvicorn"
+& $PythonExe -c "import fastapi, multipart, pymupdf, uvicorn"
 if ($LASTEXITCODE -ne 0) {
     throw "Runtime dependency preflight failed. Install requirements.txt before building."
 }
 
-if (-not $SkipGpuPreflight) {
-    & $PythonExe -c "import llama_cpp, torch; ok = torch.cuda.is_available() and llama_cpp.llama_supports_gpu_offload(); print('CUDA preflight:', ok); raise SystemExit(0 if ok else 1)"
-    if ($LASTEXITCODE -ne 0) {
-        throw "CUDA preflight failed. Build the release in a CUDA-enabled environment or use -SkipGpuPreflight only for configuration smoke checks."
-    }
+Write-Host "Building the Mistral API client; no local models or CUDA assets are needed."
+if ([string]::IsNullOrWhiteSpace($TesseractDir)) {
+    $ocrCommand = Get-Command tesseract.exe -ErrorAction SilentlyContinue
+    if ($ocrCommand) { $TesseractDir = Split-Path -Parent $ocrCommand.Source }
+    elseif ($env:TESSERACT_CMD) { $TesseractDir = Split-Path -Parent $env:TESSERACT_CMD }
+    else { $TesseractDir = Join-Path $env:ProgramFiles "Tesseract-OCR" }
 }
-
-if (-not $SkipAssetPreparation) {
-    & $PythonExe (Join-Path $PSScriptRoot "prepare_assets.py") --repo-root $RepoRoot
-    if ($LASTEXITCODE -ne 0) {
-        throw "Locked asset preparation failed."
-    }
+if (-not (Test-Path -LiteralPath (Join-Path $TesseractDir "tesseract.exe"))) {
+    throw "Install Tesseract OCR or pass -TesseractDir before building the portable app."
 }
 
 & $PythonExe -m PyInstaller --noconfirm --clean --distpath $FrozenDist --workpath $PyInstallerWork $SpecPath
@@ -80,7 +78,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $FrozenApp = Join-Path $FrozenDist "ModuleToFlashcards"
-& $PythonExe (Join-Path $PSScriptRoot "assemble_portable.py") --repo-root $RepoRoot --frozen-app $FrozenApp --assets $AssetsRoot --output-dir $BundleDir
+& $PythonExe (Join-Path $PSScriptRoot "assemble_portable.py") --repo-root $RepoRoot --frozen-app $FrozenApp --output-dir $BundleDir --tesseract-dir $TesseractDir
 if ($LASTEXITCODE -ne 0) {
     throw "Portable bundle assembly failed."
 }

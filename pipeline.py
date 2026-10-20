@@ -24,7 +24,7 @@ from flashcard_csv import migrate_legacy_module, valid_written_parts
 from flashcard_types import ModuleIdentity
 from graph_input import GraphInputError, extract_graph_facts, load_graph
 from knowledge_graph_checker import is_checked_graph
-from local_model import DEFAULT_N_CTX
+from mistral_backend import DEFAULT_N_CTX, DEFAULT_MODEL
 from worker_budget import parse_cluster_workers
 from structured_module import (
     graph_ready_text,
@@ -112,7 +112,8 @@ def pipeline_paths(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run a TXT module report -> knowledge graph -> validated "
+            "Run module PDFs from course folders, or a TXT report, through OCR, Mistral filtering, "
+            "knowledge graph extraction and validated "
             "flashcards as a resumable local sequence."
         ),
         epilog=(
@@ -122,9 +123,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "Valid completed stages are reused when the sequence resumes."
         ),
     )
-    parser.add_argument("input", type=Path, help="UTF-8 TXT module report")
-    parser.add_argument("--course-code", required=True, help="exact course code")
-    parser.add_argument("--module-number", required=True, help="exact module number")
+    parser.add_argument("input", type=Path, help="course folder, parent of course folders, module PDF, or TXT report")
+    parser.add_argument("--course-code", help="course code; inferred from folders for PDFs")
+    parser.add_argument("--module-number", help="module number; inferred from PDF filename")
+    parser.add_argument("--ocr-language", default="eng", help="installed Tesseract language(s), e.g. eng or eng+fil")
+    parser.add_argument("--ocr-mode", choices=("auto", "always"), default="auto")
+    parser.add_argument("--ocr-dpi", type=int, default=200)
     parser.add_argument(
         "--identity-from-filename",
         action="store_true",
@@ -137,6 +141,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="root for per-module stage artifacts (default: pipeline_output)",
     )
     parser.add_argument("--model-dir", type=Path, default=Path("models"))
+    parser.add_argument("--mistral-model", default=None, help=f"Mistral model ID (default: MISTRAL_MODEL or {DEFAULT_MODEL})")
     parser.add_argument("--attempts", type=int, default=3)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--n-gpu-layers", type=int, default=-1)
@@ -145,7 +150,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--cluster-workers",
         type=parse_cluster_workers,
         default="auto",
-        help="parallel model contexts: auto GPU-memory budget or 1–20 (default: auto)",
+        help="parallel API requests: auto (4) or 1–20 (default: auto)",
     )
     parser.add_argument(
         "--clusters-per-call", type=int, choices=(1, 2, 5), default=1,
@@ -243,6 +248,9 @@ def build_stage_commands(
         stage_two.append("--identity-from-filename")
     if args.skip_final_review:
         stage_three.append("--skip-final-review")
+    if getattr(args, "mistral_model", None):
+        stage_two.extend(("--mistral-model", args.mistral_model))
+        stage_three.extend(("--mistral-model", args.mistral_model))
 
     return (
         StageCommand(
@@ -383,6 +391,8 @@ def _pipeline_manifest_contents(args: argparse.Namespace, source: Path) -> dict[
         "course_code": str(args.course_code),
         "module_number": str(args.module_number),
         "settings": {
+            "provider": "mistral-api-v1",
+            "mistral_model": getattr(args, "mistral_model", None) or os.environ.get("MISTRAL_MODEL", DEFAULT_MODEL),
             **(
                 {"identity_from_filename": True}
                 if getattr(args, "identity_from_filename", False) else {}
@@ -478,10 +488,28 @@ def run(
     timeout_seconds: float | None = None,
 ) -> PipelinePaths:
     source = Path(args.input)
+    if source.is_file() and source.suffix.casefold() == ".pdf":
+        from batch_pipeline import BatchItem, run_batch
+        from module_sources import pdf_identity
+        from pdf_ingestion import validate_pdf
+        validate_pdf(source)
+        pdf_args = argparse.Namespace(**vars(args))
+        if not pdf_args.course_code or not pdf_args.module_number:
+            course, number = pdf_identity(source.name, pdf_args.course_code or source.parent.name)
+            pdf_args.course_code = pdf_args.course_code or course
+            pdf_args.module_number = pdf_args.module_number or number
+        paths = pipeline_paths(source, pdf_args.output_root, pdf_args.course_code, pdf_args.module_number)
+        result = run_batch((BatchItem(source.name, pdf_args, paths),), timeout_seconds=(
+            getattr(args, "timeout", 0) if timeout_seconds is None else timeout_seconds))
+        if result.errors:
+            raise PipelineRunError(str(result.errors[0]["error"]))
+        return paths
     if not source.is_file():
         raise PipelineRunError(f"module report not found: {source}")
     if source.suffix.casefold() != ".txt":
-        raise PipelineRunError(f"input must be a .txt file: {source}")
+        raise PipelineRunError(f"input must be a .pdf or .txt file: {source}")
+    if not args.course_code or not args.module_number:
+        raise PipelineRunError("TXT reports require --course-code and --module-number.")
     if args.attempts < 1:
         raise PipelineRunError("--attempts must be at least 1")
 
@@ -587,9 +615,43 @@ def run(
     return paths
 
 
+def run_folder(args: argparse.Namespace):
+    from batch_pipeline import BatchItem, BatchResult, run_batch
+    from module_sources import course_folder_pdfs, pdf_identity
+    root = Path(args.input).resolve()
+    if args.module_number:
+        raise PipelineRunError("Do not set --module-number for a course folder; PDF names supply module numbers.")
+    items, errors, identities = [], [], set()
+    for source in course_folder_pdfs(root):
+        try:
+            course, number = pdf_identity(f"{source.parent.name}/{source.name}", args.course_code or "")
+            if args.course_code and source.parent == root:
+                course = args.course_code
+            identity = (course.casefold(), module_file_label(number).casefold())
+            if identity in identities:
+                raise ValueError(f"Duplicate PDF for course {course}, module {number}.")
+            identities.add(identity)
+            item_args = argparse.Namespace(**vars(args))
+            item_args.input, item_args.course_code, item_args.module_number = source, course, number
+            paths = pipeline_paths(source, args.output_root, course, number)
+            items.append(BatchItem(str(source.relative_to(root)), item_args, paths))
+        except ValueError as exc:
+            errors.append({"file": str(source.relative_to(root)), "error": str(exc)})
+    result = run_batch(tuple(items), timeout_seconds=args.timeout)
+    return BatchResult(result.outputs, (*errors, *result.errors))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     try:
-        paths = run(parse_args(argv))
+        args = parse_args(argv)
+        if args.input.is_dir():
+            result = run_folder(args)
+            for output in result.outputs:
+                print(f"Flashcards: {output.resolve()}")
+            for error in result.errors:
+                print(f"Error [{error['file']}]: {error['error']}", file=sys.stderr)
+            return 1 if result.errors else 0
+        paths = run(args)
     except (PipelineRunError, ValueError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

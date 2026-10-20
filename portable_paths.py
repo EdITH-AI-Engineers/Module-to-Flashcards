@@ -5,7 +5,9 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 import sys
 
-from local_model import MODEL_FILENAME
+# Retained only for compatibility with older bundles; hosted inference does
+# not require this file or import the old model runtime.
+MODEL_FILENAME = "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf"
 
 
 @dataclass(frozen=True)

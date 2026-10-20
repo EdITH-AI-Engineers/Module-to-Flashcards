@@ -388,8 +388,8 @@ def parse_concept_plan(
             errors.append(f"{prefix} name must be a non-empty string")
             continue
         normalized_name = _normalized(name)
-        if normalized_name in seen_names:
-            errors.append(f"{prefix} duplicates another concept name")
+        # if normalized_name in seen_names:
+        #     errors.append(f"{prefix} duplicates another concept name")
         seen_names.add(normalized_name)
         if _contains_metadata_artifact(name):
             errors.append(

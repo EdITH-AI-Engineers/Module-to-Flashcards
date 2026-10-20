@@ -122,6 +122,31 @@ def test_assemble_rejects_output_outside_repository(tmp_path):
         )
 
 
+def test_hosted_bundle_needs_no_staged_models(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    result = assemble_module.assemble_portable(
+        repo_root=repo, frozen_app=_fake_frozen_app(repo))
+    verify_manifest(result, result / "models" / "manifest.json", force_hash=True)
+    assert not list((result / "models").glob("*.gguf"))
+    assert not (result / "models" / "rebel-large").exists()
+    assert (result / "licenses" / "build-versions.txt").is_file()
+
+
+def test_portable_bundle_includes_tesseract_and_language_data(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    ocr = tmp_path / "ocr"
+    (ocr / "tessdata").mkdir(parents=True)
+    (ocr / "tesseract.exe").write_bytes(b"fake exe")
+    (ocr / "tessdata" / "eng.traineddata").write_bytes(b"fake language data")
+    result = assemble_module.assemble_portable(repo_root=repo,
+        frozen_app=_fake_frozen_app(repo), tesseract_dir=ocr)
+    records = verify_manifest(result, result / "models" / "manifest.json", force_hash=True)
+    assert (result / "tesseract" / "tessdata" / "eng.traineddata").is_file()
+    assert any(record.path == "tesseract/tesseract.exe" for record in records)
+
+
 def test_assemble_rejects_incomplete_frozen_application(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()

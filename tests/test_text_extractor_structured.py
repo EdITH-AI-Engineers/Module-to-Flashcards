@@ -382,29 +382,29 @@ def test_run_releases_an_internally_owned_runtime_on_success_and_output_failure(
 ):
     source = tmp_path / "module.txt"
     source.write_text(structured_text(), encoding="utf-8")
-    runtime = text_extractor.RebelRuntime(object(), object(), "cpu")
     released = []
+    runtime = SimpleNamespace(close=lambda: released.append("closed"))
     args = text_extractor.parse_args(
         [str(source), "--output-dir", str(tmp_path / "graph"), "--batch-size", "1"]
     )
 
-    monkeypatch.setattr(text_extractor, "load_runtime", lambda *a, **k: runtime)
-    monkeypatch.setattr(text_extractor, "release_runtime", released.append)
-    monkeypatch.setattr(text_extractor, "make_chunks", lambda *a, **k: [{"id": 1}])
-    monkeypatch.setattr(text_extractor, "extract_relations", lambda *a, **k: [])
+    import mistral_backend
+    import mistral_graph
+    monkeypatch.setattr(mistral_backend, "backend_from_args", lambda args: runtime)
     if save_error is not None:
         monkeypatch.setattr(
-            text_extractor,
-            "save_outputs",
+            mistral_graph,
+            "run",
             lambda *a, **k: (_ for _ in ()).throw(save_error),
         )
         with pytest.raises(OSError, match="output failed"):
             text_extractor.run(args)
     else:
-        monkeypatch.setattr(text_extractor, "save_outputs", lambda *a, **k: None)
+        monkeypatch.setattr(mistral_graph, "run", lambda *a, **k: (
+            args.output_dir / "knowledge_graph.json", args.output_dir / "triples.csv"))
         assert text_extractor.run(args) == (
             args.output_dir / "knowledge_graph.json",
             args.output_dir / "triples.csv",
         )
 
-    assert released == [runtime]
+    assert released == ["closed"]

@@ -157,6 +157,46 @@ def test_failed_module_does_not_stop_other_module(tmp_path):
     assert ("graph", "one.txt") not in [event[:2] for event in events]
 
 
+@pytest.mark.parametrize("stage", ["ingest", "graph", "flashcards"])
+@pytest.mark.parametrize("category", ["access_denied", "model_unavailable"])
+def test_model_configuration_error_stops_remaining_modules_without_repeating_requests(tmp_path, stage, category):
+    from dataclasses import replace
+    from mistral_backend import MistralRequestError
+    items = make_items(tmp_path, "one.txt", "two.txt", "three.txt")
+    events, progress, attempted = [], [], []
+    @contextmanager
+    def loader(args):
+        yield object()
+    def unavailable(item, runtime):
+        attempted.append(item.filename)
+        raise MistralRequestError("Model is unavailable in your subscription", category=category, status=403)
+    stage_field = "flashcard_stage" if stage == "flashcards" else stage + "_stage"
+    dependencies = replace(fake_dependencies(events, loader, loader), **{stage_field: unavailable})
+    result = run_batch(items, dependencies=dependencies, progress=progress.append)
+    assert attempted == ["one.txt"]
+    assert not result.outputs and len(result.errors) == 3
+    assert all("Run stopped before processing more modules" in error["error"] for error in result.errors[1:])
+    assert {event.filename for event in progress if event.state == "failed"} == {"one.txt", "two.txt", "three.txt"}
+
+
+def test_model_access_error_preserves_previously_completed_module(tmp_path):
+    from dataclasses import replace
+    from mistral_backend import MistralRequestError
+    items = make_items(tmp_path, "complete.txt", "blocked.txt", "waiting.txt")
+    for stage in ("ingest", "graph", "flashcards"):
+        materialize(items[0], stage)
+    batch_pipeline._write_manifest(items[0])
+    @contextmanager
+    def loader(args):
+        yield object()
+    def unavailable(item, runtime):
+        raise MistralRequestError("Model not available", category="access_denied", status=403)
+    dependencies = replace(fake_dependencies([], loader, loader), ingest_stage=unavailable)
+    result = run_batch(items, dependencies=dependencies)
+    assert result.outputs == items[0].paths.flashcard_parts
+    assert {error["file"] for error in result.errors} == {"blocked.txt", "waiting.txt"}
+
+
 def test_timeout_counts_only_each_modules_active_work(tmp_path):
     items = make_items(tmp_path, "one.txt", "two.txt")
     events = []
@@ -260,13 +300,7 @@ def test_production_loaders_release_their_owned_runtimes(monkeypatch, tmp_path):
     items = make_items(tmp_path, "one.txt")
     backend = type("Backend", (), {"closed": False})()
     backend.close = lambda: setattr(backend, "closed", True)
-    runtime = object()
-    released = []
-
-    monkeypatch.setattr(batch_pipeline, "ensure_model", lambda model_dir: tmp_path / "model.gguf")
-    monkeypatch.setattr(batch_pipeline, "LocalModelBackend", lambda *a, **k: backend)
-    monkeypatch.setattr(batch_pipeline, "load_runtime", lambda *a, **k: runtime)
-    monkeypatch.setattr(batch_pipeline, "release_runtime", released.append)
+    monkeypatch.setattr(batch_pipeline, "backend_from_args", lambda args: backend)
 
     with pytest.raises(RuntimeError, match="stage failed"):
         with batch_pipeline.PRODUCTION_DEPENDENCIES.model_loader(items[0].args):
@@ -276,42 +310,26 @@ def test_production_loaders_release_their_owned_runtimes(monkeypatch, tmp_path):
             raise RuntimeError("stage failed")
 
     assert backend.closed is True
-    assert released == [runtime]
 
 
-def test_production_loaders_disable_network_for_portable_items(monkeypatch, tmp_path):
+def test_portable_loaders_use_mistral_without_loading_local_models(monkeypatch, tmp_path):
     item = make_items(tmp_path, "one.txt")[0]
     item.args.portable = True
     item.args.rebel_model = tmp_path / "models" / "rebel-large"
-    model_calls = []
-    rebel_calls = []
+    calls = []
     backend = type("Backend", (), {"close": lambda self: None})()
-    runtime = object()
-
     monkeypatch.setattr(
         batch_pipeline,
-        "ensure_model",
-        lambda model_dir, **kwargs: model_calls.append((model_dir, kwargs))
-        or tmp_path / "model.gguf",
+        "backend_from_args",
+        lambda args: calls.append(args) or backend,
     )
-    monkeypatch.setattr(batch_pipeline, "LocalModelBackend", lambda *a, **k: backend)
-    monkeypatch.setattr(
-        batch_pipeline,
-        "load_runtime",
-        lambda model, device, **kwargs: rebel_calls.append((model, device, kwargs))
-        or runtime,
-    )
-    monkeypatch.setattr(batch_pipeline, "release_runtime", lambda value: None)
 
     with batch_pipeline.PRODUCTION_DEPENDENCIES.model_loader(item.args):
         pass
     with batch_pipeline.PRODUCTION_DEPENDENCIES.rebel_loader(item.args):
         pass
 
-    assert model_calls == [(item.args.model_dir, {"allow_download": False})]
-    assert rebel_calls == [
-        (item.args.rebel_model, item.args.kg_device, {"local_files_only": True})
-    ]
+    assert calls == [item.args, item.args]
 
 
 @pytest.mark.parametrize(
@@ -762,16 +780,17 @@ def test_production_ingest_adapter_stages_validated_structured_text(tmp_path):
     )
 
 
-def test_production_graph_adapter_translates_fast_settings(tmp_path, monkeypatch):
+def test_production_graph_adapter_passes_run_backend_and_paths(tmp_path, monkeypatch):
+    import mistral_graph
     item = make_items(tmp_path, "one.txt")[0]
     runtime = object()
     captured = {}
 
-    def fake_run(args, *, runtime):
+    def fake_run(args, runtime):
         captured.update(args=vars(args), runtime=runtime)
         return args.output_dir / "knowledge_graph.json", args.output_dir / "triples.csv"
 
-    monkeypatch.setattr(batch_pipeline.text_extractor, "run", fake_run)
+    monkeypatch.setattr(mistral_graph, "run", fake_run)
 
     batch_pipeline.PRODUCTION_DEPENDENCIES.graph_stage(item, runtime)
 

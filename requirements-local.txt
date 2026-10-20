@@ -1,0 +1,6 @@
+# Optional dependencies for legacy model experiments and their tests.
+huggingface-hub
+llama-cpp-python>=0.3.36
+sentencepiece
+torch
+transformers

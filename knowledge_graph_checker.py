@@ -299,7 +299,7 @@ def check_knowledge_graph(
             "edge_count": len(checked["edges"]),
             "fact_count": len(checked["facts"]),
             "graph_checker": {
-                "model": "Ministral-3-3B-Instruct-2512-Q4_K_M",
+                "model": getattr(backend, "model_name", "custom-backend"),
                 "status": "checked",
                 "removed_facts": len(removed_positions["facts"]),
                 "removed_edges": len(removed_positions["edges"]),

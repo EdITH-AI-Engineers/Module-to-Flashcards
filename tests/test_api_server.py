@@ -69,10 +69,11 @@ class ClosingUpload(FakeUpload):
             raise self.close_error
 
 
-def test_safe_filename_accepts_txt_and_rejects_pdf():
+def test_safe_filename_accepts_txt_and_pdf():
     assert api_server.safe_filename("Module 1.txt") == "Module_1.txt"
-    with pytest.raises(ValueError, match="TXT module reports"):
-        api_server.safe_filename("Module 1.pdf")
+    assert api_server.safe_filename("Module 1.pdf") == "Module_1.pdf"
+    with pytest.raises(ValueError, match="PDF modules or TXT module reports"):
+        api_server.safe_filename("Module 1.exe")
 
 
 def test_structured_module_number_uses_embedded_metadata(tmp_path):
@@ -115,7 +116,7 @@ def test_publish_module_upload_renames_the_staged_file(tmp_path):
     assert not staged.exists()
 
 
-def test_process_endpoint_requires_course_code_in_multipart_payload():
+def test_process_endpoint_allows_course_code_to_be_inferred_from_folders():
     schema = api_server.app.openapi()
     request_schema = schema["paths"]["/process"]["post"]["requestBody"]["content"][
         "multipart/form-data"
@@ -123,7 +124,7 @@ def test_process_endpoint_requires_course_code_in_multipart_payload():
     schema_name = request_schema["$ref"].rsplit("/", 1)[-1]
     body = schema["components"]["schemas"][schema_name]
 
-    assert body["required"] == ["courseCode", "files"]
+    assert body["required"] == ["files"]
     assert set(body["properties"]) == {"courseCode", "files"}
     assert "/process/{course_code}" not in schema["paths"]
 

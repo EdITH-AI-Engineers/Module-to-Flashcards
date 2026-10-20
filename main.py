@@ -17,12 +17,7 @@ from graph_input import (
     load_graph,
     resolve_identity,
 )
-from local_model import (
-    DEFAULT_N_CTX,
-    LocalModelBackend,
-    ensure_model,
-    thread_budget_for_workers,
-)
+from mistral_backend import DEFAULT_N_CTX, DEFAULT_MODEL, backend_from_args
 from worker_budget import parse_cluster_workers
 from knowledge_graph_checker import (
     KnowledgeGraphCheckError,
@@ -93,15 +88,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Generate validated assessment CSV from a knowledge graph with a "
-            "local Ministral-3-3B-Instruct-2512 Q4_K_M model."
+            "Mistral hosted API."
         )
     )
     parser.add_argument("graph", type=Path, help="knowledge_graph.json path")
+    parser.add_argument("--mistral-model", default=None, help=f"Mistral model ID (default: MISTRAL_MODEL or {DEFAULT_MODEL})")
     parser.add_argument(
         "--unchecked-graph",
         type=Path,
         help=(
-            "unchecked REBEL graph to prune with the local model before publishing the "
+            "unchecked graph to review with Mistral before publishing the "
             "positional knowledge_graph.json"
         ),
     )
@@ -117,7 +113,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--model-dir",
         type=Path,
         default=Path("models"),
-        help="download directory for the GGUF model (default: models)",
+        help="legacy option; hosted Mistral requires no model directory",
     )
     parser.add_argument(
         "--max-retries",
@@ -129,13 +125,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--seed",
         type=int,
         default=42,
-        help="local inference seed (default: 42)",
+        help="Mistral random seed (default: 42)",
     )
     parser.add_argument(
         "--n-gpu-layers",
         type=int,
         default=-1,
-        help="layers requested for GPU offload; -1 requests all (default: -1)",
+        help="legacy option; hosted Mistral does not use GPU layers",
     )
     parser.add_argument(
         "--n-ctx",
@@ -147,7 +143,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--cluster-workers",
         type=parse_cluster_workers,
         default="auto",
-        help="parallel model contexts: auto GPU-memory budget or 1–20 (default: auto)",
+        help="parallel API requests: auto (4) or 1–20 (default: auto)",
     )
     parser.add_argument(
         "--clusters-per-call", type=int, choices=(1, 2, 5), default=1,
@@ -163,7 +159,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--smoke-test",
         action="store_true",
-        help="load the model and run a tiny JSON response check only",
+        help="run a tiny Mistral JSON response check only",
     )
     return parser.parse_args(argv)
 
@@ -188,21 +184,9 @@ def run(
 
     if backend is None:
         try:
-            model_path = ensure_model(args.model_dir)
-            setting = getattr(args, "cluster_workers", "auto")
-            backend = LocalModelBackend(
-                model_path,
-                n_ctx=args.n_ctx,
-                n_gpu_layers=args.n_gpu_layers,
-                n_threads=(
-                    thread_budget_for_workers(setting)
-                    if isinstance(setting, int)
-                    else None
-                ),
-                seed=args.seed,
-            )
+            backend = backend_from_args(args)
         except Exception as exc:
-            raise RuntimeError(f"local model setup failed: {exc}") from exc
+            raise RuntimeError(f"Mistral setup failed: {exc}") from exc
 
     if args.smoke_test:
         raw = backend.complete(
@@ -213,14 +197,14 @@ def run(
         try:
             smoke_value = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise RuntimeError("Local model smoke test did not return valid JSON") from exc
+            raise RuntimeError("Mistral smoke test did not return valid JSON") from exc
         if smoke_value != {"status": "ok"}:
-            raise RuntimeError("Local model smoke test returned an unexpected JSON value")
+            raise RuntimeError("Mistral smoke test returned an unexpected JSON value")
         return None
 
     if checked_graph is None:
         print(
-            "[knowledge-graph-checker] reviewing REBEL graph before final save...",
+            "[knowledge-graph-checker] reviewing graph before final save...",
             file=sys.stderr,
             flush=True,
         )
@@ -279,7 +263,7 @@ def run(
         getattr(
             backend,
             "auto_cluster_workers_reason",
-            "GPU measurement unavailable for injected backend; using one worker",
+            "No worker preference supplied by the backend; using one worker",
         )
         if setting == "auto"
         else f"manual setting selected {selected_workers} cluster workers"

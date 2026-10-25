@@ -386,6 +386,13 @@ def _make_state(item: BatchItem, timeout_seconds: float | None) -> _BatchState:
         # An explicit graph checkpoint does not depend on the original PDF,
         # structured text, or generation settings from the interrupted run.
         needs_ingest = needs_graph = False
+    elif getattr(args, "start_from_structured", False):
+        # Recovery owns a validated copy of the structured text. The original
+        # PDF and ingestion settings are no longer dependencies.
+        needs_ingest = False
+        needs_graph = args.force or not (
+            _valid_graph(paths.unchecked_graph_json) or _valid_checked_graph(paths.graph_json)
+        )
     else:
         reusable = _manifest_matches(item)
         needs_ingest = (
@@ -712,6 +719,7 @@ def _write_completed_manifests(
         if (
             not state.active or not _has_remaining_work(state)
             or getattr(state.item.args, "start_from_graph", False)
+            or getattr(state.item.args, "start_from_structured", False)
         ):
             continue
         try:
@@ -761,6 +769,7 @@ def run_batch(
     for item in items:
         if (
             not getattr(item.args, "start_from_graph", False)
+            and not getattr(item.args, "start_from_structured", False)
             and not item.args.force
             and _legacy_manifest_matches(item)
             and _valid_structured_text(
@@ -786,6 +795,12 @@ def run_batch(
 
     states = [_make_state(item, timeout_seconds) for item in items]
     for state in states:
+        if getattr(state.item.args, "start_from_structured", False) and not _valid_structured_text(
+            state.item.paths.structured_text,
+            identity_from_filename=getattr(state.item.args, "identity_from_filename", False),
+        ):
+            _fail(state, "No usable saved structured module. Choose a run with completed ingestion.", progress)
+            continue
         if getattr(state.item.args, "start_from_graph", False) and not (
             _checked_graph_available(state.item)
             or valid_graph_checkpoint(state.item.paths.unchecked_graph_json)

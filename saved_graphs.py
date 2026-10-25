@@ -1,4 +1,4 @@
-"""Discover and copy graph checkpoints without touching an interrupted run."""
+"""Discover and copy saved checkpoints without touching an interrupted run."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,11 +7,12 @@ from pathlib import Path
 import re
 import shutil
 
-from artifact_paths import flashcard_output_path
+from artifact_paths import flashcard_output_path, module_file_label, safe_path_component
 from flashcard_csv import valid_written_receipt
 from graph_input import GraphInputError, extract_graph_facts, load_graph, resolve_identity
 from knowledge_graph_checker import is_checked_graph
-from pipeline import PipelinePaths, pipeline_paths
+from pipeline import PipelinePaths, _valid_structured_text, pipeline_paths, stage_structured_module
+from structured_module import parse_module_metadata, parse_slide_report_metadata, validate_slide_report
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,23 @@ class SavedGraphModule:
     module_number: str
     checked: bool
     completed: bool
+
+    @property
+    def source(self) -> Path:
+        return self.graph
+
+
+@dataclass(frozen=True)
+class SavedStructuredModule:
+    source: Path
+    paths: PipelinePaths
+    course_code: str
+    module_number: str
+    identity_from_filename: bool = False
+    completed: bool = False
+
+
+SavedCheckpoint = SavedGraphModule | SavedStructuredModule
 
 
 def saved_run_root(runs_root: Path, run_id: str) -> Path:
@@ -36,6 +54,20 @@ def saved_run_root(runs_root: Path, run_id: str) -> Path:
 
 def _contained(path: Path, root: Path) -> bool:
     return path.resolve().is_relative_to(root.resolve())
+
+
+def _checkpoint_paths(workspace: Path, run_root: Path, course: str, number: str) -> PipelinePaths:
+    return PipelinePaths(
+        workspace=workspace,
+        structured_text=workspace / "structured_module.txt",
+        unchecked_graph_dir=workspace / "unchecked_knowledge_graph",
+        unchecked_graph_json=workspace / "unchecked_knowledge_graph" / "knowledge_graph.json",
+        unchecked_triples_csv=workspace / "unchecked_knowledge_graph" / "triples.csv",
+        graph_dir=workspace / "knowledge_graph",
+        graph_json=workspace / "knowledge_graph" / "knowledge_graph.json",
+        triples_csv=workspace / "knowledge_graph" / "triples.csv",
+        flashcards=flashcard_output_path(run_root / "flashcards", course, number),
+    )
 
 
 def _validate_checkpoint_facts(graph: dict) -> None:
@@ -63,7 +95,7 @@ def valid_graph_checkpoint(path: Path, *, checked: bool = False) -> bool:
         return False
 
 
-def discover_graphs(run_root: Path) -> tuple[tuple[SavedGraphModule, ...], list[dict[str, str]]]:
+def _discover_graphs(run_root: Path) -> tuple[tuple[SavedGraphModule, ...], dict[Path, str]]:
     run_root = Path(run_root).resolve()
     workspaces = sorted({
         graph.parent.parent
@@ -71,7 +103,7 @@ def discover_graphs(run_root: Path) -> tuple[tuple[SavedGraphModule, ...], list[
         for graph in run_root.glob(f"pipeline_output/*/*/{directory}/knowledge_graph.json")
     })
     modules: list[SavedGraphModule] = []
-    errors: list[dict[str, str]] = []
+    errors: dict[Path, str] = {}
     identities: set[str] = set()
     for workspace in workspaces:
         failures = []
@@ -85,18 +117,7 @@ def discover_graphs(run_root: Path) -> tuple[tuple[SavedGraphModule, ...], list[
                 graph = load_graph(source)
                 _validate_checkpoint_facts(graph)
                 identity = resolve_identity(graph, None, None)
-                paths = PipelinePaths(
-                    workspace=workspace,
-                    structured_text=workspace / "structured_module.txt",
-                    unchecked_graph_dir=workspace / "unchecked_knowledge_graph",
-                    unchecked_graph_json=workspace / "unchecked_knowledge_graph" / "knowledge_graph.json",
-                    unchecked_triples_csv=workspace / "unchecked_knowledge_graph" / "triples.csv",
-                    graph_dir=workspace / "knowledge_graph",
-                    graph_json=workspace / "knowledge_graph" / "knowledge_graph.json",
-                    triples_csv=workspace / "knowledge_graph" / "triples.csv",
-                    flashcards=flashcard_output_path(run_root / "flashcards",
-                                                    identity.course_code, identity.module_number),
-                )
+                paths = _checkpoint_paths(workspace, run_root, identity.course_code, identity.module_number)
                 if not all(_contained(path, run_root) for path in (
                     paths.flashcards, *paths.flashcard_parts, paths.flashcard_receipt,
                 )):
@@ -113,7 +134,64 @@ def discover_graphs(run_root: Path) -> tuple[tuple[SavedGraphModule, ...], list[
             except (GraphInputError, OSError, ValueError) as exc:
                 failures.append(str(exc))
         else:
-            errors.append({"file": workspace.name, "error": "; ".join(failures)})
+            errors[workspace] = "; ".join(failures)
+    modules.sort(key=lambda module: (
+        module.course_code.casefold(),
+        tuple(int(part) if part.isdigit() else part.casefold()
+              for part in re.split(r"(\d+)", module.module_number)),
+    ))
+    return tuple(modules), errors
+
+
+def discover_graphs(run_root: Path) -> tuple[tuple[SavedGraphModule, ...], list[dict[str, str]]]:
+    modules, errors = _discover_graphs(run_root)
+    return modules, [{"file": workspace.name, "error": error} for workspace, error in errors.items()]
+
+
+def discover_checkpoints(run_root: Path) -> tuple[tuple[SavedCheckpoint, ...], list[dict[str, str]]]:
+    """Prefer usable graphs, falling back to structured text for each workspace."""
+    run_root = Path(run_root).resolve()
+    graphs, graph_errors = _discover_graphs(run_root)
+    modules: list[SavedCheckpoint] = list(graphs)
+    graph_workspaces = {module.paths.workspace for module in graphs}
+    identities = {str(module.paths.flashcards).casefold() for module in graphs}
+    errors: list[dict[str, str]] = []
+    for source in sorted(run_root.glob("pipeline_output/*/*/structured_module.txt")):
+        workspace = source.parent
+        if workspace in graph_workspaces:
+            continue
+        graph_errors.pop(workspace, None)
+        try:
+            if not _contained(source, run_root):
+                raise ValueError("Saved structured module resolves outside its run.")
+            content = source.read_text(encoding="utf-8-sig")
+            metadata = parse_module_metadata(content) or parse_slide_report_metadata(content)
+            course = metadata.get("course_code", "").strip() or workspace.parent.name
+            number = metadata.get("module_number", "").strip()
+            # API workspaces retain the accepted upload identity, including TXT
+            # filenames that deliberately overrode conflicting report metadata.
+            canonical = re.fullmatch(re.escape(workspace.parent.name) + r"_M(.+)", workspace.name)
+            if canonical:
+                if safe_path_component(course, fallback="course") != workspace.parent.name:
+                    course = workspace.parent.name
+                if module_file_label(number) != canonical[1]:
+                    number = canonical[1]
+            if not number:
+                raise ValueError("Saved structured module must declare a module number.")
+            if not _valid_structured_text(source, identity_from_filename=bool(canonical)):
+                raise ValueError("Saved structured module contains no valid readable learning content.")
+            if not parse_module_metadata(content):
+                validate_slide_report(content, course_code=course, module_number=number,
+                                      identity_from_filename=bool(canonical))
+            paths = _checkpoint_paths(workspace, run_root, course, number)
+            output_key = str(paths.flashcards).casefold()
+            if output_key in identities:
+                raise ValueError("More than one saved workspace has this course and module number.")
+            identities.add(output_key)
+            modules.append(SavedStructuredModule(source, paths, course, number, bool(canonical)))
+        except (OSError, ValueError) as exc:
+            errors.append({"file": workspace.name, "error": str(exc)})
+    errors.extend({"file": workspace.name, "error": error} for workspace, error in graph_errors.items())
     modules.sort(key=lambda module: (
         module.course_code.casefold(),
         tuple(int(part) if part.isdigit() else part.casefold()
@@ -123,12 +201,12 @@ def discover_graphs(run_root: Path) -> tuple[tuple[SavedGraphModule, ...], list[
 
 
 def saved_run_summary(run_root: Path) -> dict[str, object] | None:
-    modules, errors = discover_graphs(run_root)
+    modules, errors = discover_checkpoints(run_root)
     if not modules and not errors:
         return None
     modified = max(
         [run_root.stat().st_mtime]
-        + [module.graph.stat().st_mtime for module in modules]
+        + [module.source.stat().st_mtime for module in modules]
         + [module.paths.flashcard_receipt.stat().st_mtime for module in modules if module.completed]
     )
     completed = sum(module.completed for module in modules)
@@ -137,6 +215,8 @@ def saved_run_summary(run_root: Path) -> dict[str, object] | None:
         "moduleCount": len(modules),
         "completedCount": completed,
         "pendingCount": len(modules) - completed,
+        "graphCount": sum(isinstance(module, SavedGraphModule) for module in modules),
+        "structuredCount": sum(isinstance(module, SavedStructuredModule) for module in modules),
         "courses": sorted({module.course_code for module in modules}),
         "updatedAt": datetime.fromtimestamp(modified, timezone.utc).isoformat(),
         "errors": errors,
@@ -163,4 +243,15 @@ def copy_graph_checkpoint(module: SavedGraphModule, destination_root: Path) -> P
     if corpus.is_file() and _contained(corpus, source_root) and not target_corpus.exists():
         target_corpus.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(corpus, target_corpus)
+    return paths
+
+
+def copy_checkpoint(module: SavedCheckpoint, destination_root: Path) -> PipelinePaths:
+    if isinstance(module, SavedGraphModule):
+        return copy_graph_checkpoint(module, destination_root)
+    paths = pipeline_paths(Path(module.paths.workspace.name + ".txt"), destination_root / "pipeline_output",
+                           module.course_code, module.module_number)
+    stage_structured_module(module.source, paths.structured_text,
+        course_code=module.course_code, module_number=module.module_number,
+        identity_from_filename=module.identity_from_filename)
     return paths

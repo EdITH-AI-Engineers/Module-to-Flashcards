@@ -11,8 +11,11 @@ import batch_pipeline
 from batch_pipeline import run_batch
 from flashcard_csv import valid_written_receipt
 from flashcard_types import ModuleIdentity
-from saved_graphs import copy_graph_checkpoint, discover_graphs, saved_run_root, saved_run_summary
-from tests.batch_helpers import fake_dependencies, make_items, materialize
+from saved_graphs import (
+    SavedGraphModule, SavedStructuredModule, copy_checkpoint, copy_graph_checkpoint,
+    discover_checkpoints, discover_graphs, saved_run_root, saved_run_summary,
+)
+from tests.batch_helpers import fake_dependencies, make_items, materialize, structured_content
 from tests.factories import valid_clusters
 
 
@@ -260,7 +263,230 @@ def test_resume_rejects_busy_sources_invalid_paths_and_reused_sessions(checkpoin
 
 def test_browser_exposes_graph_recovery_without_file_upload_requirements(checkpoint):
     from web_ui import HTML
-    assert '<option value="graphs">Saved knowledge graphs</option>' in HTML
+    assert '<option value="graphs">Saved graphs or structured modules</option>' in HTML
     assert 'id="saved-run"' in HTML and "'/api/saved-runs'" in HTML
     assert "/resume" in HTML and "sourceRunId" in HTML
     assert "input.disabled=graphs" in HTML
+
+
+@pytest.fixture
+def structured_checkpoint(checkpoint):
+    root, items = checkpoint
+    for item in items:
+        item.paths.structured_text.write_text(structured_content(item.args.module_number), encoding="utf-8")
+    source = root / "CPE0021_M3.txt"
+    source.write_text(structured_content("3"), encoding="utf-8-sig")
+    args = server.pipeline_args(source, "CPE0021", "3")
+    paths = server.pipeline_paths(source, root / "pipeline_output", "CPE0021", "3")
+    item = batch_pipeline.BatchItem(source.name, args, paths)
+    paths.structured_text.parent.mkdir(parents=True)
+    paths.structured_text.write_bytes(source.read_bytes())
+    source.unlink()
+    return root, (*items, item)
+
+
+def recovery_dependencies(events):
+    @contextmanager
+    def loader(_args):
+        yield object()
+
+    dependencies = fake_dependencies(events, loader, loader)
+
+    def graph(item, runtime):
+        assert item.paths.structured_text.is_file()
+        dependencies.graph_stage(item, runtime)
+        graph = json.loads(item.paths.unchecked_graph_json.read_text(encoding="utf-8"))
+        graph["metadata"]["course_code"] = item.args.course_code
+        item.paths.unchecked_graph_json.write_text(json.dumps(graph), encoding="utf-8")
+
+    def forbidden_ingest(*_args):
+        pytest.fail("Recovery must never repeat ingestion")
+
+    return replace(dependencies, graph_stage=graph, ingest_stage=forbidden_ingest)
+
+
+def test_structured_discovery_prefers_graphs_and_copies_text_unchanged(structured_checkpoint):
+    root, items = structured_checkpoint
+    # Broken text cannot prevent a usable graph from being recovered.
+    items[1].paths.structured_text.write_text("broken text", encoding="utf-8")
+    modules, errors = discover_checkpoints(root)
+    assert not errors
+    assert [type(module) for module in modules] == [SavedGraphModule, SavedGraphModule, SavedStructuredModule]
+    summary = saved_run_summary(root)
+    assert (summary["moduleCount"], summary["graphCount"], summary["structuredCount"],
+            summary["completedCount"], summary["pendingCount"]) == (3, 2, 1, 1, 2)
+    before = modules[2].source.read_bytes()
+    paths = copy_checkpoint(modules[2], root.parent / ("b" * 32))
+    assert paths.structured_text.read_bytes() == before
+    assert paths.workspace != modules[2].paths.workspace
+    assert modules[2].source.read_bytes() == before
+
+
+@pytest.mark.parametrize("broken_graph", [False, True])
+def test_structured_fallback_accepts_missing_or_broken_graphs(structured_checkpoint, broken_graph):
+    root, items = structured_checkpoint
+    if broken_graph:
+        items[2].paths.graph_dir.mkdir()
+        items[2].paths.graph_json.write_text("broken graph", encoding="utf-8")
+    modules, errors = discover_checkpoints(root)
+    assert not errors and isinstance(modules[2], SavedStructuredModule)
+
+
+@pytest.mark.parametrize("content", [b"", b"not a module", b"\xff\xfe", b"[MODULE]\nformat_version: 2\n"])
+def test_invalid_structured_modules_are_reported_without_blocking_graphs(structured_checkpoint, content):
+    root, items = structured_checkpoint
+    items[2].paths.structured_text.write_bytes(content)
+    modules, errors = discover_checkpoints(root)
+    assert len(modules) == 2 and len(errors) == 1
+    assert errors[0]["file"] == items[2].paths.workspace.name
+
+
+@pytest.mark.parametrize("report", [False, True])
+def test_structured_recovery_preserves_filename_identity_over_conflicting_metadata(structured_checkpoint, report):
+    root, items = structured_checkpoint
+    if report:
+        from tests.test_slide_report_input import REPORT
+        content = REPORT
+    else:
+        content = structured_content("99").replace("CPE0021", "OTHER")
+    items[2].paths.structured_text.write_text(content, encoding="utf-8")
+    modules, errors = discover_checkpoints(root)
+    assert not errors
+    module = modules[2]
+    assert (module.course_code, module.module_number, module.identity_from_filename) == ("CPE0021", "3", True)
+    paths = copy_checkpoint(module, root.parent / ("b" * 32))
+    assert paths.structured_text.read_text(encoding="utf-8") == content
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_structured_batch_skips_ingestion_with_missing_pdf_and_changed_settings(structured_checkpoint, force):
+    root, _items = structured_checkpoint
+    modules, _errors = discover_checkpoints(root)
+    module = modules[2]
+    paths = copy_checkpoint(module, root.parent / ("b" * 32))
+    args = server.pipeline_args(root / "missing.pdf", module.course_code, module.module_number)
+    args.start_from_structured = True
+    args.mistral_model = "changed-model"
+    args.force = force
+    item = batch_pipeline.BatchItem("CPE0021_M3.txt", args, paths)
+    events, progress = [], []
+    result = run_batch((item,), dependencies=recovery_dependencies(events), progress=progress.append)
+    assert not result.errors and len(result.outputs) == 2
+    assert [event[0] for event in events] == ["graph", "flashcards"]
+    assert progress[0].stage == "graph" and all(event.stage != "ingest" for event in progress)
+
+
+def test_missing_structured_checkpoint_fails_before_mutating_outputs(structured_checkpoint):
+    root, items = structured_checkpoint
+    item = items[0]
+    item.args.start_from_structured = True
+    before = item.paths.flashcard_parts[0].read_bytes()
+    item.paths.structured_text.unlink()
+    events = []
+    result = run_batch((item,), dependencies=recovery_dependencies(events))
+    assert not result.outputs and "No usable saved structured module" in result.errors[0]["error"]
+    assert not events and item.paths.flashcard_parts[0].read_bytes() == before
+
+
+def test_duplicate_structured_identity_is_reported_without_replacing_graph(structured_checkpoint):
+    root, items = structured_checkpoint
+    source = root / "pipeline_output" / "CPE0021" / "duplicate" / "structured_module.txt"
+    source.parent.mkdir()
+    source.write_text(structured_content("1"), encoding="utf-8")
+    modules, errors = discover_checkpoints(root)
+    assert len(modules) == 3 and len(errors) == 1
+    assert modules[0].source == items[0].paths.graph_json
+    assert "More than one" in errors[0]["error"]
+
+
+def test_same_workspace_name_in_other_course_keeps_its_graph_error(structured_checkpoint):
+    root, _items = structured_checkpoint
+    graph = root / "pipeline_output" / "OTHER" / "CPE0021_M3" / "knowledge_graph" / "knowledge_graph.json"
+    graph.parent.mkdir(parents=True)
+    graph.write_text("broken", encoding="utf-8")
+    modules, errors = discover_checkpoints(root)
+    assert len(modules) == 3 and len(errors) == 1
+    assert "valid JSON" in errors[0]["error"]
+
+
+def test_production_graph_adapter_uses_saved_structured_text(structured_checkpoint):
+    root, _items = structured_checkpoint
+    modules, _errors = discover_checkpoints(root)
+    module = modules[2]
+    paths = copy_checkpoint(module, root.parent / ("b" * 32))
+    args = server.pipeline_args(root / "missing.pdf", module.course_code, module.module_number)
+    args.start_from_structured = True
+    item = batch_pipeline.BatchItem("CPE0021_M3.txt", args, paths)
+
+    class Backend:
+        model_name = "test-recovery"
+
+        def complete(self, system, user, **kwargs):
+            assert "processor" in user
+            return '{"triples":[]}'
+
+    @contextmanager
+    def loader(_args):
+        yield Backend()
+
+    def forbidden_ingest(*_args):
+        pytest.fail("Saved text must skip PDF ingestion")
+
+    dependencies = replace(batch_pipeline.PRODUCTION_DEPENDENCIES,
+        rebel_loader=loader, model_loader=loader, ingest_stage=forbidden_ingest,
+        flashcard_stage=lambda current, _backend: materialize(current, "flashcards"))
+    result = run_batch((item,), dependencies=dependencies)
+    assert not result.errors and len(result.outputs) == 2
+    graph = json.loads(paths.graph_json.read_text(encoding="utf-8"))
+    assert graph["metadata"]["course_code"] == "CPE0021"
+    assert graph["metadata"]["module_number"] == "3" and graph["facts"]
+
+
+@pytest.mark.parametrize("structured_only", [False, True])
+def test_resume_api_recovers_structured_and_mixed_runs_after_restart(structured_checkpoint, monkeypatch, structured_only):
+    root, items = structured_checkpoint
+    if structured_only:
+        for item in items:
+            item.paths.graph_json.unlink(missing_ok=True)
+            item.paths.unchecked_graph_json.unlink(missing_ok=True)
+    before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    events, progress = [], []
+
+    def process(batch, **kwargs):
+        assert all(item.args.skip_final_review is False for item in batch)
+        assert all(item.args.mistral_model == "recovery-model" for item in batch)
+        def record(event):
+            progress.append(event)
+            kwargs["progress"](event)
+        return run_batch(batch, dependencies=recovery_dependencies(events), progress=record)
+
+    monkeypatch.setattr(server, "run_batch", process)
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
+            summary = (await client.get("/api/saved-runs")).json()["runs"][0]
+            assert summary["structuredCount"] == (3 if structured_only else 1)
+            assert summary["graphCount"] == (0 if structured_only else 2)
+            created = (await client.post("/api/sessions", json={
+                "apiKeys": ["private-key"], "model": "recovery-model"})).json()
+            session_id = created["sessionId"]
+            response = await client.post(f"/api/sessions/{session_id}/resume", json={"sourceRunId": SOURCE_ID})
+            assert response.status_code == 200 and response.json()["errors"] == []
+            assert len(response.json()["outputs"]) == 6
+            assert all(session_id in path for path in response.json()["outputs"])
+            status = (await client.get(f"/api/sessions/{session_id}")).json()
+            assert status["summary"]["completed"] == 3 and not status["running"]
+            for index in range(3):
+                for part in (1, 2):
+                    assert (await client.get(f"/api/sessions/{session_id}/files/{index}/{part}")).status_code == 200
+            server._SESSIONS.clear()
+            summaries = (await client.get("/api/saved-runs")).json()["runs"]
+            recovered = next(run for run in summaries if run["runId"] == session_id)
+            assert recovered["completedCount"] == recovered["graphCount"] == 3
+            assert recovered["structuredCount"] == 0
+
+    asyncio.run(scenario())
+    assert sum(event[0] == "graph" for event in events) == (3 if structured_only else 1)
+    assert sum(event[0] == "flashcards" for event in events) == (3 if structured_only else 2)
+    assert all(event.stage != "ingest" for event in progress)
+    assert before == {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}

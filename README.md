@@ -114,14 +114,18 @@ connection and reconnects when the page becomes visible after sleep. Run
 references are retrieved from the server; no API keys are saved in browser
 storage. A server restart still clears the in-memory run list and keys.
 
-To continue an interrupted run, choose **Saved knowledge graphs** in the
+To continue an interrupted run, choose **Saved graphs or structured modules** in the
 **Start from** menu. Select the saved run, enter your Mistral keys, and click
-**Continue to flashcards**. The app discovers graphs under `runs/` even after
-a server restart. It copies the checkpoint into a new isolated run, keeps
-completed CSV pairs, and generates only the remaining modules. Original PDFs
-and structured text are not required. Checked graphs are reused; unchecked
-graphs are reviewed before generating cards. The original run stays on disk.
-Unusable graphs are reported individually while other modules continue.
+**Continue to flashcards**. The app discovers graphs and `structured_module.txt`
+files under `runs/` even after a server restart. It copies the checkpoint into
+a new isolated run, keeps
+completed CSV pairs, and generates only the remaining modules. Each module
+uses its furthest usable checkpoint. Structured text skips PDF extraction,
+OCR, and filtering, and starts at graph extraction. Checked graphs are reused;
+unchecked graphs are reviewed before generating cards. Original PDFs are not
+required, and modules with graphs do not need structured text. The original
+run stays on disk. Unusable saved modules are reported individually while
+other modules continue.
 
 ## Key queue and limits
 
@@ -211,7 +215,8 @@ clears an idle run and its credentials. The opaque session ID controls
 access to its status and CSV downloads. `GET /status` retains aggregate
 progress for older clients, and `GET /health` reports server readiness.
 
-For graph recovery, `GET /api/saved-runs` lists saved run IDs, course codes,
+For recovery, `GET /api/saved-runs` lists saved run IDs, course codes,
+graph/structured checkpoint counts (`graphCount` and `structuredCount`),
 and completed/pending module counts. Create a new session, check model access,
 then call `POST /api/sessions/<sessionId>/resume` with
 `{"sourceRunId":"<saved-run-id>"}`. Progress and downloads use the same session

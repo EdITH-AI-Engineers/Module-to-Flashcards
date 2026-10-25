@@ -28,7 +28,9 @@ from mistral_backend import DEFAULT_N_CTX, DEFAULT_MODEL, ApiKeyPool, MistralBac
 from module_sources import pdf_identity
 from pipeline import pipeline_paths
 from portable_paths import PortablePaths, build_paths
-from saved_graphs import copy_graph_checkpoint, discover_graphs, saved_run_root, saved_run_summary
+from saved_graphs import (
+    SavedGraphModule, copy_checkpoint, discover_checkpoints, saved_run_root, saved_run_summary,
+)
 from structured_module import (
     parse_module_metadata,
     parse_slide_report_metadata,
@@ -675,7 +677,7 @@ def pipeline_status(response: Response) -> dict[str, object]:
 
 @app.get("/api/saved-runs")
 def list_saved_runs(response: Response):
-    """Find durable graph checkpoints even when session memory was lost."""
+    """Find durable graph and structured-text checkpoints after a restart."""
     response.headers["Cache-Control"] = "no-store"
     root = OUTPUT_ROOT.parent / "runs"
     runs = []
@@ -697,8 +699,8 @@ def list_saved_runs(response: Response):
 
 
 @app.post("/api/sessions/{session_id}/resume")
-async def resume_saved_graphs(session_id: str, settings: ResumeSettings):
-    """Generate only flashcards in a new run, preserving the source checkpoint."""
+async def resume_saved_modules(session_id: str, settings: ResumeSettings):
+    """Continue from saved graphs or structured text in an isolated new run."""
     session = _get_session(session_id)
     if settings.sourceRunId == session_id:
         raise HTTPException(409, "Choose a previous run to continue in this new run.")
@@ -711,7 +713,7 @@ async def resume_saved_graphs(session_id: str, settings: ResumeSettings):
     errors: list[dict[str, object]] = []
     try:
         if session.request_id:
-            raise HTTPException(409, "Create a new run to continue saved graphs.")
+            raise HTTPException(409, "Create a new run to continue saved modules.")
         try:
             source_root = saved_run_root(OUTPUT_ROOT.parent / "runs", settings.sourceRunId)
         except ValueError as exc:
@@ -722,12 +724,12 @@ async def resume_saved_graphs(session_id: str, settings: ResumeSettings):
                 source_locked = source_session.lock.acquire(blocking=False)
                 if not source_locked:
                     raise HTTPException(409, "The saved run is still processing. Wait for it to finish.")
-        modules, discovery_errors = await _run_owned_thread(discover_graphs, source_root)
+        modules, discovery_errors = await _run_owned_thread(discover_checkpoints, source_root)
         if not modules:
-            raise HTTPException(422, "This run has no usable saved knowledge graphs.")
+            raise HTTPException(422, "This run has no usable saved knowledge graphs or structured modules.")
         destination_root = OUTPUT_ROOT.parent / "runs" / session_id
         request_id = _PIPELINE_STATUS.enqueue("", [
-            canonical_module_filename(module.course_code, module.module_number, ".json")
+            canonical_module_filename(module.course_code, module.module_number, module.source.suffix)
             for module in modules
         ] + [error["file"] for error in discovery_errors])
         session.request_id = request_id
@@ -743,12 +745,18 @@ async def resume_saved_graphs(session_id: str, settings: ResumeSettings):
             fail(index, error["file"], error["error"])
         items = []
         for index, module in enumerate(modules):
-            filename = canonical_module_filename(module.course_code, module.module_number, ".json")
+            from_graph = isinstance(module, SavedGraphModule)
+            filename = canonical_module_filename(module.course_code, module.module_number, module.source.suffix)
             try:
-                paths = await _run_owned_thread(copy_graph_checkpoint, module, destination_root)
-                args = pipeline_args(paths.graph_json if module.checked else paths.unchecked_graph_json,
-                                     module.course_code, module.module_number)
-                args.start_from_graph = True
+                paths = await _run_owned_thread(copy_checkpoint, module, destination_root)
+                if from_graph:
+                    source = paths.graph_json if module.checked else paths.unchecked_graph_json
+                else:
+                    source = paths.structured_text
+                args = pipeline_args(source, module.course_code, module.module_number,
+                    identity_from_filename=not from_graph and module.identity_from_filename)
+                args.start_from_graph = from_graph
+                args.start_from_structured = not from_graph
                 args.output_root = destination_root / "pipeline_output"
                 args._mistral_pool = session.pool
                 args.mistral_model = session.model
@@ -756,8 +764,10 @@ async def resume_saved_graphs(session_id: str, settings: ResumeSettings):
                 args.skip_final_review = False
                 items.append(BatchItem(filename, args, paths, request_index=index))
                 _PIPELINE_STATUS.update(request_id, index, course_code=module.course_code,
-                    module_number=module.module_number, stage="flashcards", progress_percent=45,
-                    message="Continuing from saved knowledge graph.")
+                    module_number=module.module_number, stage="flashcards" if from_graph else "graph",
+                    progress_percent=45 if from_graph else 10,
+                    message="Continuing from saved knowledge graph." if from_graph else
+                            "Continuing from saved structured module; skipping ingestion.")
             except (OSError, ValueError, RuntimeError) as exc:
                 fail(index, filename, exc)
         if source_locked:
